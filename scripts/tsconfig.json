@@ -1,9 +1,0 @@
-{
-  "extends": "../tsconfig.base.json",
-  "compilerOptions": {
-    // Type-checks the generated client sources too; see clients/js/tsconfig.json.
-    "exactOptionalPropertyTypes": false,
-    "types": ["node"]
-  },
-  "include": ["*.ts"]
-}

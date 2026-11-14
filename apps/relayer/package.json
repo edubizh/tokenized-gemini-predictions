@@ -7,7 +7,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "start": "node --env-file=../../.env src/main.ts start",
-    "bootstrap": "node --env-file=../../.env scripts/bootstrap.ts"
+    "bootstrap": "node --env-file=../../.env scripts/bootstrap.ts",
+    "demo": "node --env-file=../../.env scripts/demo.ts",
+    "e2e:local": "node scripts/local-e2e.ts"
   },
   "dependencies": {
     "@gemini-markets/sdk": "0.1.1",

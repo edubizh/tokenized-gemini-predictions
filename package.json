@@ -8,6 +8,13 @@
     "node": ">=24.6 <25"
   },
   "scripts": {
+    "bootstrap": "pnpm --filter @outcome/relayer bootstrap",
+    "dev": "node scripts/dev.mjs",
+    "dev:mock": "node scripts/dev.mjs --mock",
+    "relayer": "pnpm --filter @outcome/relayer start",
+    "web": "pnpm --filter @outcome/web dev",
+    "demo": "pnpm --filter @outcome/relayer demo",
+    "e2e:local": "pnpm --filter @outcome/relayer e2e:local",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "codegen": "codama run js"
