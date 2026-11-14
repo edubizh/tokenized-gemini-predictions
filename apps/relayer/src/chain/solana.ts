@@ -21,15 +21,18 @@ import {
   getCreateMarketInstructionAsync,
   getCreateOutcomeMintInstructionAsync,
   getFillBuyInstructionAsync,
+  getFillSellInstructionAsync,
   getOrderDecoder,
   getOrderSize,
   getSetMarketInstructionAsync,
   getSetPauseInstructionAsync,
+  getSettleMarketInstructionAsync,
   MarketStatus,
   ORDER_DISCRIMINATOR,
   PAUSE_FILL,
   PAUSE_PLACE,
   Side,
+  type Market,
   type Order,
 } from "@outcome/program-client";
 import {
@@ -42,7 +45,7 @@ import { fetchMint as fetchOutcomeMint, TOKEN_2022_PROGRAM_ADDRESS } from "@sola
 import { fetchSysvarClock } from "@solana/sysvars";
 import { createRetryingRpc } from "./rpc.ts";
 import type { Chain, ChainConfig, ChainMarket, ChainOrder, MarketChain, NewChainMarket } from "./chain.ts";
-import { orderClosure, type OrderClosure } from "./events.ts";
+import { marketSettlement, orderClosure, type OrderClosure } from "./events.ts";
 import { toChainConfig, toChainMarket, toChainOrder } from "./mapping.ts";
 import { createSender } from "./send.ts";
 
@@ -77,15 +80,18 @@ const CLOSURE_SIGNATURES = 10;
 /** The transaction index can trail the account state by a moment. */
 const CLOSURE_READS = 3;
 const CLOSURE_READ_DELAY_MS = 500;
+/** How many of a market's newest transactions are searched for the one that settled it. */
+const SETTLEMENT_SIGNATURES = 25;
 
 export function createSolanaChain(options: SolanaChainOptions): Chain & MarketChain & { close(): void } {
   const rpc = createRetryingRpc(options.rpcUrl);
   const programId = address(options.programId);
   const program = { programAddress: programId };
   const commitment = options.commitment ?? "confirmed";
-  const { relayer } = options;
+  const { relayer, settler } = options;
   const stableMint = address(options.stableMint);
   const treasury = address(options.treasury);
+  const relayerFloat = address(options.relayerFloat);
   const log = options.log ?? (() => {});
   const sender = createSender({
     rpc,
@@ -154,6 +160,47 @@ export function createSolanaChain(options: SolanaChainOptions): Chain & MarketCh
       }
     }
     return null;
+  }
+
+  /**
+   * The transaction of the market's current settlement, searched in its newest transactions. The
+   * redemption time tells it apart from a settlement that was revoked.
+   */
+  async function findSettlement(marketAddress: Address, settled: Market): Promise<string | null> {
+    for (let read = 0; read < CLOSURE_READS; read++) {
+      if (read > 0) await new Promise((resolve) => setTimeout(resolve, CLOSURE_READ_DELAY_MS));
+      const entries = await rpc.getSignaturesForAddress(marketAddress, { commitment, limit: SETTLEMENT_SIGNATURES }).send();
+      for (const entry of entries) {
+        if (entry.err !== null) continue;
+        const transaction = await rpc
+          .getTransaction(entry.signature, { commitment, encoding: "json", maxSupportedTransactionVersion: 0 })
+          .send();
+        const meta = transaction?.meta;
+        if (!meta || meta.err !== null || !meta.logMessages) continue;
+        const event = marketSettlement(meta.logMessages, programId, marketAddress);
+        if (event === null) continue;
+        if (event.yesPayout === settled.yesPayout && event.noPayout === settled.noPayout && event.redeemAfter === settled.redeemAfter) {
+          return entry.signature;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Outcome of `settle_market` for a market that is settled already. */
+  async function resolveSettled(marketAddress: Address, settled: Market, yesPayout: bigint, noPayout: bigint, cause?: unknown): Promise<string> {
+    if (settled.yesPayout !== yesPayout || settled.noPayout !== noPayout) {
+      throw new Error(
+        `already settled: ${settled.symbol} pays (${settled.yesPayout}, ${settled.noPayout}), not (${yesPayout}, ${noPayout})`,
+        { cause },
+      );
+    }
+    const signature = await findSettlement(marketAddress, settled);
+    if (signature === null) {
+      throw new Error(`market settled: no settle_market of ${settled.symbol} (${marketAddress}) found in its recent transactions`, { cause });
+    }
+    log(`market ${settled.symbol}: settlement already landed in ${signature}`);
+    return signature;
   }
 
   /** Outcome of a write to an order whose account no longer exists. */
@@ -288,8 +335,31 @@ export function createSolanaChain(options: SolanaChainOptions): Chain & MarketCh
       });
     },
 
-    async fillSell() {
-      throw new Error("fill_sell is not in this build of the program");
+    fillSell(order, args) {
+      return writeOrder(order, "fill", async (data, orderAddress) => {
+        if (data.kind !== ORDER_KIND_SELL) throw new Error(`order ${orderAddress} is not a sell`);
+        const outcomeMint = await outcomeMintOf(data);
+        const userOutcome = await associatedAccount(data.user, outcomeMint, TOKEN_2022_PROGRAM_ADDRESS);
+        const userStable = await associatedAccount(data.user, stableMint, TOKEN_PROGRAM_ADDRESS);
+        const fill = await getFillSellInstructionAsync(
+          {
+            relayer,
+            market: data.market,
+            order: orderAddress,
+            outcomeMint,
+            payoutSource: relayerFloat,
+            userStable: userStable.account,
+            userOutcome: userOutcome.account,
+            rentPayer: data.rentPayer,
+            stableMint,
+            fillQty: args.fillUnits,
+            proceeds: args.proceedsMicros,
+            fee: args.feeMicros,
+          },
+          program,
+        );
+        return [userOutcome.create, userStable.create, fill];
+      });
     },
 
     cancel(order) {
@@ -366,8 +436,41 @@ export function createSolanaChain(options: SolanaChainOptions): Chain & MarketCh
       return sender.send(relayer, [instruction]);
     },
 
-    async settleMarket() {
-      throw new Error("settle_market is not in this build of the program");
+    /**
+     * Exactly-once like the order writes: the market is read before sending and again after any
+     * failure, and when it is settled the transaction that settled it decides the result.
+     */
+    async settleMarket(symbol, yesPayout, noPayout) {
+      const marketAddress = await marketPda(symbol);
+      const account = await fetchMaybeMarket(rpc, marketAddress, { commitment });
+      if (!account.exists) throw new Error(`market ${symbol} does not exist on-chain`);
+      if (account.data.status === MarketStatus.Settled) return resolveSettled(marketAddress, account.data, yesPayout, noPayout);
+      try {
+        const instruction = await getSettleMarketInstructionAsync(
+          {
+            settler,
+            payer: settler,
+            market: marketAddress,
+            yesMint: account.data.yesMint,
+            noMint: account.data.noMint,
+            funderStable: treasury,
+            stableMint,
+            yesPayout,
+            noPayout,
+          },
+          program,
+        );
+        return await sender.send(settler, [instruction]);
+      } catch (error) {
+        let after: Awaited<ReturnType<typeof fetchMaybeMarket>>;
+        try {
+          after = await fetchMaybeMarket(rpc, marketAddress, { commitment });
+        } catch {
+          throw error;
+        }
+        if (!after.exists || after.data.status !== MarketStatus.Settled) throw error;
+        return resolveSettled(marketAddress, after.data, yesPayout, noPayout, error);
+      }
     },
 
     async pause(flags) {

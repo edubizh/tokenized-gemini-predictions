@@ -1,6 +1,7 @@
 // The run behind `scripts/local-e2e.ts`: starts `solana-test-validator` with the program loaded,
 // bootstraps `localnet`, then takes one buy through the order pipeline to an on-chain fill and a
-// second one to a cancel with a full refund.
+// second one to a cancel with a full refund, settles the market and redeems both sides, and lets
+// the settlement watcher settle a second, short-lived market on its own.
 
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -20,12 +21,13 @@ import {
   type KeyPairSigner,
   type Signature,
 } from "@solana/kit";
-import * as programClient from "@outcome/program-client";
 import {
   fetchTrader,
   findEscrowPda,
   findTraderPda,
+  findVaultPda,
   getPlaceBuyInstructionAsync,
+  getRedeemInstructionAsync,
   getRegisterTraderInstructionAsync,
   ORDER_SEED,
   OUTCOME_TOKENS_PROGRAM_ADDRESS,
@@ -44,21 +46,38 @@ import type { ChainOrder } from "../../src/chain/chain.ts";
 import { createSender, waitForSignature, type ChainRpc } from "../../src/chain/send.ts";
 import { createSolanaChain, loadKeypairSigner } from "../../src/chain/solana.ts";
 import { openJournal } from "../../src/journal.ts";
-import { feeCap, takerFee } from "../../src/money.ts";
+import { createMarketManager } from "../../src/markets.ts";
+import { feeCap, PAYOUT_PER_UNIT, takerFee } from "../../src/money.ts";
 import { DEFAULT_PIPELINE_CONFIG, processOrder, type PipelineDeps } from "../../src/pipeline.ts";
+import { openRegistry } from "../../src/registry.ts";
+import { createSettlementWatcher } from "../../src/settlement.ts";
 import { MockVenue } from "../../src/venue/mock.ts";
 import { bootstrap, LOCALNET_RPC_URL } from "./bootstrap.ts";
 
 const SYMBOL = "TEST-BTC15M-UP";
+/** The short-lived market the settlement watcher settles. */
+const FAST_SYMBOL = "TEST-FAST3M-UP";
+const FAST_SERIES = "FAST3M";
+/** Seconds from its creation to its expiry, and how long before that it "started". */
+const FAST_EXPIRES_IN_SECS = 150;
+const FAST_STARTED_AGO_SECS = 60;
+/** The whole run is abandoned (and the validator stopped) after this long. */
+const RUN_TIMEOUT_MS = 480_000;
 const PORTS = [8899, 8900, 9900];
 const COMMITMENT = "confirmed";
 const DUSD = 1_000_000n;
 const LAMPORTS_PER_SOL = 1_000_000_000n;
 
 const repoRoot = path.resolve(import.meta.dirname, "../../../..");
-const programSo = process.env.PROGRAM_SO ?? path.join(repoRoot, ".data", "outcome_tokens.p3.so");
+const programSo = process.env.PROGRAM_SO ?? path.join(repoRoot, ".data", "outcome_tokens.p4.so");
 const ledgerDir = path.join(repoRoot, ".data", "local-e2e-ledger");
 const programId = OUTCOME_TOKENS_PROGRAM_ADDRESS;
+
+/** A registered user and their associated stable token account. */
+interface Trader {
+  signer: KeyPairSigner;
+  stable: Address;
+}
 
 let validator: ChildProcess | null = null;
 let validatorExited = false;
@@ -163,8 +182,28 @@ async function unitsConsumed(rpc: ChainRpc, signature: string | null | undefined
   return transaction?.meta?.computeUnitsConsumed?.toString() ?? "unknown";
 }
 
+/** Compute units the program's own instruction consumed in a confirmed transaction. */
+async function programUnits(rpc: ChainRpc, signature: string): Promise<string> {
+  const transaction = await rpc
+    .getTransaction(signature as Signature, { commitment: COMMITMENT, encoding: "json", maxSupportedTransactionVersion: 0 })
+    .send();
+  const line = new RegExp(`^Program ${programId} consumed (\\d+) of \\d+ compute units$`);
+  const consumed = (transaction?.meta?.logMessages ?? []).map((log) => line.exec(log)?.[1]).filter((units) => units !== undefined);
+  return consumed.at(-1) ?? "unknown";
+}
+
 async function accountExists(rpc: ChainRpc, account: Address): Promise<boolean> {
   return (await fetchEncodedAccount(rpc, account, { commitment: COMMITMENT })).exists;
+}
+
+/** Waits until the cluster clock (unix seconds) has reached `target`. */
+async function waitForClusterTime(chain: { now(): Promise<number> }, target: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if ((await chain.now()) >= target) return;
+    if (Date.now() > deadline) throw new Error(`the cluster clock did not reach ${target} within ${timeoutMs} ms`);
+    await sleep(1_000);
+  }
 }
 
 async function run(): Promise<void> {
@@ -220,18 +259,26 @@ async function run(): Promise<void> {
   say("--- prefunded trader account");
   await prefundProbe(rpc, sender, registrar);
 
-  // 1. A fresh user: SOL, a trader account, 1_000 dUSD from the faucet.
-  say("--- step 1: user");
-  const user = await generateKeyPairSigner();
-  await waitForSignature(rpc, await rpc.requestAirdrop(user.address, lamports(LAMPORTS_PER_SOL), { commitment: COMMITMENT }).send(), COMMITMENT, 30_000);
-  const [userStable] = await findAssociatedTokenPda({ owner: user.address, mint: stableMint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
-  await sender.send(registrar, [
-    await getRegisterTraderInstructionAsync({ registrar, payer: registrar, user: user.address }),
-    await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: registrar, owner: user.address, mint: stableMint, tokenProgram: TOKEN_PROGRAM_ADDRESS }),
-    getTransferCheckedInstruction({ source: faucet, mint: stableMint, destination: userStable, authority: registrar, amount: 1_000n * DUSD, decimals: 6 }),
-  ]);
-  assert.equal(await stableBalance(rpc, userStable), 1_000n * DUSD, "the user holds 1_000 dUSD");
-  say(`  user ${user.address} registered and funded`);
+  // 1. Fresh users: SOL, a trader account, 1_000 dUSD from the faucet each.
+  say("--- step 1: users");
+  const newUser = async (role: string): Promise<Trader> => {
+    const signer = await generateKeyPairSigner();
+    await waitForSignature(rpc, await rpc.requestAirdrop(signer.address, lamports(LAMPORTS_PER_SOL), { commitment: COMMITMENT }).send(), COMMITMENT, 30_000);
+    const [stable] = await findAssociatedTokenPda({ owner: signer.address, mint: stableMint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
+    await sender.send(registrar, [
+      await getRegisterTraderInstructionAsync({ registrar, payer: registrar, user: signer.address }),
+      await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: registrar, owner: signer.address, mint: stableMint, tokenProgram: TOKEN_PROGRAM_ADDRESS }),
+      getTransferCheckedInstruction({ source: faucet, mint: stableMint, destination: stable, authority: registrar, amount: 1_000n * DUSD, decimals: 6 }),
+    ]);
+    assert.equal(await stableBalance(rpc, stable), 1_000n * DUSD, "the user holds 1_000 dUSD");
+    say(`  ${role} ${signer.address} registered and funded`);
+    return { signer, stable };
+  };
+  const yesHolder = await newUser("YES buyer");
+  const noHolder = await newUser("NO buyer");
+  const fastBuyer = await newUser("buyer in the fast market");
+  const user = yesHolder.signer;
+  const userStable = yesHolder.stable;
 
   // 2. The mock venue with one contract, and its market on-chain.
   say("--- step 2: market");
@@ -268,6 +315,9 @@ async function run(): Promise<void> {
   assert.equal(market.closeTs, expiresAt);
   assert.equal(market.tickPx, 100n);
   assert.ok(market.yesMint !== null && market.noMint !== null, "both outcome mints exist");
+  const marketAddress = market.address as Address;
+  const yesMint = market.yesMint as Address;
+  const noMint = market.noMint as Address;
   assert.equal(market.yesSupply, 0n);
   assert.deepEqual(await chain.ensureMarket(spec), market, "ensureMarket leaves an existing market alone");
   const marketSignature = /^market \S+: 3 instruction\(s\) in (\S+)$/.exec(chainLog.at(-1) ?? "")?.[1];
@@ -287,29 +337,41 @@ async function run(): Promise<void> {
     },
   };
 
-  const placeBuy = async (limitPx: bigint): Promise<{ order: Address; escrow: Address }> => {
-    const [trader] = await findTraderPda({ user: user.address });
+  const placeBuy = async (buyer: Trader, onMarket: Address, side: Side, units: bigint, limitPx: bigint): Promise<{ order: Address; escrow: Address }> => {
+    const [trader] = await findTraderPda({ user: buyer.signer.address });
     const nonce = (await fetchTrader(rpc, trader, { commitment: COMMITMENT })).data.nextNonce;
     const [order] = await getProgramDerivedAddress({
       programAddress: programId,
-      seeds: [ORDER_SEED, getAddressEncoder().encode(user.address), getU64Encoder().encode(nonce)],
+      seeds: [ORDER_SEED, getAddressEncoder().encode(buyer.signer.address), getU64Encoder().encode(nonce)],
     });
     const [escrow] = await findEscrowPda({ order });
-    await sender.send(user, [
+    await sender.send(buyer.signer, [
       await getPlaceBuyInstructionAsync({
-        user,
-        payer: user,
-        market: market.address as Address,
+        user: buyer.signer,
+        payer: buyer.signer,
+        market: onMarket,
         order,
-        userStable,
+        userStable: buyer.stable,
         stableMint,
-        side: Side.Yes,
-        qtyUnits: 200n,
+        side,
+        qtyUnits: units,
         limitPx: Number(limitPx),
-        maxFee: feeCap(200n, limitPx),
+        maxFee: feeCap(units, limitPx),
       }),
     ]);
     return { order, escrow };
+  };
+  const outcomeBalance = async (owner: Address, mint: Address): Promise<bigint> => {
+    const [account] = await findAssociatedTokenPda({ owner, mint, tokenProgram: TOKEN_2022_PROGRAM_ADDRESS });
+    return (await fetchOutcomeToken(rpc, account, { commitment: COMMITMENT })).data.amount;
+  };
+  /** One transaction signed by the holder: the stable account if it is missing, then `redeem`. */
+  const redeem = async (holder: Trader, onMarket: Address, outcomeMint: Address, amount: bigint): Promise<string> => {
+    const [holderOutcome] = await findAssociatedTokenPda({ owner: holder.signer.address, mint: outcomeMint, tokenProgram: TOKEN_2022_PROGRAM_ADDRESS });
+    return sender.send(holder.signer, [
+      await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: holder.signer, owner: holder.signer.address, mint: stableMint, tokenProgram: TOKEN_PROGRAM_ADDRESS }),
+      await getRedeemInstructionAsync({ holder: holder.signer, market: onMarket, outcomeMint, holderOutcome, holderStable: holder.stable, stableMint, amount }),
+    ]);
   };
   const openOrder = async (order: Address): Promise<ChainOrder> => {
     const open = await chain.openOrders();
@@ -318,10 +380,61 @@ async function run(): Promise<void> {
     return found;
   };
 
+  // The market of the automatic settlement path. It is created now so that its short life runs
+  // while the steps below take place; the watcher settles it at the end.
+  say("--- fast market: created through the market manager, one YES buy");
+  const fastCreatedAt = await chain.now();
+  const fastExpiresAt = fastCreatedAt + FAST_EXPIRES_IN_SECS;
+  say(`  expires at ${fastExpiresAt}; the cluster clock is ${fastCreatedAt - Math.floor(Date.now() / 1000)} s ahead of the local clock`);
+  venue.addContract({
+    symbol: FAST_SYMBOL,
+    eventTicker: "TEST-FAST3M",
+    series: FAST_SERIES,
+    title: "Fast test market",
+    label: "Up",
+    status: "active",
+    marketState: "open",
+    effectiveAt: new Date((fastCreatedAt - FAST_STARTED_AGO_SECS) * 1000),
+    expiresAt: new Date(fastExpiresAt * 1000),
+    tickPx: 100n,
+    unitIncrement: 1n,
+    minUnits: 1n,
+    resolutionSide: null,
+  });
+  venue.setBook(FAST_SYMBOL, { bids: [[4_000n, 1_000_000n]], asks: [[4_500n, 1_000_000n]] });
+  const registry = openRegistry(":memory:");
+  const manager = createMarketManager({ venue, chain, registry, series: [FAST_SERIES], now: () => Date.now() });
+  await manager.refresh();
+  assert.equal(registry.get(SYMBOL), undefined, "only the curated series is in the registry");
+  const fastOnchain = (await manager.ensureOnchain(FAST_SYMBOL)).onchain;
+  assert.ok(fastOnchain !== null, "the fast market exists on-chain");
+  assert.equal(fastOnchain.status, "open");
+  assert.equal(fastOnchain.closeTs, fastExpiresAt);
+  assert.equal(fastOnchain.placeCutoffSecs, 90, "a market of up to 5 minutes stops 60 s before expiry, plus the 30 s buffer");
+  assert.equal(registry.get(FAST_SYMBOL)?.marketAddress, fastOnchain.market);
+  const fastOrder = await placeBuy(fastBuyer, fastOnchain.market as Address, Side.Yes, 200n, 4_500n);
+  assert.equal(await processOrder(await openOrder(fastOrder.order), deps), "chain_filled");
+  assert.equal((await chain.market(FAST_SYMBOL))?.yesSupply, 200n, "the fast market has 200 YES units outstanding");
+  const watcherAlerts: string[] = [];
+  const watcher = createSettlementWatcher({
+    venue,
+    chain,
+    registry,
+    journal,
+    confirmMs: 2_000,
+    now: () => Date.now(),
+    alert: (event) => {
+      watcherAlerts.push(`${event.kind}: ${event.detail}`);
+      say(`  watcher alert ${event.kind}: ${event.detail}`);
+    },
+  });
+  await watcher.tick();
+  assert.equal(registry.get(FAST_SYMBOL)?.settleState, "open", "the watcher leaves a market alone before its expiry");
+
   // 3. and 4. A buy at the ask: filled at the venue, then on-chain.
   say("--- steps 3 and 4: a buy that fills");
   const treasuryBefore = await chain.treasuryMicros();
-  const first = await placeBuy(4_500n);
+  const first = await placeBuy(yesHolder, marketAddress, Side.Yes, 200n, 4_500n);
   const maxFee = feeCap(200n, 4_500n);
   assert.equal(await stableBalance(rpc, userStable), 1_000n * DUSD - 200n * 4_500n - maxFee, "cost and fee allowance are escrowed");
   const firstOrder = await openOrder(first.order);
@@ -338,8 +451,7 @@ async function run(): Promise<void> {
   const feeMicros = takerFee(200n, 4_500n);
   assert.equal(filledRow.amountMicros, costMicros);
   assert.equal(filledRow.feeMicros, feeMicros);
-  const [userYes] = await findAssociatedTokenPda({ owner: user.address, mint: market.yesMint as Address, tokenProgram: TOKEN_2022_PROGRAM_ADDRESS });
-  assert.equal((await fetchOutcomeToken(rpc, userYes, { commitment: COMMITMENT })).data.amount, 200n, "the user holds 200 YES units");
+  assert.equal(await outcomeBalance(user.address, yesMint), 200n, "the user holds 200 YES units");
   assert.equal((await chain.treasuryMicros()) - treasuryBefore, costMicros + feeMicros, "the treasury received exactly cost + fee");
   assert.equal(await stableBalance(rpc, userStable), 1_000n * DUSD - costMicros - feeMicros, "the unused fee allowance was refunded");
   assert.equal(await accountExists(rpc, first.order), false, "the order account is closed");
@@ -357,7 +469,7 @@ async function run(): Promise<void> {
   // 5. A buy below the ask: not filled, cancelled, fully refunded.
   say("--- step 5: a buy that does not fill");
   const stableBefore = await stableBalance(rpc, userStable);
-  const second = await placeBuy(4_400n);
+  const second = await placeBuy(yesHolder, marketAddress, Side.Yes, 200n, 4_400n);
   const secondOrder = await openOrder(second.order);
   assert.equal(await processOrder(secondOrder, deps), "chain_cancelled");
   const cancelledRow = journal.get(second.order);
@@ -377,24 +489,126 @@ async function run(): Promise<void> {
   assert.deepEqual(alerts, [], "the pipeline raised no alert");
   say(`  cancelled in ${cancelledRow.chainSignature}`);
 
-  say(
-    `--- compute units of the 300000 limit: market and both mints ${await unitsConsumed(rpc, marketSignature)}, ` +
-      `fill_buy with two token accounts ${await unitsConsumed(rpc, filledRow.chainSignature)}, ` +
-      `cancel_order ${await unitsConsumed(rpc, cancelledRow.chainSignature)}`,
+  // 6. A second user buys NO: the venue order takes from the bids, at 10_000 less the bid.
+  say("--- step 6: a NO buy that fills");
+  const noUnits = 300n;
+  const noPx = PAYOUT_PER_UNIT - 4_000n;
+  const third = await placeBuy(noHolder, marketAddress, Side.No, noUnits, noPx);
+  const thirdOrder = await openOrder(third.order);
+  assert.equal(thirdOrder.side, "NO");
+  assert.equal(await processOrder(thirdOrder, deps), "chain_filled");
+  const noRow = journal.get(third.order);
+  assert.equal(noRow?.state, "chain_filled", "journal row is chain_filled");
+  assert.equal(noRow.amountMicros, noUnits * noPx);
+  assert.equal(await outcomeBalance(noHolder.signer.address, noMint), noUnits, "the second user holds 300 NO units");
+  assert.equal(await stableBalance(rpc, noHolder.stable), 1_000n * DUSD - noUnits * noPx - takerFee(noUnits, noPx), "the second user paid cost + fee");
+  const beforeSettlement = await chain.market(SYMBOL);
+  assert.deepEqual(
+    { status: beforeSettlement?.status, yes: beforeSettlement?.yesSupply, no: beforeSettlement?.noSupply, yesPayout: beforeSettlement?.yesPayout, redeemAfter: beforeSettlement?.redeemAfter },
+    { status: "open", yes: 200n, no: noUnits, yesPayout: null, redeemAfter: null },
   );
+  assert.deepEqual(alerts, [], "the pipeline raised no alert");
 
-  // Settlement and redemption: the chain adapter does not send `settle_market` in this build.
-  const client = programClient as Record<string, unknown>;
-  const inClient = typeof client["getSettleMarketInstructionAsync"] === "function" && typeof client["getRedeemInstructionAsync"] === "function";
-  await assert.rejects(chain.settleMarket(SYMBOL, 10_000n, 0n), /^Error: settle_market is not in this build of the program$/);
+  // 7. Settlement: the settler funds the vault from the treasury.
+  say("--- step 7: settle (10_000, 0)");
+  const [vault] = await findVaultPda({ market: marketAddress });
+  assert.equal(await accountExists(rpc, vault), false, "the vault does not exist before settlement");
+  const treasuryBeforeSettlement = await chain.treasuryMicros();
+  const settleSignature = await chain.settleMarket(SYMBOL, PAYOUT_PER_UNIT, 0n);
+  const settledAt = await chain.now();
+  const settled = await chain.market(SYMBOL);
+  assert.ok(settled !== null);
+  assert.equal(settled.status, "settled", "the market reads as settled");
+  assert.equal(settled.yesPayout, 10_000n);
+  assert.equal(settled.noPayout, 0n);
+  const redeemAfter = settled.redeemAfter;
+  assert.ok(redeemAfter !== null, "a settled market has a redeemAfter");
+  assert.ok(
+    redeemAfter <= settledAt + chainConfig.settleDelaySecs && redeemAfter >= settledAt + chainConfig.settleDelaySecs - 20,
+    `redeemAfter ${redeemAfter} is settle_delay_secs after the settlement (cluster clock now ${settledAt})`,
+  );
+  const funding = settled.yesSupply * PAYOUT_PER_UNIT;
+  assert.equal(funding, 200n * 10_000n);
+  assert.equal(await stableBalance(rpc, vault), funding, "the vault holds exactly yesSupply * 10_000");
+  assert.equal(treasuryBeforeSettlement - (await chain.treasuryMicros()), funding, "the treasury funded the vault");
+  assert.equal(await chain.settleMarket(SYMBOL, PAYOUT_PER_UNIT, 0n), settleSignature, "a repeated settleMarket resolves with the signature of the settlement that landed");
+  await assert.rejects(chain.settleMarket(SYMBOL, 0n, PAYOUT_PER_UNIT), /^Error: already settled: /, "other payouts for a settled market are refused");
+  say(`  settled in ${settleSignature}, redemption opens at ${redeemAfter}`);
+
+  // 8. Redemption is locked until redeemAfter.
+  say("--- step 8: a redeem before redeemAfter");
+  assert.ok((await chain.now()) < redeemAfter, "the early redeem is sent before redeemAfter");
+  await assert.rejects(redeem(yesHolder, marketAddress, yesMint, 200n), /RedeemLocked/, "an early redeem fails with RedeemLocked");
+  assert.equal(await outcomeBalance(user.address, yesMint), 200n, "nothing was burned");
+  say(`  refused with RedeemLocked; waiting for the cluster clock to reach ${redeemAfter}`);
+  await waitForClusterTime(chain, redeemAfter, 120_000);
+
+  // 9. Winners are paid 10_000 per unit, losers nothing; the vault ends empty.
+  say("--- step 9: redeem");
+  const yesStableBefore = await stableBalance(rpc, userStable);
+  const redeemYesSignature = await redeem(yesHolder, marketAddress, yesMint, 200n);
+  assert.equal((await stableBalance(rpc, userStable)) - yesStableBefore, 200n * 10_000n, "the YES holder received exactly units * 10_000");
+  assert.equal(await outcomeBalance(user.address, yesMint), 0n, "the YES units were burned");
+  const noStableBefore = await stableBalance(rpc, noHolder.stable);
+  const redeemNoSignature = await redeem(noHolder, marketAddress, noMint, noUnits);
+  assert.equal(await stableBalance(rpc, noHolder.stable), noStableBefore, "the NO holder received nothing");
+  assert.equal(await outcomeBalance(noHolder.signer.address, noMint), 0n, "the NO units were burned");
+  const redeemed = await chain.market(SYMBOL);
+  assert.deepEqual({ status: redeemed?.status, yes: redeemed?.yesSupply, no: redeemed?.noSupply }, { status: "settled", yes: 0n, no: 0n }, "both supplies are zero");
+  assert.equal(await stableBalance(rpc, vault), 0n, "the vault is empty");
+  say(`  YES redeemed in ${redeemYesSignature}, NO in ${redeemNoSignature}`);
+
+  // 10. The automatic path: expiry, the venue's resolution, then the watcher settles on-chain.
+  say("--- step 10: the settlement watcher settles the fast market");
+  assert.equal(registry.get(FAST_SYMBOL)?.settleState, "open");
+  await waitForClusterTime(chain, fastExpiresAt, 240_000);
+  const untilLocalExpiry = fastExpiresAt * 1000 - Date.now();
+  if (untilLocalExpiry >= 0) await sleep(untilLocalExpiry + 250);
+  venue.resolve(FAST_SYMBOL, "yes");
+  const watcherDeadline = Date.now() + 60_000;
+  let ticks = 0;
+  for (;;) {
+    await watcher.tick();
+    ticks += 1;
+    const row = registry.get(FAST_SYMBOL);
+    if (row?.settleState === "settled") break;
+    assert.equal(row?.settleState, "awaiting_result", `the fast market is waiting for its settlement (${row?.detail ?? "no detail"})`);
+    assert.ok(Date.now() < watcherDeadline, "the watcher settled the fast market within 60 s");
+    await sleep(1_000);
+  }
+  assert.ok(ticks >= 2, "the resolution was confirmed over more than one tick");
+  const fastSignature = registry.get(FAST_SYMBOL)?.settleSignature;
+  assert.ok(typeof fastSignature === "string", "the registry has the settlement signature");
+  const fastSettled = await chain.market(FAST_SYMBOL);
+  assert.deepEqual(
+    { status: fastSettled?.status, yesPayout: fastSettled?.yesPayout, noPayout: fastSettled?.noPayout },
+    { status: "settled", yesPayout: 10_000n, noPayout: 0n },
+    "the fast market is settled (10_000, 0) on-chain",
+  );
+  assert.ok(fastSettled?.redeemAfter != null, "the fast market has a redeemAfter");
+  const [fastVault] = await findVaultPda({ market: fastOnchain.market as Address });
+  assert.equal(await stableBalance(rpc, fastVault), 200n * 10_000n, "the fast market's vault holds the winners' payout");
+  assert.equal(await chain.settleMarket(FAST_SYMBOL, PAYOUT_PER_UNIT, 0n), fastSignature, "the adapter finds the watcher's settlement");
+  assert.deepEqual(watcherAlerts, [], "the watcher raised no alert");
+  assert.deepEqual(alerts, [], "the pipeline raised no alert");
+  say(`  settled by the watcher in ${fastSignature} after ${ticks} ticks`);
+
   say(
-    inClient
-      ? "--- settle and redeem: skipped (the program client has the instructions, the chain adapter and the default program binary of this run do not)"
-      : "--- settle and redeem: skipped (settle_market and redeem are not in this build of the program client)",
+    `--- compute units of the 300000 limit (whole transaction): market and both mints ${await unitsConsumed(rpc, marketSignature)}, ` +
+      `fill_buy with two token accounts ${await unitsConsumed(rpc, filledRow.chainSignature)}, ` +
+      `cancel_order ${await unitsConsumed(rpc, cancelledRow.chainSignature)}, ` +
+      `settle_market ${await unitsConsumed(rpc, settleSignature)}, ` +
+      `redeem YES with the token-account instruction ${await unitsConsumed(rpc, redeemYesSignature)}, ` +
+      `redeem NO ${await unitsConsumed(rpc, redeemNoSignature)}`,
+  );
+  say(
+    `--- compute units of the program instruction alone: settle_market ${await programUnits(rpc, settleSignature)}, ` +
+      `redeem with a payout ${await programUnits(rpc, redeemYesSignature)}, redeem without a payout ${await programUnits(rpc, redeemNoSignature)}`,
   );
 
   assert.ok((await chain.relayerLamports()) > 0n);
   journal.close();
+  registry.close();
   chain.close();
 }
 
@@ -429,11 +643,18 @@ async function prefundProbe(rpc: ChainRpc, sender: ReturnType<typeof createSende
 }
 
 let failure: unknown = null;
+let watchdog: NodeJS.Timeout | undefined;
 try {
-  await run();
+  await Promise.race([
+    run(),
+    new Promise<never>((_resolve, reject) => {
+      watchdog = setTimeout(() => reject(new Error(`the run did not finish within ${RUN_TIMEOUT_MS / 1000} s`)), RUN_TIMEOUT_MS);
+    }),
+  ]);
 } catch (error) {
   failure = error;
 }
+clearTimeout(watchdog);
 await stopValidator();
 if (failure !== null) {
   console.error(`LOCAL E2E FAILED: ${failure instanceof Error ? failure.message : String(failure)}`);

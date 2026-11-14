@@ -2,10 +2,12 @@
 
 import { getBase64Encoder, type Address } from "@solana/kit";
 import {
+  getMarketSettledEventDecoder,
   getOrderCancelledEventDecoder,
   getOrderFilledEventDecoder,
   identifyOutcomeTokensEvent,
   OutcomeTokensEvent,
+  type MarketSettledEvent,
   type OrderCancelledEvent,
   type OrderFilledEvent,
 } from "@outcome/program-client";
@@ -72,4 +74,22 @@ export function orderClosure(logs: readonly string[], programId: Address, order:
     }
   }
   return null;
+}
+
+/**
+ * The settlement of `market` in the logs of one transaction, or null when there is none. The last
+ * one counts when a transaction settles the market more than once (settle, revoke, settle).
+ */
+export function marketSettlement(logs: readonly string[], programId: Address, market: Address): MarketSettledEvent | null {
+  let found: MarketSettledEvent | null = null;
+  for (const { name, bytes } of programEvents(logs, programId)) {
+    if (name !== "MarketSettled") continue;
+    try {
+      const event = getMarketSettledEventDecoder().decode(bytes);
+      if (event.market === market) found = event;
+    } catch {
+      // Truncated event data: not a usable record.
+    }
+  }
+  return found;
 }
