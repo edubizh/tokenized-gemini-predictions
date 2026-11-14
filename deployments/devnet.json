@@ -1,0 +1,13 @@
+{
+  "cluster": "devnet",
+  "programId": "8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn",
+  "config": "HZZqfyLxsz5QwoQ1UksKZK4Fhn41wXPTTHCHZDhozQzj",
+  "stableMint": "9G8LHL4WbzmY5nkfL78ELeysYT2yXECr3nnNFMBVsq3c",
+  "treasury": "GdBVMZdxeWbbFbZFRNB9QyvkYm2jx1oLCDijZVHgDhoM",
+  "admin": "HYtKhVxGh9k3jKWachumjsX3WT5EN42PHeJMc1Qu26YD",
+  "relayer": "5N6jBggmC26bbLtWoEjrqFUUE72V3DwsDEQDpbrsD6E4",
+  "settler": "2thvtwFWixbjsg9Zq8GvBfaQpLChmCqsCys5aEi27t2m",
+  "registrar": "CxgEdMowhy4XecyNdWwV9hXhUczqLhjWHKsWJDePtFyj",
+  "relayerFloat": "FPmgaCEDjQDDL1WrH4myw1wLTMoKpzWPms8PAvn6m6Gj",
+  "faucet": "8dLwsB3Pf7iXxpxq7anvmVqGmtSVdtoaph7o6kq9NtWT"
+}
