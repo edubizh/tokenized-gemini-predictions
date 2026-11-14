@@ -87,4 +87,20 @@ pub mod outcome_tokens {
     pub fn cancel_order(ctx: Context<CancelOrder>) -> Result<()> {
         handle_cancel_order(ctx)
     }
+
+    pub fn settle_market(
+        ctx: Context<SettleMarket>,
+        yes_payout: u64,
+        no_payout: u64,
+    ) -> Result<()> {
+        handle_settle_market(ctx, yes_payout, no_payout)
+    }
+
+    pub fn revoke_settlement(ctx: Context<RevokeSettlement>) -> Result<()> {
+        handle_revoke_settlement(ctx)
+    }
+
+    pub fn redeem(ctx: Context<Redeem>, amount: u64) -> Result<()> {
+        handle_redeem(ctx, amount)
+    }
 }

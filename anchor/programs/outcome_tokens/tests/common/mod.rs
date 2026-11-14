@@ -25,8 +25,8 @@ use {
     },
     outcome_tokens::{
         constants::{
-            CONFIG_SEED, ESCROW_SEED, MARKET_SEED, MINT_SEED, ORDER_SEED, STABLE_DECIMALS,
-            TRADER_SEED,
+            CONFIG_SEED, ESCROW_SEED, MARKET_SEED, MINT_SEED, ORDER_SEED, REDEEM_SEED,
+            STABLE_DECIMALS, TRADER_SEED,
         },
         error::ErrorCode,
         instructions::{InitializeArgs, SetConfigArgs},
@@ -364,6 +364,11 @@ pub fn order_address(user: &Pubkey, nonce: u64) -> Pubkey {
 
 pub fn escrow_address(order: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[ESCROW_SEED, order.as_ref()], &outcome_tokens::id()).0
+}
+
+/// The redemption vault of a market.
+pub fn vault_address(market: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[REDEEM_SEED, market.as_ref()], &outcome_tokens::id()).0
 }
 
 // --- Instructions ----------------------------------------------------------------------
@@ -977,4 +982,153 @@ pub fn halt_market(env: &mut Env, market: &Pubkey) {
         None,
     );
     send_ok(&mut env.svm, &[instruction], &[&env.relayer]);
+}
+
+// --- Settlement and redemption ---------------------------------------------------------
+
+/// Gives the trader `qty_units` outcome tokens of `side` the way the program issues them:
+/// a buy at `ORDER_LIMIT_PX` filled in full at that price without a fee. Returns the fresh
+/// token account that received them.
+pub fn buy_outcome(
+    env: &mut Env,
+    trader: &TraderKeys,
+    market: &MarketKeys,
+    side: Side,
+    qty_units: u64,
+) -> Pubkey {
+    let args = outcome_tokens::instruction::PlaceBuy {
+        side,
+        qty_units,
+        limit_px: ORDER_LIMIT_PX,
+        max_fee: 0,
+    };
+    let order = place_buy(env, trader, &market.market, args);
+    let user_outcome = create_outcome_account(env, &market.mint(side), &trader.wallet.pubkey());
+    let accounts = fill_buy_accounts(env, &order, &user_outcome, &trader.stable);
+    let fill = outcome_tokens::instruction::FillBuy {
+        fill_qty: qty_units,
+        cost: qty_units * u64::from(ORDER_LIMIT_PX),
+        fee: 0,
+    };
+    send_ok(
+        &mut env.svm,
+        &[instruction(accounts, fill)],
+        &[&env.relayer],
+    );
+    user_outcome
+}
+
+/// The accounts of a `settle_market` signed and paid for by the settler, funded from
+/// `funder_stable`. Tests replace single fields to probe one check at a time.
+pub fn settle_market_accounts(
+    env: &Env,
+    market: &MarketKeys,
+    funder_stable: &Pubkey,
+) -> outcome_tokens::accounts::SettleMarket {
+    outcome_tokens::accounts::SettleMarket {
+        settler: env.settler.pubkey(),
+        payer: env.settler.pubkey(),
+        config: env.config,
+        market: market.market,
+        yes_mint: market.yes_mint,
+        no_mint: market.no_mint,
+        vault: vault_address(&market.market),
+        funder_stable: *funder_stable,
+        stable_mint: env.stable_mint,
+        token_program: spl_token::ID,
+        system_program: system_program::ID,
+    }
+}
+
+/// Sends `settle_market` signed by the settler.
+pub fn try_settle_market(
+    env: &mut Env,
+    accounts: outcome_tokens::accounts::SettleMarket,
+    yes_payout: u64,
+    no_payout: u64,
+) -> SendResult {
+    let args = outcome_tokens::instruction::SettleMarket {
+        yes_payout,
+        no_payout,
+    };
+    send(
+        &mut env.svm,
+        &[instruction(accounts, args)],
+        &[&env.settler],
+    )
+}
+
+/// The accounts of a `revoke_settlement` of `market` by `authority`. Tests replace single
+/// fields to probe one check at a time.
+pub fn revoke_settlement_accounts(
+    env: &Env,
+    authority: &Pubkey,
+    market: &Pubkey,
+) -> outcome_tokens::accounts::RevokeSettlement {
+    outcome_tokens::accounts::RevokeSettlement {
+        authority: *authority,
+        config: env.config,
+        market: *market,
+        vault: vault_address(market),
+        treasury: env.treasury,
+        stable_mint: env.stable_mint,
+        token_program: spl_token::ID,
+    }
+}
+
+/// Sends `revoke_settlement` signed by `authority`.
+pub fn try_revoke_settlement(
+    env: &mut Env,
+    authority: &Keypair,
+    accounts: outcome_tokens::accounts::RevokeSettlement,
+) -> SendResult {
+    send(
+        &mut env.svm,
+        &[instruction(
+            accounts,
+            outcome_tokens::instruction::RevokeSettlement {},
+        )],
+        &[authority],
+    )
+}
+
+/// The accounts of a `redeem` by `holder` of tokens of `outcome_mint` held in
+/// `holder_outcome`, paid out to `holder_stable`. Tests replace single fields to probe one
+/// check at a time.
+pub fn redeem_accounts(
+    env: &Env,
+    holder: &Pubkey,
+    market: &Pubkey,
+    outcome_mint: &Pubkey,
+    holder_outcome: &Pubkey,
+    holder_stable: &Pubkey,
+) -> outcome_tokens::accounts::Redeem {
+    outcome_tokens::accounts::Redeem {
+        holder: *holder,
+        market: *market,
+        outcome_mint: *outcome_mint,
+        holder_outcome: *holder_outcome,
+        vault: vault_address(market),
+        holder_stable: *holder_stable,
+        stable_mint: env.stable_mint,
+        stable_token_program: spl_token::ID,
+        outcome_token_program: spl_token_2022::ID,
+    }
+}
+
+/// Sends `redeem` signed by `holder`.
+pub fn try_redeem(
+    env: &mut Env,
+    holder: &Keypair,
+    accounts: outcome_tokens::accounts::Redeem,
+    amount: u64,
+) -> SendResult {
+    send(
+        &mut env.svm,
+        &[instruction(
+            accounts,
+            outcome_tokens::instruction::Redeem { amount },
+        )],
+        &[holder],
+    )
 }

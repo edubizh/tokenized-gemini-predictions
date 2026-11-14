@@ -814,6 +814,120 @@
       ]
     },
     {
+      "name": "redeem",
+      "discriminator": [
+        184,
+        12,
+        86,
+        149,
+        70,
+        196,
+        97,
+        225
+      ],
+      "accounts": [
+        {
+          "name": "holder",
+          "docs": [
+            "Anyone who holds outcome tokens; no trader registration is needed."
+          ],
+          "signer": true
+        },
+        {
+          "name": "market",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.symbol_hash",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "outcome_mint",
+          "docs": [
+            "Either of the market's two mints. It decides which payout applies."
+          ],
+          "writable": true
+        },
+        {
+          "name": "holder_outcome",
+          "docs": [
+            "Any token account of the holder for the outcome mint; it need not be the",
+            "associated one."
+          ],
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "account: a stable token account whose authority is the market. Left untyped so",
+            "that an unsettled market is reported as such, not as a vault that does not exist."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  100,
+                  101,
+                  101,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_stable",
+          "docs": [
+            "Any stable token account of the holder."
+          ],
+          "writable": true
+        },
+        {
+          "name": "stable_mint",
+          "docs": [
+            "The vault's mint: the token program refuses the payout for any other."
+          ]
+        },
+        {
+          "name": "stable_token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "outcome_token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "register_trader",
       "discriminator": [
         75,
@@ -885,6 +999,110 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "revoke_settlement",
+      "discriminator": [
+        187,
+        67,
+        255,
+        84,
+        249,
+        79,
+        196,
+        93
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The admin or the settler. Receives the vault's rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.symbol_hash",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "account: a stable token account whose authority is the market. Left untyped so",
+            "that an unsettled market is reported as such, not as a vault that does not exist."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  100,
+                  101,
+                  101,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "stable_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
       "args": []
@@ -1077,6 +1295,140 @@
         {
           "name": "flags",
           "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "settle_market",
+      "discriminator": [
+        193,
+        153,
+        95,
+        216,
+        166,
+        6,
+        144,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "settler",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Funds the vault's rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.symbol_hash",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "yes_mint",
+          "docs": [
+            "program created. Left untyped so that a market without its mints is reported as",
+            "such, not as an account that does not exist."
+          ]
+        },
+        {
+          "name": "no_mint"
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "account here; an `init` constraint would run before the checks on `market` and",
+            "report a settled market as a System program error."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  100,
+                  101,
+                  101,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "funder_stable",
+          "writable": true
+        },
+        {
+          "name": "stable_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "yes_payout",
+          "type": "u64"
+        },
+        {
+          "name": "no_payout",
+          "type": "u64"
         }
       ]
     }

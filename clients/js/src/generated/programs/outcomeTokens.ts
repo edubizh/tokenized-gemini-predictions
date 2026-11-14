@@ -56,20 +56,26 @@ import {
   getFillBuyInstructionAsync,
   getInitializeInstructionAsync,
   getPlaceBuyInstructionAsync,
+  getRedeemInstructionAsync,
   getRegisterTraderInstructionAsync,
+  getRevokeSettlementInstructionAsync,
   getSetConfigInstructionAsync,
   getSetMarketInstructionAsync,
   getSetPauseInstructionAsync,
+  getSettleMarketInstructionAsync,
   parseCancelOrderInstruction,
   parseCreateMarketInstruction,
   parseCreateOutcomeMintInstruction,
   parseFillBuyInstruction,
   parseInitializeInstruction,
   parsePlaceBuyInstruction,
+  parseRedeemInstruction,
   parseRegisterTraderInstruction,
+  parseRevokeSettlementInstruction,
   parseSetConfigInstruction,
   parseSetMarketInstruction,
   parseSetPauseInstruction,
+  parseSettleMarketInstruction,
   type CancelOrderAsyncInput,
   type CreateMarketAsyncInput,
   type CreateOutcomeMintAsyncInput,
@@ -81,15 +87,21 @@ import {
   type ParsedFillBuyInstruction,
   type ParsedInitializeInstruction,
   type ParsedPlaceBuyInstruction,
+  type ParsedRedeemInstruction,
   type ParsedRegisterTraderInstruction,
+  type ParsedRevokeSettlementInstruction,
   type ParsedSetConfigInstruction,
   type ParsedSetMarketInstruction,
   type ParsedSetPauseInstruction,
+  type ParsedSettleMarketInstruction,
   type PlaceBuyAsyncInput,
+  type RedeemAsyncInput,
   type RegisterTraderAsyncInput,
+  type RevokeSettlementAsyncInput,
   type SetConfigAsyncInput,
   type SetMarketAsyncInput,
   type SetPauseAsyncInput,
+  type SettleMarketAsyncInput,
 } from "../instructions/index.js";
 import {
   findConfigPda,
@@ -97,6 +109,7 @@ import {
   findMarketPda,
   findMintPda,
   findTraderPda,
+  findVaultPda,
 } from "../pdas/index.js";
 
 export const OUTCOME_TOKENS_PROGRAM_ADDRESS =
@@ -352,20 +365,26 @@ export const OutcomeTokensInstruction = {
   3: "FillBuy",
   4: "Initialize",
   5: "PlaceBuy",
-  6: "RegisterTrader",
-  7: "SetConfig",
-  8: "SetMarket",
-  9: "SetPause",
+  6: "Redeem",
+  7: "RegisterTrader",
+  8: "RevokeSettlement",
+  9: "SetConfig",
+  10: "SetMarket",
+  11: "SetPause",
+  12: "SettleMarket",
   CancelOrder: 0,
   CreateMarket: 1,
   CreateOutcomeMint: 2,
   FillBuy: 3,
   Initialize: 4,
   PlaceBuy: 5,
-  RegisterTrader: 6,
-  SetConfig: 7,
-  SetMarket: 8,
-  SetPause: 9,
+  Redeem: 6,
+  RegisterTrader: 7,
+  RevokeSettlement: 8,
+  SetConfig: 9,
+  SetMarket: 10,
+  SetPause: 11,
+  SettleMarket: 12,
 } as const;
 
 export type OutcomeTokensInstruction =
@@ -448,12 +467,34 @@ export function identifyOutcomeTokensInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([184, 12, 86, 149, 70, 196, 97, 225]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensInstruction.Redeem;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([75, 243, 224, 167, 1, 5, 51, 32]),
       ),
       0,
     )
   ) {
     return OutcomeTokensInstruction.RegisterTrader;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([187, 67, 255, 84, 249, 79, 196, 93]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensInstruction.RevokeSettlement;
   }
   if (
     containsBytes(
@@ -488,6 +529,17 @@ export function identifyOutcomeTokensInstruction(
   ) {
     return OutcomeTokensInstruction.SetPause;
   }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([193, 153, 95, 216, 166, 6, 144, 217]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensInstruction.SettleMarket;
+  }
   throw new SolanaError(
     SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_INSTRUCTION,
     { instructionData: data, programName: "outcomeTokens" },
@@ -516,8 +568,14 @@ export type ParsedOutcomeTokensInstruction<
       instructionType: typeof OutcomeTokensInstruction.PlaceBuy;
     } & ParsedPlaceBuyInstruction<TProgram>)
   | ({
+      instructionType: typeof OutcomeTokensInstruction.Redeem;
+    } & ParsedRedeemInstruction<TProgram>)
+  | ({
       instructionType: typeof OutcomeTokensInstruction.RegisterTrader;
     } & ParsedRegisterTraderInstruction<TProgram>)
+  | ({
+      instructionType: typeof OutcomeTokensInstruction.RevokeSettlement;
+    } & ParsedRevokeSettlementInstruction<TProgram>)
   | ({
       instructionType: typeof OutcomeTokensInstruction.SetConfig;
     } & ParsedSetConfigInstruction<TProgram>)
@@ -526,7 +584,10 @@ export type ParsedOutcomeTokensInstruction<
     } & ParsedSetMarketInstruction<TProgram>)
   | ({
       instructionType: typeof OutcomeTokensInstruction.SetPause;
-    } & ParsedSetPauseInstruction<TProgram>);
+    } & ParsedSetPauseInstruction<TProgram>)
+  | ({
+      instructionType: typeof OutcomeTokensInstruction.SettleMarket;
+    } & ParsedSettleMarketInstruction<TProgram>);
 
 export function parseOutcomeTokensInstruction<TProgram extends string>(
   instruction: Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array>,
@@ -575,11 +636,25 @@ export function parseOutcomeTokensInstruction<TProgram extends string>(
         ...parsePlaceBuyInstruction(instruction),
       };
     }
+    case OutcomeTokensInstruction.Redeem: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OutcomeTokensInstruction.Redeem,
+        ...parseRedeemInstruction(instruction),
+      };
+    }
     case OutcomeTokensInstruction.RegisterTrader: {
       assertIsInstructionWithAccounts(instruction);
       return {
         instructionType: OutcomeTokensInstruction.RegisterTrader,
         ...parseRegisterTraderInstruction(instruction),
+      };
+    }
+    case OutcomeTokensInstruction.RevokeSettlement: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OutcomeTokensInstruction.RevokeSettlement,
+        ...parseRevokeSettlementInstruction(instruction),
       };
     }
     case OutcomeTokensInstruction.SetConfig: {
@@ -601,6 +676,13 @@ export function parseOutcomeTokensInstruction<TProgram extends string>(
       return {
         instructionType: OutcomeTokensInstruction.SetPause,
         ...parseSetPauseInstruction(instruction),
+      };
+    }
+    case OutcomeTokensInstruction.SettleMarket: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OutcomeTokensInstruction.SettleMarket,
+        ...parseSettleMarketInstruction(instruction),
       };
     }
     default:
@@ -664,10 +746,19 @@ export type OutcomeTokensPluginInstructions = {
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getPlaceBuyInstructionAsync> &
     SelfPlanAndSendFunctions;
+  redeem: (
+    input: RedeemAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getRedeemInstructionAsync> & SelfPlanAndSendFunctions;
   registerTrader: (
     input: MakeOptional<RegisterTraderAsyncInput, "payer">,
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getRegisterTraderInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  revokeSettlement: (
+    input: RevokeSettlementAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getRevokeSettlementInstructionAsync> &
     SelfPlanAndSendFunctions;
   setConfig: (
     input: SetConfigAsyncInput,
@@ -684,6 +775,11 @@ export type OutcomeTokensPluginInstructions = {
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getSetPauseInstructionAsync> &
     SelfPlanAndSendFunctions;
+  settleMarket: (
+    input: MakeOptional<SettleMarketAsyncInput, "payer">,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getSettleMarketInstructionAsync> &
+    SelfPlanAndSendFunctions;
 };
 
 export type OutcomeTokensPluginPdas = {
@@ -692,6 +788,7 @@ export type OutcomeTokensPluginPdas = {
   market: typeof findMarketPda;
   mint: typeof findMintPda;
   trader: typeof findTraderPda;
+  vault: typeof findVaultPda;
 };
 
 export type OutcomeTokensPluginRequirements = ClientWithRpc<
@@ -776,6 +873,14 @@ export function outcomeTokensProgram(
                 },
               ),
             ),
+          redeem: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getRedeemInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
           registerTrader: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -786,6 +891,14 @@ export function outcomeTokensProgram(
                     instructionConfig?.programAddress ?? config.programAddress,
                 },
               ),
+            ),
+          revokeSettlement: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getRevokeSettlementInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
             ),
           setConfig: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
@@ -811,6 +924,17 @@ export function outcomeTokensProgram(
                   instructionConfig?.programAddress ?? config.programAddress,
               }),
             ),
+          settleMarket: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getSettleMarketInstructionAsync(
+                { ...input, payer: input.payer ?? client.payer },
+                {
+                  programAddress:
+                    instructionConfig?.programAddress ?? config.programAddress,
+                },
+              ),
+            ),
         },
         pdas: {
           config: (pdaConfig) =>
@@ -835,6 +959,11 @@ export function outcomeTokensProgram(
             }),
           trader: (seeds, pdaConfig) =>
             findTraderPda(seeds, {
+              programAddress:
+                pdaConfig?.programAddress ?? config.programAddress,
+            }),
+          vault: (seeds, pdaConfig) =>
+            findVaultPda(seeds, {
               programAddress:
                 pdaConfig?.programAddress ?? config.programAddress,
             }),
