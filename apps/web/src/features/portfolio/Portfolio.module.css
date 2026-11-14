@@ -240,7 +240,10 @@
   .short {
     display: inline;
   }
+}
 
+/* The position lists stack below 56rem (they are dense row lists), and their values then read from the left. */
+@media (max-width: 56rem) {
   .stack {
     justify-items: start;
   }

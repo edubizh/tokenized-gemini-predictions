@@ -52,6 +52,8 @@ export interface TimelineInput {
   apiOrder: ApiOrder | null;
   local: LocalOrder | null;
   chainNowSecs: number;
+  /** True while the relayer is not answering: without its record, what it did with the order is not known. */
+  relayerAway?: boolean;
 }
 
 export type StepStatus = "done" | "current" | "pending" | "skipped";
@@ -224,8 +226,10 @@ export function deriveTimeline(input: TimelineInput): DerivedTimeline {
   /** Before the relayer has sent anything: it has not seen the order, or has only just picked it up. */
   const beforeSending = (): DerivedTimeline => {
     const nothing = step("filled", "skipped", "Not filled", words.nothing);
-    if (closed) return finish([held, step("sent", "skipped", "Not sent", "The relayer did not send this order"), nothing], refunded(reclaimed, null), "REFUNDED");
-    if (expired) return finish([held, step("sent", "skipped", "Not sent", "The relayer did not pick this order up in time"), nothing], reclaim, "EXPIRED");
+    // Without the relayer's record nothing says whether the order reached the venue.
+    const notSent = (why: string) => (input.relayerAway ? step("sent", "skipped", "Sent to the venue", "Whether this order reached the venue is not known while the relayer is not answering") : step("sent", "skipped", "Not sent", why));
+    if (closed) return finish([held, notSent("The relayer did not send this order"), nothing], refunded(reclaimed, null), "REFUNDED");
+    if (expired) return finish([held, notSent("The relayer did not pick this order up in time"), nothing], reclaim, "EXPIRED");
     const waiting = api === null ? "Waiting for the relayer" : "The relayer has the order and is sending it";
     return finish([held, step("sent", "current", "Sent to the venue", waiting), step("filled", "pending", "Filled")], step("result", "pending", words.resultTitle), "OPEN");
   };

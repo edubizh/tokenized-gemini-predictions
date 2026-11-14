@@ -43,8 +43,10 @@
 }
 
 .tab {
+  min-width: 28px;
   min-height: 28px;
   padding: 0 0 var(--space-1);
+  text-align: left;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: var(--leading-xs);
@@ -110,7 +112,10 @@
   color: var(--ink-2);
 }
 
+/* The padding gives the pointer 24px; the margin keeps the line where it was. */
 .link {
+  padding-block: 2px;
+  margin-block: -2px;
   font-weight: var(--weight-medium);
   color: var(--ink);
   text-decoration: underline;

@@ -1,4 +1,8 @@
+/* The padding makes the link 24px tall to the pointer; the margin keeps the line where it was. */
 .link {
+  display: inline-block;
+  padding-block: 4px;
+  margin-block: -4px;
   white-space: nowrap;
 }
 

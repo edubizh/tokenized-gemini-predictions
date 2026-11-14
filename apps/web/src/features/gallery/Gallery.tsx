@@ -23,6 +23,7 @@ import { WelcomeView, type WelcomeState } from "@/features/onboarding/WelcomeVie
 import { formatContracts, formatDollars, formatPrice, shortAddress } from "@/lib/format";
 import { askPrices, buildFixtures, FIXTURE_USER, fixtureSignature } from "@/lib/relayer/fixtures";
 import { ACCOUNT_SECTIONS, AccountGallery } from "./AccountGallery";
+import { OFFLINE_SECTIONS, OfflineGallery } from "./OfflineGallery";
 import { TRADING_SECTIONS, TradingGallery } from "./TradingGallery";
 import styles from "./Gallery.module.css";
 
@@ -48,6 +49,7 @@ const SECTIONS = [
   ["welcome", "Welcome screen"],
   ...TRADING_SECTIONS,
   ...ACCOUNT_SECTIONS,
+  ...OFFLINE_SECTIONS,
 ] as const;
 
 const COLOURS = [
@@ -665,6 +667,7 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
 
         <TradingGallery anchorMs={anchorMs} Section={Section} Specimen={Specimen} />
         <AccountGallery anchorMs={anchorMs} Section={Section} Specimen={Specimen} />
+        <OfflineGallery anchorMs={anchorMs} Section={Section} Specimen={Specimen} />
       </main>
     </div>
   );

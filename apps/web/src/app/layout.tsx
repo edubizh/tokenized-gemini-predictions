@@ -1,15 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import type { ReactNode } from "react";
 import { NetworkStrip } from "@/components/shell/NetworkStrip";
 import { HealthProvider } from "@/features/markets/hooks";
 import { loadConfig } from "@/lib/config.server";
 import { Providers } from "@/lib/privy/providers";
 import { SESSION_HINT_SCRIPT } from "@/lib/privy/session-hint";
+import { plexMono, plexSans } from "./fonts";
 import "./globals.css";
-
-const plexSans = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--plex-sans", display: "swap" });
-const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--plex-mono", display: "swap" });
 
 export const metadata: Metadata = {
   title: { default: "Outcome Tokens", template: "%s · Outcome Tokens" },

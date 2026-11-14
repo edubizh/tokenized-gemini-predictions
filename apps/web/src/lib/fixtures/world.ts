@@ -4,9 +4,9 @@
 
 import type { ApiMarket, ApiOrder, SideName } from "@outcome/relayer/api-types";
 import { complementPx, cost, takerFee } from "@outcome/relayer/money";
-import { buildFixtures, buildJustSettledMarket, fixtureAddress, fixtureResponse, fixtureSignature, type FixtureResponse } from "@/lib/relayer/fixtures";
+import { buildFixtures, buildJustSettledMarket, fixtureAddress, fixtureChainMarket, fixtureResponse, fixtureSignature, type FixtureResponse } from "@/lib/relayer/fixtures";
 import type { RelayerRoute } from "@/lib/relayer/proxy";
-import type { FixtureChain, FixtureOpenOrder } from "./chain-types";
+import type { FixtureChain, FixtureChainMarket, FixtureOpenOrder, MarketQuery } from "./chain-types";
 
 /** Fixture times are offsets from an anchor that moves every five minutes, so countdowns run. */
 export const FIXTURE_CYCLE_MS = 5 * 60 * 1000;
@@ -182,6 +182,28 @@ export class FixtureWorld {
       if (found) return found;
     }
     return undefined;
+  }
+
+  /** Every market of this and the recent anchors: what a relayer keeps, and what stays on-chain. */
+  private everyMarket(nowMs: number): ApiMarket[] {
+    const known = new Map(this.markets(nowMs).map((market) => [market.symbol, market]));
+    for (let back = 1; back < ANCHORS_BACK; back++) {
+      for (const market of this.markets(nowMs, anchorOf(nowMs) - back * FIXTURE_CYCLE_MS)) if (!known.has(market.symbol)) known.set(market.symbol, market);
+    }
+    return [...known.values()];
+  }
+
+  /** The market accounts the simulated chain holds for a query, one per market. */
+  chainMarkets(query: MarketQuery, nowMs: number): FixtureChainMarket[] {
+    const mints = new Set(query.mints ?? []);
+    const addresses = new Set(query.markets ?? []);
+    const symbols = new Set(query.symbols ?? []);
+    return this.everyMarket(nowMs).flatMap((market) => {
+      const onchain = market.onchain;
+      if (!onchain) return [];
+      if (!mints.has(onchain.yesMint) && !mints.has(onchain.noMint) && !addresses.has(onchain.market) && !symbols.has(market.symbol)) return [];
+      return fixtureChainMarket(market) ?? [];
+    });
   }
 
   private nextNonce(user: string): bigint {
@@ -445,11 +467,7 @@ export class FixtureWorld {
         const markets = this.markets(nowMs);
         if (route.scope !== "all") return { status: 200, body: { markets: markets.filter((market) => market.expiresAt > nowMs && market.settleState === "open") } };
         // A relayer keeps the markets of earlier windows, so tokens and orders from them can be named.
-        const known = new Map(markets.map((market) => [market.symbol, market]));
-        for (let back = 1; back < ANCHORS_BACK; back++) {
-          for (const market of this.markets(nowMs, anchorOf(nowMs) - back * FIXTURE_CYCLE_MS)) if (!known.has(market.symbol)) known.set(market.symbol, market);
-        }
-        return { status: 200, body: { markets: [...known.values()] } };
+        return { status: 200, body: { markets: this.everyMarket(nowMs) } };
       }
       case "ensure":
       case "market": {

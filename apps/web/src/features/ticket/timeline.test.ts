@@ -239,3 +239,23 @@ describe("deriveTimeline for a sell", () => {
     expect(sell({ local: null, chainOrder: undefined, apiOrder: sellApi({ state: "seen" }) }).steps[0]?.text).toBe("3.00 YES tokens held");
   });
 });
+
+describe("deriveTimeline while the relayer is away", () => {
+  it("does not say what the relayer did with an expired order it has no record of", () => {
+    const timeline = derive({ chainNowSecs: EXPIRES + 5, relayerAway: true });
+    expect(timeline.stamp).toBe("EXPIRED");
+    expect(timeline.canReclaim).toBe(true);
+    expect(shape(timeline)).toEqual(["done:$0.97 held", "skipped:Whether this order reached the venue is not known while the relayer is not answering", "skipped:Nothing was bought", "current:Expired. Reclaim your hold."]);
+    expect(timeline.steps[1].title).toBe("Sent to the venue");
+  });
+
+  it("says the same of an order the user reclaimed", () => {
+    const timeline = derive({ chainOrder: null, chainNowSecs: EXPIRES + 60, local: { ...local, reclaimSignature: "reclaimSig" }, relayerAway: true });
+    expect(timeline.stamp).toBe("REFUNDED");
+    expect(shape(timeline)).toEqual(["done:$0.97 held", "skipped:Whether this order reached the venue is not known while the relayer is not answering", "skipped:Nothing was bought", "done:Hold returned in full."]);
+  });
+
+  it("still waits for the relayer while the order can be filled", () => {
+    expect(shape(derive({ relayerAway: true }))[1]).toBe("current:Waiting for the relayer");
+  });
+});

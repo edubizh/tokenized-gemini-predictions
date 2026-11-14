@@ -46,9 +46,9 @@ export function formatContracts(units: bigint): string {
   return `${group(whole)}.${fraction}`;
 }
 
-/** Lamports as SOL, at least two decimals. */
+/** Lamports as SOL with four decimals: `0.0984`. The rest is cut off, never rounded up. */
 export function formatSol(lamports: bigint): string {
-  return scaled(lamports, 9, 2);
+  return scaled(lamports / 100_000n, 4, 4);
 }
 
 /** `8rj8…DK8p` */

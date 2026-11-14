@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ApiOrder } from "@outcome/relayer/api-types";
 type OrderState = ApiOrder["state"];
 import { buildFixtures, FIXTURE_USER, fixtureResponse } from "./fixtures";
-import { matchRoute } from "./proxy";
+import { fixtureSwitches, matchRoute } from "./proxy";
 
 const NOW = Date.UTC(2026, 10, 14, 15, 7, 30);
 const WALLET = "8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn";
@@ -119,5 +119,23 @@ describe("fixtures", () => {
 
     const status = fixtureResponse(matchRoute("GET", ["status"], "")!, NOW).body as { solvency: { ok: boolean } };
     expect(status.solvency.ok).toBe(true);
+  });
+});
+
+describe("fixtureSwitches", () => {
+  it("is all off without cookies", () => {
+    expect(fixtureSwitches(null)).toEqual({ relayerOffline: false, chainFailing: false });
+    expect(fixtureSwitches("")).toEqual({ relayerOffline: false, chainFailing: false });
+    expect(fixtureSwitches("theme=paper; other=1")).toEqual({ relayerOffline: false, chainFailing: false });
+  });
+
+  it("reads the relayer and chain switches from their cookies", () => {
+    expect(fixtureSwitches("fixtures-relayer=offline")).toEqual({ relayerOffline: true, chainFailing: false });
+    expect(fixtureSwitches("a=b; fixtures-chain=failing; fixtures-relayer=offline")).toEqual({ relayerOffline: true, chainFailing: true });
+  });
+
+  it("ignores any other value", () => {
+    expect(fixtureSwitches("fixtures-relayer=online; fixtures-chain=ok")).toEqual({ relayerOffline: false, chainFailing: false });
+    expect(fixtureSwitches("xfixtures-relayer=offline")).toEqual({ relayerOffline: false, chainFailing: false });
   });
 });

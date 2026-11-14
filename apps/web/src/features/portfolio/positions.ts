@@ -3,7 +3,7 @@
 
 import type { ApiMarket, SideName } from "@outcome/relayer/api-types";
 import { bidPx } from "@/features/markets/book";
-import { formatClock, formatStrike, payoutStatement, type TimeOptions } from "@/features/markets/wording";
+import { formatClock, formatStrike, payoutStatement, venueKnown, type TimeOptions } from "@/features/markets/wording";
 import { formatPrice } from "@/lib/format";
 
 /** What one winning unit pays, in micro-dollars: one test dollar per contract. */
@@ -109,11 +109,15 @@ export function buildPortfolio(balances: readonly TokenBalance[], markets: reado
   return portfolio;
 }
 
-type Described = Pick<ApiMarket, "underlying" | "label" | "strike" | "startsAt" | "expiresAt">;
+type Described = Pick<ApiMarket, "underlying" | "label" | "strike" | "startsAt" | "expiresAt"> & { venueStatus?: string };
 
 /** What one side of a market pays for, in one sentence. */
 export function sideStatement(market: Described, side: SideName, options: TimeOptions = {}): string {
   if (market.label !== "Up") return side === "YES" ? `YES pays $1.00 if: ${market.label}.` : `NO pays $1.00 if not: ${market.label}.`;
+  if (market.strike === null && !venueKnown(market)) {
+    const close = formatClock(market.expiresAt, { ...options, zone: true });
+    return `${side} pays $1.00 if ${market.underlying} is ${side === "YES" ? "at or above" : "below"} its price to beat at ${close}.`;
+  }
   if (market.strike === null) return payoutStatement(market, options);
   const close = formatClock(market.expiresAt, { ...options, zone: true });
   const condition = side === "YES" ? "at or above" : "below";

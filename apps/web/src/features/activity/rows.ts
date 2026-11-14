@@ -20,11 +20,11 @@ export interface ActivityRow {
   receipt: OrderReceipt;
 }
 
-export function buildActivityRows(entries: readonly OrderEntry[], markets: readonly ApiMarket[], chainNowSecs: number): ActivityRow[] {
+export function buildActivityRows(entries: readonly OrderEntry[], markets: readonly ApiMarket[], chainNowSecs: number, relayerAway = false): ActivityRow[] {
   return entries.map((entry) => {
     const market =
       markets.find((candidate) => (entry.symbol !== null && candidate.symbol === entry.symbol) || (entry.marketAddress !== null && candidate.onchain?.market === entry.marketAddress)) ?? null;
-    const timeline = deriveTimeline({ chainOrder: entry.chain, apiOrder: entry.api, local: entry.local, chainNowSecs });
+    const timeline = deriveTimeline({ chainOrder: entry.chain, apiOrder: entry.api, local: entry.local, chainNowSecs, relayerAway });
     return {
       address: entry.address,
       entry,

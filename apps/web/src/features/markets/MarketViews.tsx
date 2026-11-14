@@ -10,7 +10,7 @@ import { Stamp, type StampValue } from "@/components/ui/Stamp";
 import type { Position } from "@/lib/chain/reads";
 import { formatContracts, formatDollars, formatPrice } from "@/lib/format";
 import { askPx } from "./book";
-import { formatClock, formatStrike, marketTitle, payoutStatement, resultIsIn, type TimeOptions } from "./wording";
+import { formatClock, formatStrike, marketTitle, payoutStatement, resultIsIn, venueKnown, type TimeOptions } from "./wording";
 import styles from "./Markets.module.css";
 
 /** True while the 15-minute window is running. */
@@ -29,11 +29,13 @@ export interface MarketHeaderViewProps extends TimeOptions {
   nowMs: number;
   /** Freezes the countdown at `nowMs`, for the gallery. */
   frozen?: boolean;
+  /** True while the relayer is not answering: prices are not known. */
+  offline?: boolean;
   onClosed?(): void;
 }
 
 /** The question, then three facts on one ruled line: time left, price to beat, price of each side. */
-export function MarketHeaderView({ market, nowMs, frozen, onClosed, timeZone }: MarketHeaderViewProps) {
+export function MarketHeaderView({ market, nowMs, frozen, offline = false, onClosed, timeZone }: MarketHeaderViewProps) {
   const upcoming = market.startsAt > nowMs;
   const expired = nowMs >= market.expiresAt;
   const deadline = upcoming ? market.startsAt : market.expiresAt;
@@ -45,6 +47,9 @@ export function MarketHeaderView({ market, nowMs, frozen, onClosed, timeZone }: 
   if (expired && !resultIsIn(market)) timeNote = `${timeNote}, awaiting the result`;
   let beatNote = upcoming ? `set at ${formatClock(market.startsAt, { timeZone })}` : `${market.underlying} at ${formatClock(market.startsAt, { timeZone })}`;
   if (market.settlementValue !== null) beatNote = `final price ${formatStrike(market.settlementValue)}`;
+  // Read from Solana alone, the market has no price to beat and no start time to show.
+  const known = venueKnown(market);
+  if (!known) beatNote = "kept by the relayer, which is not answering";
 
   return (
     <header>
@@ -71,7 +76,7 @@ export function MarketHeaderView({ market, nowMs, frozen, onClosed, timeZone }: 
         </div>
         <div className={styles.fact}>
           <dt className={styles.factLabel}>Price to beat</dt>
-          <dd className={styles.factValue}>{market.strike === null ? <span className={styles.pending}>Not set yet</span> : formatStrike(market.strike)}</dd>
+          <dd className={styles.factValue}>{market.strike === null ? <span className={styles.pending}>{known ? "Not set yet" : "Not known"}</span> : formatStrike(market.strike)}</dd>
           <dd className={styles.factNote}>{beatNote}</dd>
         </div>
         <div className={styles.fact}>
@@ -83,6 +88,10 @@ export function MarketHeaderView({ market, nowMs, frozen, onClosed, timeZone }: 
           ) : expired ? (
             <dd className={styles.factValue}>
               <span className={styles.pending}>Not in yet</span>
+            </dd>
+          ) : offline ? (
+            <dd className={styles.factValue}>
+              <span className={styles.pending}>Not known</span>
             </dd>
           ) : (
             <dd className={`${styles.factValue} ${styles.sides}`}>
@@ -97,7 +106,13 @@ export function MarketHeaderView({ market, nowMs, frozen, onClosed, timeZone }: 
             </dd>
           )}
           <dd className={styles.factNote}>
-            {market.resolution ? `${market.resolution.toUpperCase()} tokens pay $1.00 each` : expired ? "the venue reports it after the close" : "per contract, in test dollars"}
+            {market.resolution
+              ? `${market.resolution.toUpperCase()} tokens pay $1.00 each`
+              : expired
+                ? "the venue reports it after the close"
+                : offline
+                  ? "prices come from the relayer"
+                  : "per contract, in test dollars"}
           </dd>
         </div>
       </dl>
@@ -201,6 +216,15 @@ export function PreparingPanel({ failed, onRetry }: { failed: boolean; onRetry()
       </p>
       <p className={styles.panelText}>The relayer is creating the market account and its YES and NO token mints. The order ticket appears here in a few seconds.</p>
     </div>
+  );
+}
+
+/** In the ticket's place while the relayer is not answering. */
+export function OfflinePanel() {
+  return (
+    <Notice tone="caution" title="Orders cannot be placed right now">
+      The relayer is not answering, so a new order would not reach the venue. Orders you already placed are safe on Solana, and each can be reclaimed here once it expires.
+    </Notice>
   );
 }
 

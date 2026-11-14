@@ -2,9 +2,10 @@
 
 import { useCallback, useReducer, useState } from "react";
 import { PageHeader, useFaucet } from "@/components/shell/Shell";
-import { chainNow, useMarkets } from "@/features/markets/hooks";
+import { chainNow, useHealth, useMarkets } from "@/features/markets/hooks";
+import { knownMarkets } from "@/features/markets/known";
 import { marketTitle } from "@/features/markets/wording";
-import { useBalances, usePositions } from "@/features/ticket/hooks";
+import { useBalances, useChainMarkets, usePositions } from "@/features/ticket/hooks";
 import { explorerAddressUrl, explorerTxUrl, useConfig } from "@/lib/config";
 import { useReconnect } from "@/lib/privy/use-reconnect";
 import { useRedeem } from "./actions";
@@ -13,7 +14,8 @@ import { buildPortfolio, type PositionRow } from "./positions";
 
 export function PortfolioPage() {
   const config = useConfig();
-  const { balances } = useBalances();
+  const { offline } = useHealth();
+  const { balances, stale } = useBalances();
   const positions = usePositions();
   const markets = useMarkets("all");
   const faucet = useFaucet();
@@ -25,10 +27,17 @@ export function PortfolioPage() {
   const [, redraw] = useReducer((count: number) => count + 1, 0);
 
   const now = Date.now();
-  // Without the relayer the tokens are still listed, by mint, until it answers again.
-  const marketsKnown = markets.data !== undefined;
-  const ready = positions.data !== undefined && (marketsKnown || !markets.loading);
-  const portfolio = ready ? buildPortfolio(positions.data ?? [], markets.data ?? [], { wallMs: now, chainSecs: Math.floor(chainNow() / 1000) }) : null;
+  // The relayer names the markets. For tokens it does not name, and for all of them while it is
+  // not answering, the market accounts are read from Solana, which is enough to group and redeem.
+  const relayerDown = offline || markets.error !== null;
+  const relayerTried = markets.data !== undefined || !markets.loading;
+  const held = positions.data;
+  const named = new Set((markets.data ?? []).flatMap((market) => (market.onchain ? [market.onchain.yesMint, market.onchain.noMint] : [])));
+  const chainMarkets = useChainMarkets(held === undefined || !relayerTried ? null : { mints: held.map((position) => position.mint).filter((mint) => relayerDown || !named.has(mint)) });
+  const ready = held !== undefined && relayerTried && chainMarkets.settled;
+  const portfolio = ready
+    ? buildPortfolio(held, knownMarkets({ relayer: markets.data, chain: chainMarkets.markets, offline: relayerDown }), { wallMs: now, chainSecs: Math.floor(chainNow() / 1000) })
+    : null;
 
   const { redeem } = redeeming;
   const { refresh } = positions;
@@ -51,7 +60,8 @@ export function PortfolioPage() {
       <PortfolioView
         balances={balances}
         portfolio={portfolio}
-        unnamed={!marketsKnown}
+        offline={relayerDown}
+        chainFailing={positions.error !== null && !stale}
         faucet={{ status: faucet.status, onRequest: faucet.request }}
         receipts={receipts}
         redeeming={redeeming}

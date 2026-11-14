@@ -85,7 +85,8 @@ a.title:hover {
   text-decoration: none;
 }
 
-@media (max-width: 40rem) {
+/* The list stacks below 56rem (it is a dense row list), and its values then read from the left. */
+@media (max-width: 56rem) {
   .stack {
     justify-items: start;
   }
@@ -120,4 +121,13 @@ a.title:hover {
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
   color: var(--ink-3);
+}
+
+/* Above the rows while the relayer is not answering: what the list is made of. */
+.offline {
+  max-width: 44rem;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
 }

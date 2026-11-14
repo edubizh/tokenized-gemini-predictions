@@ -22,14 +22,16 @@ export interface RowListProps {
   /** Accessible name of the list: "Markets", "Your orders". */
   label: string;
   columns: readonly Column[];
+  /** For a list of five or more columns: its rows stack below 56rem, not only on a phone. */
+  dense?: boolean;
   children: ReactNode;
 }
 
 /** The ledger pattern: a header of small mono labels, then ruled rows with numbers in fixed columns. */
-export function RowList({ label, columns, children }: RowListProps) {
+export function RowList({ label, columns, dense = false, children }: RowListProps) {
   const template = columns.map((column) => column.width ?? (column.primary ? "minmax(0, 1fr)" : "max-content")).join(" ");
   return (
-    <div className={styles.list} role="table" aria-label={label} style={{ "--columns": template } as CSSProperties}>
+    <div className={`${styles.list} ${dense ? styles.dense : ""}`} role="table" aria-label={label} style={{ "--columns": template } as CSSProperties}>
       <div role="rowgroup">
         <div className={styles.header} role="row">
           {columns.map((column) => (

@@ -183,9 +183,6 @@ export function AccountGallery({ anchorMs, Section, Specimen }: { anchorMs: numb
         <Specimen label="No positions yet" wide>
           {portfolio({ portfolio: portfolioOf([]) })}
         </Specimen>
-        <Specimen label="Relayer not answering: tokens listed by mint" wide>
-          {portfolio({ portfolio: portfolioOf(held.slice(0, 2), []), unnamed: true })}
-        </Specimen>
         <Specimen label="Loading" wide>
           {portfolio({ balances: null, portfolio: null })}
         </Specimen>
@@ -239,6 +236,9 @@ export function AccountGallery({ anchorMs, Section, Specimen }: { anchorMs: numb
         </Specimen>
         <Specimen label="Before the first answer" wide>
           {system({ health: null, offline: false, status: null })}
+        </Specimen>
+        <Specimen label="Every market settled, or none created yet: nothing to reconcile" wide>
+          {system({ status: { ...fixtures.status, markets: [] } })}
         </Specimen>
       </Section>
     </>

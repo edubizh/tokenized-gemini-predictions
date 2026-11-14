@@ -73,10 +73,13 @@ describe("formatContracts", () => {
 });
 
 describe("formatSol", () => {
-  it("writes lamports as SOL, trimming trailing zeros down to two decimals", () => {
-    expect(formatSol(50_000_000n)).toBe("0.05");
-    expect(formatSol(1_000_000_000n)).toBe("1.00");
-    expect(formatSol(1_234_567_890n)).toBe("1.23456789");
+  it("writes lamports as SOL with four decimals, never rounding up", () => {
+    expect(formatSol(50_000_000n)).toBe("0.0500");
+    expect(formatSol(1_000_000_000n)).toBe("1.0000");
+    expect(formatSol(98_471_160n)).toBe("0.0984");
+    expect(formatSol(2_965_193_200n)).toBe("2.9651");
+    expect(formatSol(1_234_999_999_999n)).toBe("1,234.9999");
+    expect(formatSol(0n)).toBe("0.0000");
   });
 });
 

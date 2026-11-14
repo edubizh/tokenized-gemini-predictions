@@ -65,3 +65,27 @@ describe("orderEntries", () => {
     expect(closed[0]?.chain).toBeNull();
   });
 });
+
+describe("orderEntries while the relayer is away", () => {
+  const sources = {
+    api: undefined,
+    open: { orders: [open("OPEN")], startedAt: NOW - 1_000 },
+    local: { OPEN: local("OPEN", NOW - 90_000), GONE: local("GONE", NOW - 80_000), MINE: local("MINE", NOW - 70_000, { reclaimSignature: "r" }), NEW: local("NEW", NOW - 500) },
+    nowMs: NOW,
+  };
+
+  it("leaves out an order that has left Solana when nothing says how it ended", () => {
+    const entries = orderEntries({ ...sources, relayerAway: true });
+    // Still open, reclaimed by the user, or placed after the last read of the chain: all kept.
+    expect(entries.map((entry) => entry.address)).toEqual(["NEW", "MINE", "OPEN"]);
+  });
+
+  it("keeps it when the relayer's last answer has a record of it", () => {
+    const entries = orderEntries({ ...sources, api: [api("GONE", NOW - 79_000)], relayerAway: true });
+    expect(entries.map((entry) => entry.address)).toContain("GONE");
+  });
+
+  it("keeps everything while the relayer answers", () => {
+    expect(orderEntries(sources).map((entry) => entry.address)).toEqual(["NEW", "MINE", "GONE", "OPEN"]);
+  });
+});

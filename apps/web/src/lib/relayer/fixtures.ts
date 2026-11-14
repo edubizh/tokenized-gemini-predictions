@@ -14,6 +14,7 @@ import type {
   ApiReconcileMarket,
   ApiStatus,
 } from "@outcome/relayer/api-types";
+import type { FixtureChainMarket } from "@/lib/fixtures/chain-types";
 import type { RelayerRoute } from "./proxy";
 
 type OrderState = ApiOrder["state"];
@@ -198,6 +199,35 @@ export function buildJustSettledMarket(anchorMs: number): ApiMarket {
     anchor,
   );
   return { ...market, onchain: market.onchain && { ...market.onchain, redeemAfter: Math.floor((anchor + 5 * MINUTE + 30 * SECOND) / 1000) } };
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+/** The metadata name the relayer gives an outcome token: `BTC Up 22:00Z 14 Nov YES`. */
+export function fixtureTokenName(market: Pick<ApiMarket, "underlying" | "label" | "expiresAt">, side: "YES" | "NO"): string {
+  const expiry = new Date(market.expiresAt);
+  const two = (value: number) => String(value).padStart(2, "0");
+  return `${market.underlying} ${market.label} ${two(expiry.getUTCHours())}:${two(expiry.getUTCMinutes())}Z ${expiry.getUTCDate()} ${MONTHS[expiry.getUTCMonth()] ?? ""} ${side}`;
+}
+
+/** A market's account as the simulated chain holds it; null for a market that is not on-chain. */
+export function fixtureChainMarket(market: ApiMarket): FixtureChainMarket | null {
+  const onchain = market.onchain;
+  if (!onchain) return null;
+  return {
+    address: onchain.market,
+    symbol: market.symbol,
+    yesMint: onchain.yesMint,
+    noMint: onchain.noMint,
+    status: onchain.status,
+    closeTs: onchain.closeTs,
+    placeCutoffSecs: onchain.placeCutoffSecs,
+    tickPx: Number(market.tickPx),
+    yesPayout: onchain.yesPayout ?? "0",
+    noPayout: onchain.noPayout ?? "0",
+    redeemAfter: onchain.redeemAfter ?? 0,
+    tokenName: fixtureTokenName(market, "YES"),
+  };
 }
 
 export interface Fixtures {

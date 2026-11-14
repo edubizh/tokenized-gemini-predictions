@@ -54,7 +54,10 @@ export function AccountMenu({ address, embedded, onGetTestFunds, faucet, onLogou
   }, [copied]);
 
   function onButtonKeyDown(event: KeyboardEvent) {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if (event.key === "Escape" && open) {
+      event.preventDefault();
+      close(true);
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       setOpen(true);
       requestAnimationFrame(() => {
@@ -108,7 +111,12 @@ export function AccountMenu({ address, embedded, onGetTestFunds, faucet, onLogou
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         aria-label={`Account ${shortAddress(address)}`}
-        onClick={() => setOpen((value) => !value)}
+        onClick={(event) => {
+          // Opened from the keyboard (Enter or Space), focus moves into the menu, as with the arrow keys.
+          const fromKeyboard = event.detail === 0;
+          if (!open && fromKeyboard) requestAnimationFrame(() => items()[0]?.focus());
+          setOpen((value) => !value);
+        }}
         onKeyDown={onButtonKeyDown}
       >
         <span className={styles.address}>{shortAddress(address)}</span>

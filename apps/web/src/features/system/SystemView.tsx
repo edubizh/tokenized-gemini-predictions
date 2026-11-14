@@ -217,12 +217,12 @@ export function SystemView({ venue, health, offline, status, markets, addresses,
       <Section
         id="reconciliation"
         title="Reconciliation"
-        note="For every market, the tokens on Solana must match the operator's position at the venue: YES supply minus NO supply, plus fills in flight and operator inventory. Quantities are in contracts; NO counts as negative."
+        note="For every market that is not settled yet, the tokens on Solana must match the operator's position at the venue: YES supply minus NO supply, plus fills in flight and operator inventory. Quantities are in contracts; NO counts as negative."
       >
         {status === null ? (
           <p className={styles.emptyLine}>{waiting || !offline ? "Reading the relayer's books." : "Not known while the relayer is not answering."}</p>
         ) : status.markets.length === 0 ? (
-          <p className={styles.emptyLine}>No market has been created on Solana yet. One appears here when its page is first opened.</p>
+          <p className={styles.emptyLine}>No market is open or waiting for its result right now. A market is listed here from the moment it is created on Solana until it is settled.</p>
         ) : (
           <RowList label="Reconciliation by market" columns={RECONCILE}>
             {status.markets.map((row) => {

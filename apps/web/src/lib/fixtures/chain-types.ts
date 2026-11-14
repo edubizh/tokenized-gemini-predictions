@@ -22,6 +22,32 @@ export interface FixtureChain {
   openOrders: FixtureOpenOrder[];
 }
 
+/** A market account with the metadata name of its YES token. */
+export interface FixtureChainMarket {
+  address: string;
+  symbol: string;
+  yesMint: string;
+  noMint: string;
+  status: "open" | "halted" | "settled";
+  /** Cluster seconds. */
+  closeTs: number;
+  placeCutoffSecs: number;
+  tickPx: number;
+  /** Micro-dollars per unit; zero until settled. */
+  yesPayout: string;
+  noPayout: string;
+  /** Cluster seconds; zero until settled. */
+  redeemAfter: number;
+  tokenName: string | null;
+}
+
+/** What a read of market accounts asks for: by outcome mint, by market address or by venue symbol. */
+export interface MarketQuery {
+  mints?: readonly string[];
+  markets?: readonly string[];
+  symbols?: readonly string[];
+}
+
 /** One instruction of a simulated transaction, as the browser posts it. */
 export interface FixtureInstruction {
   programAddress: string;

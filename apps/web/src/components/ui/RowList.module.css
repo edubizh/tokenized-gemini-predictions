@@ -103,3 +103,47 @@
     flex: 1 1 100%;
   }
 }
+
+/* A list with many columns has no room for them on a tablet either: the same stacking, sooner. */
+@media (max-width: 56rem) {
+  .dense .header {
+    display: none;
+  }
+
+  /* Cells start on one line so their labels line up; a button centres on the values beside it. */
+  .dense .row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-2) var(--space-5);
+    padding-block: var(--space-3);
+  }
+
+  .dense .primary {
+    flex: 1 1 100%;
+  }
+
+  .dense .cell.right {
+    text-align: left;
+  }
+
+  .dense .cellLabel {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: var(--leading-xs);
+    font-weight: var(--weight-medium);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .dense .actions {
+    align-self: center;
+    margin-left: auto;
+  }
+
+  .dense .detail {
+    flex: 1 1 100%;
+  }
+}

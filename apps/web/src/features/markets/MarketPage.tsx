@@ -7,7 +7,7 @@ import { useFaucet } from "@/components/shell/Shell";
 import { Notice } from "@/components/ui/Notice";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { usePlaceOrder, useReclaimOrder } from "@/features/ticket/actions";
-import { useBalances, useLocalOrders, useOpenOrders, useOrders, usePositions, type OpenOrdersRead } from "@/features/ticket/hooks";
+import { useBalances, useChainMarkets, useLocalOrders, useOpenOrders, useOrders, useOrdersFinished, usePositions, type OpenOrdersRead } from "@/features/ticket/hooks";
 import { orderEntries, SETTLING_MS, type OrderEntry } from "@/features/ticket/entries";
 import type { LocalOrders } from "@/features/ticket/local-orders";
 import { OrderTimelineView } from "@/features/ticket/OrderTimeline";
@@ -18,7 +18,9 @@ import { explorerTxUrl, useConfig } from "@/lib/config";
 import { useReconnect } from "@/lib/privy/use-reconnect";
 import { ensureMarket } from "@/lib/relayer/client";
 import { chainNow, useHealth, useMarket } from "./hooks";
-import { ClosedPanel, HowItWorks, isLive, MarketHeaderView, PositionView, PreparingPanel } from "./MarketViews";
+import { knownMarkets } from "./known";
+import { marketTitle } from "./wording";
+import { ClosedPanel, HowItWorks, isLive, MarketHeaderView, OfflinePanel, PositionView, PreparingPanel } from "./MarketViews";
 import styles from "./Markets.module.css";
 
 const LISTED_ORDERS = 3;
@@ -26,8 +28,8 @@ const LISTED_ORDERS = 3;
 type Entry = OrderEntry;
 
 /** Everything known about the user's orders in one market, newest first. */
-function entriesFor(market: ApiMarket, api: readonly ApiOrder[] | undefined, open: OpenOrdersRead | undefined, local: LocalOrders, nowMs: number): Entry[] {
-  return orderEntries({ api, open, local, nowMs }).filter((entry) => entry.symbol === market.symbol || (entry.marketAddress !== null && entry.marketAddress === market.onchain?.market));
+function entriesFor(market: ApiMarket, api: readonly ApiOrder[] | undefined, open: OpenOrdersRead | undefined, local: LocalOrders, nowMs: number, relayerAway: boolean): Entry[] {
+  return orderEntries({ api, open, local, nowMs, relayerAway }).filter((entry) => entry.symbol === market.symbol || (entry.marketAddress !== null && entry.marketAddress === market.onchain?.market));
 }
 
 /** Asks the relayer, once per market, to create a live market that is not on-chain yet. */
@@ -61,8 +63,8 @@ function useEnsureMarket(market: ApiMarket | null | undefined, refresh: () => vo
 
 export function MarketPage({ symbol, initialSide, initialAction = "buy" }: { symbol: string; initialSide: SideName; initialAction?: TicketAction }) {
   const config = useConfig();
-  const { health } = useHealth();
-  const { balances } = useBalances();
+  const { health, offline } = useHealth();
+  const { balances, refresh: refreshBalances } = useBalances();
   const marketPoll = useMarket(symbol);
   const openOrders = useOpenOrders();
   const local = useLocalOrders();
@@ -78,12 +80,32 @@ export function MarketPage({ symbol, initialSide, initialAction = "buy" }: { sym
   const now = Date.now();
   const recentlyPlaced = Object.values(local.orders).some((order) => now - order.placedAt < SETTLING_MS);
   const orders = useOrders((openOrders.data?.orders.length ?? 0) > 0 || recentlyPlaced);
-  const market = marketPoll.data;
-  const ensure = useEnsureMarket(market, marketPoll.refresh);
+  // While the relayer is not answering, the market's account on Solana says what is still true
+  // of it: its close, its status, its mints. With that the user's orders and tokens stay in reach.
+  const relayerDown = offline || marketPoll.error !== null;
+  const chainMarkets = useChainMarkets(relayerDown ? { symbols: [symbol] } : null);
+  const fromRelayer = marketPoll.data;
+  const market = relayerDown ? (knownMarkets({ relayer: fromRelayer ? [fromRelayer] : undefined, chain: chainMarkets.markets, offline: true })[0] ?? fromRelayer) : fromRelayer;
+  const ensure = useEnsureMarket(relayerDown ? null : market, marketPoll.refresh);
   const txUrl = useCallback((signature: string) => explorerTxUrl(config, signature), [config]);
+  // The tab is named after the market once it is known: "BTC Up · Outcome Tokens".
+  const pageTitle = market ? marketTitle(market) : null;
+  useEffect(() => {
+    if (pageTitle) document.title = `${pageTitle} · Outcome Tokens`;
+  }, [pageTitle]);
+  const { refresh: refreshPositions } = positions;
+  // A fill or a refund has just changed the wallet: read it again now, not at the next turn.
+  useOrdersFinished(
+    openOrders.data,
+    orders.data,
+    useCallback(() => {
+      refreshBalances();
+      refreshPositions();
+    }, [refreshBalances, refreshPositions]),
+  );
 
   if (market === undefined) {
-    return marketPoll.loading ? (
+    return marketPoll.loading || (relayerDown && !chainMarkets.settled) ? (
       <div aria-busy="true" style={{ display: "grid", gap: "var(--space-3)" }}>
         <span className="sr-only">Loading the market</span>
         <Skeleton width="9rem" height="1.95rem" />
@@ -91,8 +113,8 @@ export function MarketPage({ symbol, initialSide, initialAction = "buy" }: { sym
         <Skeleton width="100%" height="6.5rem" />
       </div>
     ) : (
-      <Notice tone="caution" title="This market cannot be shown right now">
-        The relayer is not answering, and it is the source of market details. This page retries on its own.
+      <Notice tone="caution" title="This market cannot be shown right now" action={<Link href="/portfolio">Open Portfolio</Link>}>
+        The relayer is not answering, and this market has no account on Solana to read in its place. This page retries on its own. Your tokens and open orders are in Portfolio and Activity.
       </Notice>
     );
   }
@@ -104,7 +126,7 @@ export function MarketPage({ symbol, initialSide, initialAction = "buy" }: { sym
     );
   }
 
-  const entries = entriesFor(market, orders.data, openOrders.data, local.orders, now);
+  const entries = entriesFor(market, orders.data, openOrders.data, local.orders, now, relayerDown);
   const chainNowSecs = Math.floor(chainNow() / 1000);
   const refreshOrders = () => {
     openOrders.refresh();
@@ -145,7 +167,7 @@ export function MarketPage({ symbol, initialSide, initialAction = "buy" }: { sym
     <OrderTimelineView
       key={entry.address}
       variant={variant}
-      timeline={deriveTimeline({ chainOrder: entry.chain, apiOrder: entry.api, local: entry.local, chainNowSecs })}
+      timeline={deriveTimeline({ chainOrder: entry.chain, apiOrder: entry.api, local: entry.local, chainNowSecs, relayerAway: relayerDown })}
       txUrl={txUrl}
       chainNow={chainNow}
       onExpired={redraw}
@@ -175,6 +197,8 @@ export function MarketPage({ symbol, initialSide, initialAction = "buy" }: { sym
     });
   } else if (now >= market.expiresAt || market.settleState !== "open") {
     aside = <ClosedPanel market={market} />;
+  } else if (relayerDown) {
+    aside = <OfflinePanel />;
   } else if (ensure.preparing) {
     aside = <PreparingPanel failed={ensure.failed} onRetry={ensure.retry} />;
   } else {
@@ -199,7 +223,7 @@ export function MarketPage({ symbol, initialSide, initialAction = "buy" }: { sym
 
   return (
     <>
-      <MarketHeaderView market={market} nowMs={now} onClosed={redraw} />
+      <MarketHeaderView market={market} nowMs={now} offline={relayerDown} onClosed={redraw} />
       <div className={styles.columns}>
         <div className={styles.aside}>{aside}</div>
         <div className={styles.main}>

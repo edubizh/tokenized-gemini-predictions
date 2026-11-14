@@ -8,7 +8,8 @@ import { usePolling } from "@/lib/polling";
 import { setSessionHint } from "./session-hint";
 import { useTradingWallet, type TradingWallet } from "./wallet";
 
-const BALANCE_INTERVAL_MS = 5_000;
+/** Balances change only when an order of the wallet finishes or a redemption lands, and both ask for a read at once. */
+const BALANCE_INTERVAL_MS = 10_000;
 
 export type TraderStatus = "unknown" | "missing" | "registered";
 

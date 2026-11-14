@@ -15,3 +15,10 @@
   line-height: var(--leading-xs);
   color: var(--ink-3);
 }
+
+/* A standalone link, so it gets the 24px a pointer needs. */
+.inner a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}

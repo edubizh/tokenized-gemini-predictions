@@ -47,8 +47,10 @@ export interface PortfolioViewProps extends TimeOptions {
   balances: Balances | null;
   /** Null until the wallet's tokens have been read. */
   portfolio: Portfolio | null;
-  /** True while the relayer is not answering, so tokens cannot be matched to their markets. */
-  unnamed?: boolean;
+  /** True while the relayer is not answering: markets are read from Solana, and prices are not known. */
+  offline?: boolean;
+  /** True while the wallet's tokens cannot be read from Solana; what is shown is the last good read. */
+  chainFailing?: boolean;
   faucet: { status: FaucetStatus; onRequest(): void };
   receipts: readonly RedemptionReceipt[];
   redeeming: RedeemState;
@@ -162,7 +164,7 @@ function RedemptionReceiptView({ receipt, txUrl, timeZone }: { receipt: Redempti
 }
 
 /** The wallet's test dollars and outcome tokens, grouped by where each market is in its life. */
-export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, redeeming, onRedeem, reconnect = null, nowMs, chainNow, frozen, onDeadline, txUrl, addressUrl, timeZone }: PortfolioViewProps) {
+export function PortfolioView({ balances, portfolio, offline = false, chainFailing = false, faucet, receipts, redeeming, onRedeem, reconnect = null, nowMs, chainNow, frozen, onDeadline, txUrl, addressUrl, timeZone }: PortfolioViewProps) {
   const redeemed = new Set(receipts.map((receipt) => receipt.mint));
   const redeemable = (portfolio?.redeemable ?? []).filter((row) => !redeemed.has(row.mint));
   const winning = redeemable.filter((row) => (row.payoutMicros ?? 0n) > 0n);
@@ -212,11 +214,15 @@ export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, 
           id="live"
           title="Live"
           count={portfolio.live.length}
-          note="Markets that are still open. Worth is what the tokens would fetch at the best bid right now; it moves until the market closes."
+          note={
+            offline
+              ? "Markets that are still open, read from Solana. What the tokens are worth now is not known, and they cannot be sold, until the relayer answers again."
+              : "Markets that are still open. Worth is what the tokens would fetch at the best bid right now; it moves until the market closes."
+          }
           empty="No tokens in a market that is still open."
         >
           {portfolio.live.length > 0 && (
-            <RowList label="Live positions" columns={LIVE}>
+            <RowList label="Live positions" columns={LIVE} dense>
               {portfolio.live.map((row) => (
                 <Row
                   key={row.mint}
@@ -224,16 +230,23 @@ export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, 
                     <PositionCell key="position" row={row} words={sideStatement(row.market, row.side, { timeZone })} />,
                     tokens(row),
                     <div key="value" className={styles.stack}>
-                      {row.worthMicros === null ? <span className={styles.words}>no bid right now</span> : <span className={styles.figure}>
+                      {row.worthMicros === null ? (
+                        <span className={styles.words}>{offline ? "not known" : "no bid right now"}</span>
+                      ) : (
+                        <span className={styles.figure}>
                           <span className={styles.about}>about </span>
                           {formatDollars(row.worthMicros)}
-                        </span>}
+                        </span>
+                      )}
                       <span className={styles.sub}>{`pays ${formatDollars(row.fullPayoutMicros)} if ${row.side}`}</span>
                     </div>,
                     closes(row),
-                    <ButtonLink key="action" size="row" href={marketHref(row.market.symbol, row.side, "sell")}>
-                      Sell<span className="sr-only">{` ${title(row)}`}</span>
-                    </ButtonLink>,
+                    // A sale goes through the relayer, so it is not offered while the relayer is away.
+                    offline ? null : (
+                      <ButtonLink key="action" size="row" href={marketHref(row.market.symbol, row.side, "sell")}>
+                        Sell<span className="sr-only">{` ${title(row)}`}</span>
+                      </ButtonLink>
+                    ),
                   ]}
                 />
               ))}
@@ -249,7 +262,7 @@ export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, 
           empty="Nothing is waiting for a result."
         >
           {portfolio.awaiting.length > 0 && (
-            <RowList label="Positions awaiting a result" columns={AWAITING}>
+            <RowList label="Positions awaiting a result" columns={AWAITING} dense>
               {portfolio.awaiting.map((row) => (
                 <Row
                   key={row.mint}
@@ -259,7 +272,9 @@ export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, 
                     <span key="value" className={styles.figure}>{`${formatDollars(row.fullPayoutMicros)} if ${row.side}`}</span>,
                     <div key="time" className={styles.stack}>
                       <span className={styles.figure}>{formatClock(row.market.expiresAt, { timeZone })}</span>
-                      <span className={styles.sub}>{row.market.settleState === "needs_review" ? "result under review" : row.market.resolution ? "result in, settling" : "result not in yet"}</span>
+                      <span className={styles.sub}>
+                        {offline ? "not settled on Solana yet" : row.market.settleState === "needs_review" ? "result under review" : row.market.resolution ? "result in, settling" : "result not in yet"}
+                      </span>
                     </div>,
                     null,
                   ]}
@@ -279,7 +294,7 @@ export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, 
           {(redeemable.length > 0 || receipts.length > 0) && (
             <>
               {redeemable.length > 0 && (
-                <RowList label="Redeemable positions" columns={REDEEMABLE}>
+                <RowList label="Redeemable positions" columns={REDEEMABLE} dense>
                   {redeemable.map((row) => {
                     const won = (row.payoutMicros ?? 0n) > 0n;
                     return (
@@ -340,7 +355,7 @@ export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, 
           empty="No settled market is waiting for redemption to open."
         >
           {portfolio.opening.length > 0 && (
-            <RowList label="Positions whose redemption opens soon" columns={OPENING}>
+            <RowList label="Positions whose redemption opens soon" columns={OPENING} dense>
               {portfolio.opening.map((row) => (
                 <Row key={row.mint} cells={[<PositionCell key="position" row={row} words={resultWords(row.market, { timeZone })} />, tokens(row), pays(row), opens(row), null]} />
               ))}
@@ -354,9 +369,9 @@ export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, 
             title="Unknown market"
             count={portfolio.unknown.length}
             note={
-              unnamed
-                ? "The relayer is not answering, so these tokens cannot be matched to their markets right now. They are safe in your wallet."
-                : "Tokens in your wallet from a mint the relayer does not list. They cannot be valued or redeemed from here."
+              offline
+                ? "Nothing on Solana says which market these tokens belong to, and the relayer is not answering. They are safe in your wallet."
+                : "Tokens in your wallet that neither the relayer nor their accounts on Solana match to a market. They cannot be valued or redeemed from here."
             }
             empty=""
           >
@@ -418,6 +433,14 @@ export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, 
             </>
           )}
           {faucetWords && <span role="status">{faucetWords}</span>}
+        </div>
+      )}
+
+      {chainFailing && (
+        <div className={styles.problem}>
+          <Notice tone="caution" title="Solana devnet is not answering">
+            {portfolio === null ? "Your tokens could not be read yet. The page keeps trying; nothing is lost." : "Your tokens are shown as they were last read. The page keeps trying; nothing is lost."}
+          </Notice>
         </div>
       )}
 

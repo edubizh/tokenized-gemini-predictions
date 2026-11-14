@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ApiMarket } from "@outcome/relayer/api-types";
+import { knownMarkets } from "@/features/markets/known";
+import type { ChainMarket } from "@/lib/chain/reads";
 import { buildFixtures, fixtureAddress } from "@/lib/relayer/fixtures";
 import { buildPortfolio, resultWords, sideStatement } from "./positions";
 
@@ -155,5 +157,64 @@ describe("resultWords", () => {
   it("says less when the venue gave no final price, and spells out a split settlement", () => {
     expect(resultWords({ ...settledYes, settlementValue: null })).toBe("Result: YES.");
     expect(resultWords({ ...settledYes, onchain: { ...settledYes.onchain!, yesPayout: "5000", noPayout: "5000" } })).toBe("Settled as a split: YES pays $0.50 and NO pays $0.50 per contract.");
+  });
+});
+
+describe("positions without the relayer", () => {
+  const CLOSE = Math.floor(Date.UTC(2026, 10, 14, 22, 0, 0) / 1000);
+  const account = (id: string, over: Partial<ChainMarket> = {}): ChainMarket => ({
+    address: `market-${id}`,
+    symbol: `GEMI-${id}15M2611142200-UP`,
+    yesMint: `yes-${id}`,
+    noMint: `no-${id}`,
+    status: "open",
+    closeTs: CLOSE,
+    placeCutoffSecs: 60,
+    tickPx: 100,
+    yesPayout: 0n,
+    noPayout: 0n,
+    redeemAfter: 0,
+    tokenName: `${id} Up 22:00Z 14 Nov YES`,
+    ...over,
+  });
+  const accounts = [
+    account("BTC"),
+    account("ETH", { closeTs: CLOSE - 900 }),
+    account("SOL", { closeTs: CLOSE - 1800, status: "settled", yesPayout: 10_000n, noPayout: 0n, redeemAfter: CLOSE - 1500 }),
+    account("XRP", { closeTs: CLOSE - 900, status: "settled", yesPayout: 0n, noPayout: 10_000n, redeemAfter: CLOSE + 60 }),
+    account("DOGE", { tokenName: null }),
+  ];
+  const markets = knownMarkets({ relayer: undefined, chain: accounts, offline: true });
+  const clock = { wallMs: (CLOSE - 300) * 1000, chainSecs: CLOSE - 300 };
+  const held = [
+    { mint: "yes-BTC", units: 300n },
+    { mint: "no-ETH", units: 100n },
+    { mint: "yes-SOL", units: 500n },
+    { mint: "no-SOL", units: 50n },
+    { mint: "no-XRP", units: 200n },
+    { mint: "yes-DOGE", units: 700n },
+  ];
+
+  it("groups tokens from their market accounts alone", () => {
+    const portfolio = buildPortfolio(held, markets, clock);
+    expect(portfolio.live.map((row) => [row.mint, row.worthMicros])).toEqual([["yes-BTC", null]]);
+    expect(portfolio.awaiting.map((row) => row.mint)).toEqual(["no-ETH"]);
+    expect(portfolio.redeemable.map((row) => [row.mint, row.side, row.payoutMicros])).toEqual([
+      ["yes-SOL", "YES", 5_000_000n],
+      ["no-SOL", "NO", 0n],
+    ]);
+    expect(portfolio.opening.map((row) => [row.mint, row.payoutMicros, row.redeemAfter])).toEqual([["no-XRP", 2_000_000n, CLOSE + 60]]);
+    // The market account is what Redeem and Clear need.
+    expect(portfolio.redeemable[0]?.market.onchain?.market).toBe("market-SOL");
+  });
+
+  it("lists by mint what nothing names", () => {
+    expect(buildPortfolio(held, markets, clock).unknown).toEqual([{ mint: "yes-DOGE", units: 700n }]);
+  });
+
+  it("words a side without a price to beat", () => {
+    const btc = markets.find((market) => market.underlying === "BTC")!;
+    expect(sideStatement(btc, "NO", { timeZone: "UTC" })).toBe("NO pays $1.00 if BTC is below its price to beat at 10:00 PM UTC.");
+    expect(resultWords(markets.find((market) => market.underlying === "SOL")!, { timeZone: "UTC" })).toBe("Result: YES.");
   });
 });

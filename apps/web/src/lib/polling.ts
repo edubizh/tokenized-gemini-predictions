@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { startPoller } from "./poller";
 
 export interface Polled<T> {
   /** The last good value; kept while a later attempt fails. */
@@ -9,13 +10,14 @@ export interface Polled<T> {
   error: Error | null;
   /** True until the first attempt has finished. */
   loading: boolean;
-  /** Runs the function now, unless a run is already in flight. */
+  /** Runs the function now; during a run, once more as soon as it ends. */
   refresh(): void;
 }
 
 /**
  * Calls `fn` now and then every `intervalMs`. Runs never overlap, and nothing runs while the tab
- * is hidden; it catches up when the tab is shown again. Pass `null` as the interval to stop.
+ * is hidden; it catches up when the tab is shown again. A failed run keeps the last good value.
+ * Pass `null` as the interval to stop.
  */
 export function usePolling<T>(fn: (signal: AbortSignal) => Promise<T>, intervalMs: number | null): Polled<T> {
   const [state, setState] = useState<{ data: T | undefined; error: Error | null; loading: boolean }>({ data: undefined, error: null, loading: true });
@@ -25,37 +27,20 @@ export function usePolling<T>(fn: (signal: AbortSignal) => Promise<T>, intervalM
 
   useEffect(() => {
     if (intervalMs === null) return;
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let running = false;
-
-    const run = async () => {
-      if (running || controller.signal.aborted) return;
-      clearTimeout(timer);
-      if (document.hidden) return;
-      running = true;
-      try {
-        const data = await latest.current(controller.signal);
-        if (!controller.signal.aborted) setState({ data, error: null, loading: false });
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          setState((previous) => ({ data: previous.data, error: error instanceof Error ? error : new Error(String(error)), loading: false }));
-        }
-      } finally {
-        running = false;
-        if (!controller.signal.aborted) timer = setTimeout(run, intervalMs);
-      }
-    };
+    const poller = startPoller<T>({
+      fn: (signal) => latest.current(signal),
+      intervalMs,
+      onData: (data) => setState({ data, error: null, loading: false }),
+      onError: (error) => setState((previous) => ({ data: previous.data, error, loading: false })),
+      paused: () => document.hidden,
+    });
     const onVisibility = () => {
-      if (!document.hidden) void run();
+      if (!document.hidden) poller.refresh();
     };
-
-    trigger.current = () => void run();
+    trigger.current = poller.refresh;
     document.addEventListener("visibilitychange", onVisibility);
-    void run();
     return () => {
-      controller.abort();
-      clearTimeout(timer);
+      poller.stop();
       document.removeEventListener("visibilitychange", onVisibility);
       trigger.current = () => {};
     };

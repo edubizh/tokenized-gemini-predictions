@@ -41,6 +41,9 @@
 }
 
 .index a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   color: var(--ink-2);
   text-decoration-color: transparent;
 }

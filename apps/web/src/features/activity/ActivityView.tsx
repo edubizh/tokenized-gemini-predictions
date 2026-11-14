@@ -40,6 +40,8 @@ export interface ActivityReclaim {
 export interface ActivityViewProps extends TimeOptions {
   /** Newest first. Null until the orders have been read. */
   rows: readonly ActivityRow[] | null;
+  /** True while the relayer is not answering: only what Solana and this browser know is listed. */
+  offline?: boolean;
   /** The wall clock the list is drawn for, unix milliseconds. */
   nowMs: number;
   /** The cluster clock, unix milliseconds: order deadlines are on-chain. */
@@ -129,7 +131,7 @@ function OrderReceiptView({ row, txUrl, addressUrl }: { row: ActivityRow; txUrl(
 }
 
 /** Orders newest first as ruled rows; each opens in place into its steps and its receipt. */
-export function ActivityView({ rows, nowMs, chainNow, frozenAtMs, onExpired, reclaim, txUrl, addressUrl, defaultExpanded, timeZone }: ActivityViewProps) {
+export function ActivityView({ rows, offline = false, nowMs, chainNow, frozenAtMs, onExpired, reclaim, txUrl, addressUrl, defaultExpanded, timeZone }: ActivityViewProps) {
   // What the user opened or closed. An order whose hold can be reclaimed starts open, so the
   // Reclaim button is on screen without a click.
   const [chosen, setChosen] = useState<ReadonlyMap<string, boolean>>(() => new Map((defaultExpanded ?? []).map((address) => [address, true])));
@@ -140,7 +142,7 @@ export function ActivityView({ rows, nowMs, chainNow, frozenAtMs, onExpired, rec
     return (
       <div aria-busy="true">
         <span className="sr-only">Loading your orders</span>
-        <RowList label="Your orders, loading" columns={COLUMNS}>
+        <RowList label="Your orders, loading" columns={COLUMNS} dense>
           {[0, 1, 2].map((index) => (
             <Row
               key={index}
@@ -161,6 +163,9 @@ export function ActivityView({ rows, nowMs, chainNow, frozenAtMs, onExpired, rec
       </div>
     );
   }
+  if (rows.length === 0 && offline) {
+    return <EmptyState>You have no open orders on Solana. Orders that have finished are listed again when the relayer answers.</EmptyState>;
+  }
   if (rows.length === 0) {
     return <EmptyState action={<ButtonLink href="/markets">See live markets</ButtonLink>}>No orders yet. Each order you place is listed here, with every step it took and its receipt.</EmptyState>;
   }
@@ -168,7 +173,12 @@ export function ActivityView({ rows, nowMs, chainNow, frozenAtMs, onExpired, rec
   const today = day(nowMs, timeZone);
   return (
     <>
-      <RowList label="Your orders" columns={COLUMNS}>
+      {offline && (
+        <p className={styles.offline} role="status">
+          Listed while the relayer is away: orders still open on Solana, each of which can be reclaimed once it expires, and earlier orders as they were last known. An order that finished in the meantime is listed again when the relayer answers.
+        </p>
+      )}
+      <RowList label="Your orders" columns={COLUMNS} dense>
         {rows.map((row) => {
           const { timeline } = row;
           const open = isOpen(row);

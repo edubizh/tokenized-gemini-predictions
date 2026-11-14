@@ -31,10 +31,16 @@ export interface OrderSources {
   open: { orders: readonly OpenOrder[]; startedAt: number } | undefined;
   local: Readonly<Record<string, LocalOrder>>;
   nowMs: number;
+  /**
+   * True while the relayer is not answering. An order whose account has left Solana, that the
+   * user did not reclaim and that the relayer's last answer does not record, was either filled or
+   * refunded; nothing known says which, so it is left out until the relayer answers.
+   */
+  relayerAway?: boolean;
 }
 
 /** Newest first. */
-export function orderEntries({ api, open, local, nowMs }: OrderSources): OrderEntry[] {
+export function orderEntries({ api, open, local, nowMs, relayerAway = false }: OrderSources): OrderEntry[] {
   const addresses = new Set<string>();
   for (const order of api ?? []) addresses.add(order.address);
   for (const order of open?.orders ?? []) addresses.add(order.address);
@@ -53,5 +59,6 @@ export function orderEntries({ api, open, local, nowMs }: OrderSources): OrderEn
       const placedAt = mine?.placedAt ?? apiOrder?.createdAt ?? null;
       return { address, api: apiOrder, chain, local: mine, at: placedAt ?? nowMs, placedAt, symbol: apiOrder?.symbol ?? mine?.symbol ?? null, marketAddress: chain?.market ?? null };
     })
+    .filter((entry) => !(relayerAway && entry.api === null && entry.chain === null && !entry.local?.reclaimSignature))
     .sort((a, b) => b.at - a.at);
 }

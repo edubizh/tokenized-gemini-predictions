@@ -8,9 +8,10 @@
 // the markets list, a market with its ticket, an order followed from the ticket to its receipt
 // (filled, not filled, reclaimed), a sale from the portfolio through the ticket's sell tab (filled,
 // and not filled with the tokens returned), the portfolio with a redemption, the activity list
-// with an order opened, and a wallet login after a page reload, where Reconnect wallet takes the
-// place of the action. The order, sale and redemption screens run only in fixtures mode, where
-// nothing reaches a chain.
+// with an order opened, every page with the relayer offline and the portfolio with Solana not
+// answering (both through the fixtures switch), the not-found and error pages, and a wallet login
+// after a page reload, where Reconnect wallet takes the place of the action. The order, sale,
+// redemption and offline screens run only in fixtures mode, where nothing reaches a chain.
 // The test login is read from PRIVY_TEST_EMAIL and PRIVY_TEST_OTP and is never printed.
 import { chromium } from "@playwright/test";
 import { existsSync, mkdirSync } from "node:fs";
@@ -34,8 +35,11 @@ const context = await browser.newContext({ viewport: VIEWPORTS[0], deviceScaleFa
 const page = await context.newPage();
 const problems = [];
 page.on("pageerror", (error) => problems.push(`pageerror: ${String(error).slice(0, 300)}`));
+// The browser itself logs every failed request. Those the script causes on purpose are not problems:
+// the page that does not exist (404), the relayer switched off (502), the chain switched off (429).
+const EXPECTED = /Failed to load resource: the server responded with a status of (404|502|429)/;
 page.on("console", (message) => {
-  if (message.type() === "error") problems.push(`console.error: ${message.text().slice(0, 300)}`);
+  if (message.type() === "error" && !EXPECTED.test(message.text())) problems.push(`console.error: ${message.text().slice(0, 300)}`);
 });
 
 async function settle() {
@@ -63,7 +67,7 @@ for (const viewport of VIEWPORTS) {
   await page.waitForSelector("#welcome");
   await shoot(`gallery-${viewport.name}`, { fullPage: true });
   // The trading sections one by one, as the whole page is too long to read at a glance.
-  for (const id of ["network-strip", "welcome", "relayer-notice", "markets-list", "market-header", "ticket", "ticket-panels", "order-paths", "reconnect", "position", "portfolio", "activity", "system"]) {
+  for (const id of ["network-strip", "welcome", "relayer-notice", "markets-list", "market-header", "ticket", "ticket-panels", "order-paths", "reconnect", "position", "portfolio", "activity", "system", "offline", "chain-failing", "problem-pages"]) {
     await page.locator(`#${id}`).screenshot({ path: path.join(OUT, `gallery-${id}-${viewport.name}.png`) });
   }
 
@@ -71,7 +75,26 @@ for (const viewport of VIEWPORTS) {
   await page.goto(`${BASE}/system`, { waitUntil: "networkidle" });
   await page.getByRole("table", { name: "Reconciliation by market" }).waitFor({ timeout: 30_000 });
   await shoot(`system-${viewport.name}`, { fullPage: true });
+
+  // An address with nothing behind it, and a page that throws while drawing (development only).
+  await page.goto(`${BASE}/no-such-page`, { waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: "There is nothing at this address" }).waitFor({ timeout: 30_000 });
+  await shoot(`not-found-${viewport.name}`);
 }
+
+// 1b. A page that throws while drawing shows the error page, not the framework's.
+await page.setViewportSize(VIEWPORTS[0]);
+const beforeThrow = problems.length;
+await page.goto(`${BASE}/dev/throw`, { waitUntil: "networkidle" });
+const errorPage = page.getByRole("heading", { name: "This page could not be shown" });
+if (await errorPage.isVisible().catch(() => false)) {
+  await shoot("error-1280");
+} else {
+  // The development overlay can sit on top of it; the error page is still in the document.
+  console.log("error page in the document:", (await errorPage.count()) > 0);
+}
+// The page that throws on purpose logs its error; that one is expected.
+problems.splice(beforeThrow);
 
 // 2. Keyboard focus, to check the ring.
 await page.setViewportSize(VIEWPORTS[0]);
@@ -255,6 +278,73 @@ if (!fixtures) {
       await page.waitForFunction((count) => document.querySelectorAll('[data-testid="redemption-receipt"]').length > count, had, { timeout: 30_000 });
     }
     await shootBoth("portfolio-redeemed");
+
+    // Scrolled, in a real viewport: the fixed notice stays above the page and covers no control.
+    await page.goto(`${BASE}/activity`, { waitUntil: "networkidle" });
+    await orders.waitFor({ timeout: 30_000 });
+    for (const viewport of VIEWPORTS) {
+      await page.setViewportSize(viewport);
+      await page.evaluate(() => window.scrollTo(0, 420));
+      await shoot(`scrolled-${viewport.name}`);
+    }
+    await page.setViewportSize(VIEWPORTS[0]);
+
+    // Without the relayer. The switch makes the proxy answer as it does for an unreachable relayer;
+    // balances, tokens and open orders still come from the (simulated) chain.
+    await page.goto(`${BASE}/markets`, { waitUntil: "networkidle" });
+    const liveMarket = await page.getByRole("row").filter({ hasText: "BTC Up" }).filter({ hasText: "YES" }).first().getByRole("link", { name: "BTC Up", exact: true }).getAttribute("href");
+    await page.request.get(`${BASE}/api/fixtures/switch?relayer=offline`);
+    try {
+      const offlineTitle = page.getByText("The relayer is not answering").first();
+      await page.goto(`${BASE}/markets`, { waitUntil: "networkidle" });
+      await offlineTitle.waitFor({ timeout: 30_000 });
+      await shootBoth("offline-markets");
+
+      await page.goto(`${BASE}${liveMarket}`, { waitUntil: "networkidle" });
+      await page.getByText("Orders cannot be placed right now").waitFor({ timeout: 30_000 });
+      await shootBoth("offline-market");
+
+      await page.goto(`${BASE}/portfolio`, { waitUntil: "networkidle" });
+      await offlineTitle.waitFor({ timeout: 30_000 });
+      const offlineRedeemable = page.getByRole("table", { name: "Redeemable positions" });
+      await page.getByRole("table", { name: "Live positions" }).waitFor({ timeout: 30_000 });
+      await shootBoth("offline-portfolio");
+      // Redeem needs only Solana. The fixture cycle may have left nothing to redeem by now.
+      const offlineAction = offlineRedeemable.getByRole("button", { name: /^(Redeem|Clear) / }).first();
+      if (await offlineAction.isVisible().catch(() => false)) {
+        const had = await page.locator('[data-testid="redemption-receipt"]').count();
+        await offlineAction.click();
+        await page.waitForFunction((count) => document.querySelectorAll('[data-testid="redemption-receipt"]').length > count, had, { timeout: 30_000 });
+        await shoot("offline-portfolio-redeemed-1280", { fullPage: true });
+        console.log("a position was redeemed or cleared with the relayer offline: true");
+      } else {
+        console.log("nothing redeemable on screen while offline (redeemed earlier in this fixture cycle)");
+      }
+
+      await page.goto(`${BASE}/activity`, { waitUntil: "networkidle" });
+      await page.getByText("Listed while the relayer is away").waitFor({ timeout: 30_000 });
+      await shootBoth("offline-activity");
+
+      await page.goto(`${BASE}/system`, { waitUntil: "networkidle" });
+      await page.getByText("Not known while the relayer is not answering.").first().waitFor({ timeout: 30_000 });
+      await shootBoth("offline-system");
+    } finally {
+      await page.request.get(`${BASE}/api/fixtures/switch?relayer=online`);
+    }
+
+    // Solana not answering: every chain read fails as a rate-limited endpoint does. What was read
+    // before stays on screen, with a notice.
+    await page.goto(`${BASE}/portfolio`, { waitUntil: "networkidle" });
+    await page.getByRole("table", { name: "Live positions" }).waitFor({ timeout: 30_000 });
+    const balanceBefore = await balance.innerText();
+    await page.request.get(`${BASE}/api/fixtures/switch?chain=failing`);
+    try {
+      await page.getByText("Solana devnet is not answering").first().waitFor({ timeout: 40_000 });
+      console.log("balance kept while chain reads fail:", (await balance.innerText()) === balanceBefore, "| live positions still listed:", await page.getByRole("table", { name: "Live positions" }).isVisible());
+      await shootBoth("chain-failing-portfolio");
+    } finally {
+      await page.request.get(`${BASE}/api/fixtures/switch?chain=ok`);
+    }
   } catch (error) {
     // What was on screen when a step failed says more than the stack does.
     await page.screenshot({ path: path.join(OUT, "failure.png"), fullPage: true }).catch(() => {});

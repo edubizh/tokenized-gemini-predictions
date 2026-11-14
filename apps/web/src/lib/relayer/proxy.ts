@@ -49,3 +49,24 @@ export function matchRoute(method: string, segments: readonly string[], search: 
   if (head === "orders" && ADDRESS.test(id)) return { kind: "order", address: id, upstream: `/orders/${id}` };
   return null;
 }
+
+/** Cookies that make the simulated relayer and chain of fixtures mode fail, to drive those states. */
+export const FIXTURE_RELAYER_COOKIE = "fixtures-relayer";
+export const FIXTURE_CHAIN_COOKIE = "fixtures-chain";
+
+export interface FixtureSwitches {
+  /** The proxy answers as it does when the relayer cannot be reached. */
+  relayerOffline: boolean;
+  /** Chain reads answer HTTP 429, as a rate-limited RPC endpoint does. */
+  chainFailing: boolean;
+}
+
+/** Reads the switches from a request's `cookie` header. Honoured in fixtures mode only. */
+export function fixtureSwitches(cookieHeader: string | null): FixtureSwitches {
+  const cookies = new Map<string, string>();
+  for (const part of (cookieHeader ?? "").split(";")) {
+    const at = part.indexOf("=");
+    if (at > 0) cookies.set(part.slice(0, at).trim(), part.slice(at + 1).trim());
+  }
+  return { relayerOffline: cookies.get(FIXTURE_RELAYER_COOKIE) === "offline", chainFailing: cookies.get(FIXTURE_CHAIN_COOKIE) === "failing" };
+}

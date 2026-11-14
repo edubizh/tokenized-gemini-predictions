@@ -5,7 +5,7 @@ import { useEffect, type ReactNode } from "react";
 import { Shell } from "@/components/shell/Shell";
 import { Notice } from "@/components/ui/Notice";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { RelayerNotice } from "@/features/markets/RelayerNotice";
+import { ChainNotice, RelayerNotice } from "@/features/markets/RelayerNotice";
 import { useConfig } from "@/lib/config";
 import { useAccount } from "@/lib/privy/account";
 
@@ -40,7 +40,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     <Shell>
       {verdict === "allow" ? (
         <>
-          <RelayerNotice />
+          <RelayerNotice offlineShownInPlace={pathname.startsWith("/markets")} />
+          <ChainNotice />
           {children}
         </>
       ) : (

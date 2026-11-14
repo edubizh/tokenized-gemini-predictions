@@ -341,3 +341,10 @@
   line-height: var(--leading-sm);
   color: var(--ink-2);
 }
+
+/* Under the offline notice on the markets list: where the user's own things still are. */
+.offlineNote {
+  max-width: 44rem;
+  margin-top: var(--space-4);
+  color: var(--ink-2);
+}

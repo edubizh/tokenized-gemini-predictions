@@ -159,3 +159,34 @@ describe("the simulated chain and relayer: place_sell", () => {
     expect(held(world, live.onchain!.yesMint)).toBe("300");
   });
 });
+
+describe("the simulated chain: markets", () => {
+  it("finds a market by one of its mints, with the name its token carries", () => {
+    const { world, live } = setup();
+    const found = world.chainMarkets({ mints: [live.onchain!.noMint] }, NOW);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      address: live.onchain!.market,
+      symbol: live.symbol,
+      yesMint: live.onchain!.yesMint,
+      noMint: live.onchain!.noMint,
+      status: "open",
+      closeTs: live.onchain!.closeTs,
+      yesPayout: "0",
+      noPayout: "0",
+      redeemAfter: 0,
+    });
+    expect(found[0]?.tokenName).toMatch(/^BTC Up \d{2}:\d{2}Z \d{1,2} [A-Z][a-z]{2} YES$/);
+  });
+
+  it("carries a settlement's payouts and the time redemption opens", () => {
+    const { world, won } = setup();
+    expect(world.chainMarkets({ markets: [won.onchain!.market] }, NOW)[0]).toMatchObject({ status: "settled", yesPayout: "10000", noPayout: "0", redeemAfter: won.onchain!.redeemAfter });
+  });
+
+  it("answers once per market however it was asked for, and not at all for what it does not hold", () => {
+    const { world, live, lost } = setup();
+    const found = world.chainMarkets({ mints: [live.onchain!.yesMint, live.onchain!.noMint, fixtureAddress("someone-else's-mint")], markets: [live.onchain!.market], symbols: [live.symbol, lost.symbol, "GEMI-NOSUCH-UP"] }, NOW);
+    expect(found.map((market) => market.symbol).sort()).toEqual([live.symbol, lost.symbol].sort());
+  });
+});

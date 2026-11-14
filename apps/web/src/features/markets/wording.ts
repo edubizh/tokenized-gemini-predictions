@@ -63,9 +63,21 @@ export function closesLine(market: Pick<ApiMarket, "expiresAt">, options: TimeOp
   return `closes ${formatClock(market.expiresAt, options)}`;
 }
 
+/** The `venueStatus` of a market read from Solana alone: nothing the venue says about it is known. */
+export const VENUE_NOT_KNOWN = "not_known";
+
+/** False for a market put together from its accounts on Solana while the relayer is not answering. */
+export function venueKnown(market: { venueStatus?: string }): boolean {
+  return market.venueStatus !== VENUE_NOT_KNOWN;
+}
+
 /** What YES pays for, in one or two sentences. */
-export function payoutStatement(market: Pick<ApiMarket, "underlying" | "label" | "strike" | "startsAt" | "expiresAt">, options: TimeOptions = {}): string {
+export function payoutStatement(market: Pick<ApiMarket, "underlying" | "label" | "strike" | "startsAt" | "expiresAt"> & { venueStatus?: string }, options: TimeOptions = {}): string {
   if (market.label !== "Up") return `YES pays $1.00 if: ${market.label}.`;
+  if (market.strike === null && !venueKnown(market)) {
+    const close = formatClock(market.expiresAt, { ...options, zone: true });
+    return `YES pays $1.00 if ${market.underlying} is at or above its price to beat at ${close}. NO pays $1.00 otherwise. The price to beat is not known while the relayer is not answering.`;
+  }
   if (market.strike === null) return `The reference price is set when the window opens at ${formatClock(market.startsAt, options)}.`;
   const close = formatClock(market.expiresAt, { ...options, zone: true });
   return `YES pays $1.00 if ${market.underlying} is at or above ${formatStrike(market.strike)} at ${close}. NO pays $1.00 otherwise.`;
