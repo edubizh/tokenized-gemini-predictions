@@ -38,3 +38,11 @@ coverage/
 
 # OS
 .DS_Store
+
+# Next.js
+next-env.d.ts
+*.tsbuildinfo
+
+# Playwright
+test-results/
+playwright-report/

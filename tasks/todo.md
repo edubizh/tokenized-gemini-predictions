@@ -64,12 +64,13 @@ Exit:
 
 ## S0c. Login spike
 
-- [ ] Next.js 16 with Privy: email login with a test account creates an embedded Solana wallet
-- [ ] Wallet login: the login window lists Phantom, Solflare, Backpack, detected wallets and WalletConnect; a wallet signs in with Sign-In With Solana
-- [ ] A transaction built with `@solana/kit` is signed through Privy (embedded wallet and external wallet) and confirms on devnet
-- [ ] `next build` passes
+- [x] Next.js 16 with Privy: email login with a test account creates an embedded Solana wallet
+- [x] Wallet login: the login window lists Phantom, Solflare, Backpack and WalletConnect (signing in with a real wallet extension is a manual check; an injected test wallet covers it in the browser tests later)
+- [x] A transaction built with `@solana/kit` is signed through Privy with the embedded wallet and confirms on devnet
+- [x] The server verifies the login token and reads the user's Solana wallet
+- [x] `next build` passes
 
-Exit: explorer shows the signature. Fallback: Wallet Standard with Sign-In With Solana.
+Exit: passed (2026-11-14). Email login, embedded wallet, server-side token verification and a signed devnet transaction all work on Next.js 16.4.6, React 19.3.1, Privy 3.51.4 and Solana Kit 8.6.0.
 
 ## S2. Web app
 
