@@ -146,3 +146,84 @@ Not done, and why:
 - Killing the relayer between the venue order and the on-chain fill has not been forced on live infrastructure; the pipeline's crash tests cover it.
 - The sandbox's market makers quote only part of the time. When a book is empty every order is refunded; `pnpm dev:mock` runs the same system against a simulated venue.
 - The known limits of the design are listed in [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
+
+# Phase 2
+
+Requested on 2026-11-14, after the prototype. Three goals, each with an exit test:
+
+1. **Redesign.** The whole site becomes very simple, clean and calm: few components, four theme colours (forest green, jade green, a peach that is almost white, white), a see-through navbar, and the feel of entering an on-chain prediction-market platform.
+2. **Every market.** Everything the sandbox lists is shown to everyone and tradable after login, not only the 15-minute contracts, with event and market pages as complete as on other prediction-market platforms. A Vaults tab is added as a placeholder.
+3. **Wallet login with real wallets.** Phantom waits on "Sign to verify" with no window, and MetaMask does not connect. Login is tested with real extensions and fixed.
+
+The order below is the build order. P0 is read-only; P1, P2 and P3 are independent of each other; P4 needs P2 and the API types of P3.
+
+## P0. Groundwork
+
+- [ ] How Polymarket, Kalshi, Gemini Predictions, Robinhood and two or three on-chain platforms lay out the markets index, the event page, the market page and the trade panel, ending in the list of parts these pages get here
+- [ ] The venue's full market model, measured on the live sandbox API: listing and pagination, binary and categorical events, price and quantity steps, market data (book, trades, price history), how strike ladders and long-dated events settle, review and invalid states, rate limits
+- [ ] The two wallet failures reproduced with real extensions in a test browser, with the cause of each
+
+## P1. Wallet login with real wallets (goal 3)
+
+- [ ] Test harness: Chromium with the unpacked Phantom and MetaMask extensions (Solflare and Backpack if they load the same way), each with a wallet created by the test
+- [ ] Cause found for "Phantom waits on Sign to verify and no window opens" and for "MetaMask does not connect"
+- [ ] Fix with the smallest correct change
+- [ ] Every step that waits for a wallet says what it is waiting for and offers retry and cancel
+- [ ] A wallet that cannot sign for Solana gets a clear message instead of a dead end; the supported wallets are stated plainly
+- [ ] Matrix below filled in for each wallet
+
+Matrix (one row per case, one column per wallet): first login (connect, then sign); the user rejects the connection; the user rejects or closes the signature; wallet locked; wallet on another network or Testnet Mode off; two wallets installed; log out and in again; switch account inside the wallet; reload, then Reconnect; first-run test funds; place an order and reach FILLED or REFUNDED; redeem; Reclaim. Email login keeps passing its checks.
+
+Exit: every row passes for Phantom and for MetaMask (through its Solana account) with real extensions on a live stack; no path hangs without a message; unit tests and browser checks pass.
+
+## P2. Design system (goal 1, first half)
+
+- [ ] The four colours chosen and every text and control pairing checked numerically against WCAG AA
+- [ ] `docs/DESIGN.md` and `docs/PRODUCT.md` rewritten for the new direction
+- [ ] Tokens, one typeface with tabular numerals, and the few primitives
+- [ ] Shell: see-through navbar (Markets, Portfolio, Activity, Vaults, the network, the wallet and its balance), a quiet devnet mark, the footer line
+- [ ] Looked at in a browser at 1280 and 390 wide before any page is built on it
+
+Exit: the reference page shows every primitive and state at both widths; contrast figures are in DESIGN.md; nothing uses a fifth hue (one muted error tone is the single written exception).
+
+## P3. Every market: relayer and API (goal 2, back end)
+
+- [ ] API types first: event grouping, category, description and rules, resolution source, dates, volume, image, per-contract label and strike; price history, depth and recent trades for one market
+- [ ] Discovery of every active event and contract in place of the curated series list, inside the venue's rate limits
+- [ ] A market is still created on-chain only when someone opens or trades it
+- [ ] Token names and tickers for strike contracts (32 and 10 bytes)
+- [ ] Settlement and reconciliation for strike ladders and long-dated events: early resolution, review, invalid
+- [ ] The simulated venue offers the same variety, so the demo and the tests are deterministic
+- [ ] Program: tick, minimum quantity, close and cutoff times confirmed against the wider set of contracts; changed and redeployed only if something does not fit
+
+Exit: with the stack running, every active sandbox event and contract appears within a poll or two; a contract with offers can be bought and sold and then settles and redeems; a contract without offers says so; tests cover discovery, grouping and the new settlement cases.
+
+## P4. Web app rebuilt (goals 1 and 2, front end)
+
+- [ ] Markets index for everyone: categories, search, sort, live and upcoming, quoted first
+- [ ] Event page: every contract of the event with its prices
+- [ ] Market page: question and rules, resolution source and terms, close and settlement times with a countdown, price chart, order book or best bid and ask, recent trades, volume, the user's position and orders, the trade panel
+- [ ] Logged out, the trade panel asks for a login and nothing else is hidden; the login gate no longer covers the market pages
+- [ ] Portfolio, Activity, Vaults (placeholder), System, Welcome, not-found, error and offline states on the new design
+- [ ] Old components and tokens deleted; fixtures and the reference page updated or cut down
+
+Exit: every route is rebuilt and reviewed in screenshots at 1280 and 390; no component or token of the old theme is left; tests, the build and the browser checks pass on the new markup.
+
+## P5. Verification
+
+- [ ] Unit tests, type-checks and builds of every package
+- [ ] Screenshots of every route and state at both widths, checked against DESIGN.md
+- [ ] Live on devnet with the sandbox: a 15-minute contract, a strike-ladder contract and a commodity contract each bought, settled and redeemed, with reconciliation balanced
+- [ ] The wallet matrix with real extensions on the live stack
+- [ ] A run with the relayer stopped
+- [ ] An independent review of each track
+
+## P6. Documentation
+
+- [ ] README, ARCHITECTURE and SCOPE brought up to date
+- [ ] Phase 2 review below: what changed, what was verified, what is not done
+- [ ] Lessons
+
+## Phase 2 review
+
+To be written when the phase is finished.
