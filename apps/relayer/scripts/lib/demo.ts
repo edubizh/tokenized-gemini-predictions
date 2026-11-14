@@ -12,9 +12,14 @@ import {
   type KeyPairSigner,
 } from "@solana/kit";
 import {
+  fetchMarket,
+  fetchMaybeMarket,
+  fetchMaybeOrder,
   fetchMaybeTrader,
   fetchTrader,
+  findMarketPda,
   findTraderPda,
+  getCancelOrderInstructionAsync,
   getPlaceBuyInstructionAsync,
   getPlaceSellInstructionAsync,
   getRedeemInstructionAsync,
@@ -37,10 +42,14 @@ import { ensureKeypairFile, loadKeypairSigner } from "../../src/chain/keys.ts";
 import { createRetryingRpc } from "../../src/chain/rpc.ts";
 import { createSender } from "../../src/chain/send.ts";
 import { complementPx, feeCap, formatPx, formatUnits, parsePx, parseUnits, PAYOUT_PER_UNIT } from "../../src/money.ts";
+import { fetchSysvarClock } from "@solana/sysvars";
 import { assertClusterAllowed, LOCALNET_RPC_URL, type Cluster, type Deployment } from "./bootstrap.ts";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 const COMMITMENT = "confirmed";
+/** The relayer's default fee slack, used when it cannot be asked. */
+const DEFAULT_FEE_SLACK = 30_000n;
 const DUSD = 1_000_000n;
 const STARTER_DUSD = 1_000n * DUSD;
 const STARTER_LAMPORTS = 50_000_000n;
@@ -52,6 +61,7 @@ const USAGE = `usage: node scripts/demo.ts <command>
   buy  <symbol|auto> <yes|no> <contracts> [limit]    place a buy and follow it (limit in dollars, default: the ask)
   sell <symbol> <yes|no> <contracts> [minimum]       sell tokens back (minimum in dollars, default: the bid)
   redeem <symbol>                                redeem every token of a settled market
+  reclaim <order address>                        take back the hold of an expired order (works without the relayer)
   status                                         balances and positions`;
 
 function say(line: string): void {
@@ -86,7 +96,7 @@ async function api<T>(base: string, route: string, method: "GET" | "POST" = "GET
 
 export async function runCli(argv: readonly string[], env: Record<string, string | undefined>): Promise<number> {
   const [command, ...rest] = argv;
-  if (command === undefined || !["setup", "markets", "buy", "sell", "redeem", "status"].includes(command)) {
+  if (command === undefined || !["setup", "markets", "buy", "sell", "redeem", "reclaim", "status"].includes(command)) {
     console.error(USAGE);
     return 2;
   }
@@ -193,33 +203,79 @@ export async function runCli(argv: readonly string[], env: Record<string, string
     return 0;
   }
 
+  if (command === "reclaim") {
+    const orderText = rest[0];
+    if (!orderText) throw new Error("usage: reclaim <order address>");
+    const orderAddress = address(orderText);
+    const open = await fetchMaybeOrder(rpc, orderAddress, { commitment: COMMITMENT });
+    if (!open.exists) {
+      say("that order is already closed: it was filled, cancelled or reclaimed");
+      return 0;
+    }
+    const clock = Number((await fetchSysvarClock(rpc, { commitment: COMMITMENT })).unixTimestamp);
+    const left = Number(open.data.expiresAt) - clock;
+    if (left >= 0) {
+      say(`the order expires in ${left + 1} s; waiting`);
+      await sleep((left + 3) * 1000);
+    }
+    const sell = open.data.kind === 1;
+    const onMarket = await fetchMarket(rpc, open.data.market, { commitment: COMMITMENT });
+    const escrowMint = !sell ? stableMint : open.data.side === Side.Yes ? onMarket.data.yesMint : onMarket.data.noMint;
+    const tokenProgram = sell ? TOKEN_2022_PROGRAM_ADDRESS : TOKEN_PROGRAM_ADDRESS;
+    const [userToken] = await findAssociatedTokenPda({ owner: open.data.user, mint: escrowMint, tokenProgram });
+    const before = await stableBalance();
+    const signature = await sender.send(user, [
+      await getCreateAssociatedTokenIdempotentInstructionAsync({ payer: user, owner: open.data.user, mint: escrowMint, tokenProgram }),
+      await getCancelOrderInstructionAsync({ caller: user, market: open.data.market, order: orderAddress, escrowMint, userToken, rentPayer: open.data.rentPayer, tokenProgram }),
+    ]);
+    say(`reclaimed in ${signature}`);
+    say(`  test dollars: ${dollars((await stableBalance()) - before)}`);
+    await printBalances();
+    return 0;
+  }
+
   // buy and sell
   const [symbolArg, sideArg, contractsArg, priceArg] = rest;
   if (!symbolArg || !sideArg || !contractsArg) throw new Error(`usage: ${command} <symbol${command === "buy" ? "|auto" : ""}> <yes|no> <contracts> [price]`);
   const { side, name: sideName } = sideOf(sideArg);
   const units = parseUnits(contractsArg);
-  const health = await api<ApiHealth>(relayerUrl, "/health");
+  // Without a reachable relayer the order is still placed on-chain; nobody will fill it, and
+  // after it expires `reclaim` takes the hold back. That is the program's own safety valve.
+  const health = await api<ApiHealth>(relayerUrl, "/health").catch(() => null);
   let symbol = symbolArg;
-  if (symbol === "auto") {
-    const { markets } = await api<{ markets: ApiMarket[] }>(relayerUrl, "/markets?scope=live");
-    const pick = markets.find((market) => market.tradable);
-    if (!pick) throw new Error("no tradable market right now: try again when a 15-minute window is open and has offers");
-    symbol = pick.symbol;
+  let market: ApiMarket | null = null;
+  let marketAddress: Address;
+  let outcomeMint: Address;
+  if (health === null) {
+    say("the relayer is not reachable: placing the order directly on-chain");
+    if (symbol === "auto" || !priceArg) throw new Error("without the relayer, name the market and the price");
+    const [found] = await findMarketPda({ symbolHash: createHash("sha256").update(symbol).digest() });
+    const account = await fetchMaybeMarket(rpc, found, { commitment: COMMITMENT });
+    if (!account.exists) throw new Error(`${symbol} does not exist on-chain, and the relayer is not reachable to create it`);
+    marketAddress = found;
+    outcomeMint = side === Side.Yes ? account.data.yesMint : account.data.noMint;
+  } else {
+    if (symbol === "auto") {
+      const { markets } = await api<{ markets: ApiMarket[] }>(relayerUrl, "/markets?scope=live");
+      const pick = markets.find((candidate) => candidate.tradable);
+      if (!pick) throw new Error("no tradable market right now: try again when a 15-minute window is open and has offers");
+      symbol = pick.symbol;
+    }
+    market = await api<ApiMarket>(relayerUrl, `/markets/${symbol}`);
+    if (market.onchain === null) {
+      say(`creating ${symbol} on-chain through the relayer`);
+      market = await api<ApiMarket>(relayerUrl, `/markets/${symbol}/ensure`, "POST");
+    }
+    if (market.onchain === null) throw new Error(`${symbol} could not be created on-chain`);
+    say(describeMarket(market));
+    // An order on a market without offers is still allowed: it shows the refund path.
+    if (!market.tradable && market.notTradableReason !== "no_offers") {
+      throw new Error(`${symbol} does not take orders right now (${market.notTradableReason})`);
+    }
+    marketAddress = address(market.onchain.market);
+    outcomeMint = address(side === Side.Yes ? market.onchain.yesMint : market.onchain.noMint);
   }
-  let market = await api<ApiMarket>(relayerUrl, `/markets/${symbol}`);
-  if (market.onchain === null) {
-    say(`creating ${symbol} on-chain through the relayer`);
-    market = await api<ApiMarket>(relayerUrl, `/markets/${symbol}/ensure`, "POST");
-  }
-  if (market.onchain === null) throw new Error(`${symbol} could not be created on-chain`);
-  say(describeMarket(market));
-  // An order on a market without offers is still allowed: it shows the refund path.
-  if (!market.tradable && market.notTradableReason !== "no_offers") {
-    throw new Error(`${symbol} does not take orders right now (${market.notTradableReason})`);
-  }
-  const marketAddress = address(market.onchain.market);
-  const outcomeMint = address(side === Side.Yes ? market.onchain.yesMint : market.onchain.noMint);
-  const slack = BigInt(health.feeSlackMicros);
+  const slack = health === null ? DEFAULT_FEE_SLACK : BigInt(health.feeSlackMicros);
 
   const nonce = (await fetchTrader(rpc, traderAddress, { commitment: COMMITMENT })).data.nextNonce;
   const [order] = await getProgramDerivedAddress({
@@ -232,7 +288,7 @@ export async function runCli(argv: readonly string[], env: Record<string, string
 
   let placed: string;
   if (command === "buy") {
-    const book = market.book;
+    const book = market?.book;
     const ask = side === Side.Yes ? book?.askPx : book?.bidPx ? String(PAYOUT_PER_UNIT - BigInt(book.bidPx)) : null;
     const limitPx = priceArg ? parsePx(priceArg) : ask ? BigInt(ask) : null;
     if (limitPx === null) throw new Error("no offer on that side right now: pass a limit price");
@@ -243,7 +299,7 @@ export async function runCli(argv: readonly string[], env: Record<string, string
       await getPlaceBuyInstructionAsync({ user, payer: user, market: marketAddress, order, userStable, stableMint, side, qtyUnits: units, limitPx: Number(limitPx), maxFee }),
     ]);
   } else {
-    const book = market.book;
+    const book = market?.book;
     const bid = side === Side.Yes ? book?.bidPx : book?.askPx ? String(PAYOUT_PER_UNIT - BigInt(book.askPx)) : null;
     const minPx = priceArg ? parsePx(priceArg) : bid ? BigInt(bid) : null;
     if (minPx === null) throw new Error("no bid on that side right now: pass a minimum price");
@@ -262,6 +318,10 @@ export async function runCli(argv: readonly string[], env: Record<string, string
   }
   say(`  placed on-chain in ${placed}`);
   say(`  order ${order}`);
+  if (health === null) {
+    say(`  nobody is filling orders right now; once it has expired run: scripts/demo.ts reclaim ${order}`);
+    return 0;
+  }
 
   // Follow the order through the relayer.
   const deadline = Date.now() + (health.orderTtlSecs + 60) * 1000;
