@@ -17,6 +17,8 @@ const config: NextConfig = {
     },
   },
   outputFileTracingRoot: repoRoot,
+  // A second server (for example one in fixtures mode beside a live one) needs its own build directory.
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
   // Both are TypeScript source packages from this workspace.
   transpilePackages: ["@outcome/program-client", "@outcome/relayer"],
   // No generated rule files in the app directory.
