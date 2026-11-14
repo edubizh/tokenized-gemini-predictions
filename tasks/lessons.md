@@ -2,6 +2,14 @@
 
 Rules learned along the way. Newest first.
 
+## 2026-11-14: A stand-in wallet does not prove wallet login
+
+Wallet login was checked with a test wallet injected into the page. It signs at once and has no window of its own, so it never met what real extensions do: a window to connect, a second window for the signature, a locked wallet, a wallet with no Solana account. With the owner's real wallets, Phantom hung on the signature step and MetaMask did not connect. Wallet login is done only after the real extensions have been driven through it (connect, sign, reject, locked, reload), and any step that waits on a wallet says what it is waiting for and offers a way to try again.
+
+## 2026-11-14: Keep the interface plain
+
+The first interface carried a motif (tickets, receipts, stamps) and many kinds of component. The owner asked for the opposite: very simple, clean and calm, few components, a small fixed palette. Start from the fewest parts that do the job, and add a component only when a screen cannot work without it.
+
 ## 2026-11-14: Run the failure case on the real network, not only against fixtures
 
 The fixtures mode drew every offline screen correctly, and the bug was still there: with the relayer stopped the app counted an order's expiry on the local clock, and Reclaim was offered a few seconds before the program allowed it. In fixtures the simulated cluster clock is the local clock, so the difference cannot show. Anything that depends on a clock, a rate limit or a real signature gets one run against devnet with the real failure injected (here: the relayer actually stopped) before it is called done.
