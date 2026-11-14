@@ -12,6 +12,13 @@ pub enum Side {
     No = 1,
 }
 
+impl Side {
+    /// The stored number as the seed that tells a market's two outcome mints apart.
+    pub fn to_le_bytes(self) -> [u8; 1] {
+        [self as u8]
+    }
+}
+
 /// Lifecycle of a market. Accounts and events store it as its number.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[borsh(use_discriminant = false)]
@@ -55,4 +62,14 @@ pub struct Market {
     pub redeem_after: i64,
     pub bump: u8,
     pub reserved: [u8; 64],
+}
+
+impl Market {
+    /// The outcome mint of `side`, or `Pubkey::default()` while it does not exist.
+    pub fn mint(&self, side: Side) -> Pubkey {
+        match side {
+            Side::Yes => self.yes_mint,
+            Side::No => self.no_mint,
+        }
+    }
 }

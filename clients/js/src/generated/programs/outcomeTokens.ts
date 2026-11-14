@@ -37,40 +37,62 @@ import {
 } from "@solana/kit/program-client-core";
 import {
   getConfigCodec,
+  getMarketCodec,
   getTraderCodec,
   type Config,
   type ConfigArgs,
+  type Market,
+  type MarketArgs,
   type Trader,
   type TraderArgs,
 } from "../accounts/index.js";
 import {
+  getCreateMarketInstructionAsync,
+  getCreateOutcomeMintInstructionAsync,
   getInitializeInstructionAsync,
   getRegisterTraderInstructionAsync,
   getSetConfigInstructionAsync,
+  getSetMarketInstructionAsync,
   getSetPauseInstructionAsync,
+  parseCreateMarketInstruction,
+  parseCreateOutcomeMintInstruction,
   parseInitializeInstruction,
   parseRegisterTraderInstruction,
   parseSetConfigInstruction,
+  parseSetMarketInstruction,
   parseSetPauseInstruction,
+  type CreateMarketAsyncInput,
+  type CreateOutcomeMintAsyncInput,
   type InitializeAsyncInput,
+  type ParsedCreateMarketInstruction,
+  type ParsedCreateOutcomeMintInstruction,
   type ParsedInitializeInstruction,
   type ParsedRegisterTraderInstruction,
   type ParsedSetConfigInstruction,
+  type ParsedSetMarketInstruction,
   type ParsedSetPauseInstruction,
   type RegisterTraderAsyncInput,
   type SetConfigAsyncInput,
+  type SetMarketAsyncInput,
   type SetPauseAsyncInput,
 } from "../instructions/index.js";
-import { findConfigPda, findTraderPda } from "../pdas/index.js";
+import {
+  findConfigPda,
+  findMarketPda,
+  findMintPda,
+  findTraderPda,
+} from "../pdas/index.js";
 
 export const OUTCOME_TOKENS_PROGRAM_ADDRESS =
   "8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn" as Address<"8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn">;
 
 export const OutcomeTokensAccount = {
   0: "Config",
-  1: "Trader",
+  1: "Market",
+  2: "Trader",
   Config: 0,
-  Trader: 1,
+  Market: 1,
+  Trader: 2,
 } as const;
 
 export type OutcomeTokensAccount = (typeof OutcomeTokensAccount)[Exclude<
@@ -92,6 +114,17 @@ export function identifyOutcomeTokensAccount(
     )
   ) {
     return OutcomeTokensAccount.Config;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([219, 190, 213, 55, 0, 227, 198, 154]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensAccount.Market;
   }
   if (
     containsBytes(
@@ -284,14 +317,20 @@ export function identifyOutcomeTokensEvent(
 }
 
 export const OutcomeTokensInstruction = {
-  0: "Initialize",
-  1: "RegisterTrader",
-  2: "SetConfig",
-  3: "SetPause",
-  Initialize: 0,
-  RegisterTrader: 1,
-  SetConfig: 2,
-  SetPause: 3,
+  0: "CreateMarket",
+  1: "CreateOutcomeMint",
+  2: "Initialize",
+  3: "RegisterTrader",
+  4: "SetConfig",
+  5: "SetMarket",
+  6: "SetPause",
+  CreateMarket: 0,
+  CreateOutcomeMint: 1,
+  Initialize: 2,
+  RegisterTrader: 3,
+  SetConfig: 4,
+  SetMarket: 5,
+  SetPause: 6,
 } as const;
 
 export type OutcomeTokensInstruction =
@@ -304,6 +343,28 @@ export function identifyOutcomeTokensInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
 ): OutcomeTokensInstruction {
   const data = "data" in instruction ? instruction.data : instruction;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([103, 226, 97, 235, 200, 188, 251, 254]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensInstruction.CreateMarket;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([32, 99, 98, 183, 5, 91, 226, 235]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensInstruction.CreateOutcomeMint;
+  }
   if (
     containsBytes(
       data,
@@ -341,6 +402,17 @@ export function identifyOutcomeTokensInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([24, 133, 119, 187, 28, 115, 163, 81]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensInstruction.SetMarket;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([63, 32, 154, 2, 56, 103, 79, 45]),
       ),
       0,
@@ -358,6 +430,12 @@ export type ParsedOutcomeTokensInstruction<
   TProgram extends string = "8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn",
 > =
   | ({
+      instructionType: typeof OutcomeTokensInstruction.CreateMarket;
+    } & ParsedCreateMarketInstruction<TProgram>)
+  | ({
+      instructionType: typeof OutcomeTokensInstruction.CreateOutcomeMint;
+    } & ParsedCreateOutcomeMintInstruction<TProgram>)
+  | ({
       instructionType: typeof OutcomeTokensInstruction.Initialize;
     } & ParsedInitializeInstruction<TProgram>)
   | ({
@@ -367,6 +445,9 @@ export type ParsedOutcomeTokensInstruction<
       instructionType: typeof OutcomeTokensInstruction.SetConfig;
     } & ParsedSetConfigInstruction<TProgram>)
   | ({
+      instructionType: typeof OutcomeTokensInstruction.SetMarket;
+    } & ParsedSetMarketInstruction<TProgram>)
+  | ({
       instructionType: typeof OutcomeTokensInstruction.SetPause;
     } & ParsedSetPauseInstruction<TProgram>);
 
@@ -375,6 +456,20 @@ export function parseOutcomeTokensInstruction<TProgram extends string>(
 ): ParsedOutcomeTokensInstruction<TProgram> {
   const instructionType = identifyOutcomeTokensInstruction(instruction);
   switch (instructionType) {
+    case OutcomeTokensInstruction.CreateMarket: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OutcomeTokensInstruction.CreateMarket,
+        ...parseCreateMarketInstruction(instruction),
+      };
+    }
+    case OutcomeTokensInstruction.CreateOutcomeMint: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OutcomeTokensInstruction.CreateOutcomeMint,
+        ...parseCreateOutcomeMintInstruction(instruction),
+      };
+    }
     case OutcomeTokensInstruction.Initialize: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -394,6 +489,13 @@ export function parseOutcomeTokensInstruction<TProgram extends string>(
       return {
         instructionType: OutcomeTokensInstruction.SetConfig,
         ...parseSetConfigInstruction(instruction),
+      };
+    }
+    case OutcomeTokensInstruction.SetMarket: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OutcomeTokensInstruction.SetMarket,
+        ...parseSetMarketInstruction(instruction),
       };
     }
     case OutcomeTokensInstruction.SetPause: {
@@ -426,11 +528,23 @@ export type OutcomeTokensPlugin = {
 export type OutcomeTokensPluginAccounts = {
   config: ReturnType<typeof getConfigCodec> &
     SelfFetchFunctions<ConfigArgs, Config>;
+  market: ReturnType<typeof getMarketCodec> &
+    SelfFetchFunctions<MarketArgs, Market>;
   trader: ReturnType<typeof getTraderCodec> &
     SelfFetchFunctions<TraderArgs, Trader>;
 };
 
 export type OutcomeTokensPluginInstructions = {
+  createMarket: (
+    input: MakeOptional<CreateMarketAsyncInput, "payer">,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getCreateMarketInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  createOutcomeMint: (
+    input: MakeOptional<CreateOutcomeMintAsyncInput, "payer">,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getCreateOutcomeMintInstructionAsync> &
+    SelfPlanAndSendFunctions;
   initialize: (
     input: MakeOptional<InitializeAsyncInput, "payer">,
     config?: { programAddress?: Address | HasAddress },
@@ -446,6 +560,11 @@ export type OutcomeTokensPluginInstructions = {
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getSetConfigInstructionAsync> &
     SelfPlanAndSendFunctions;
+  setMarket: (
+    input: SetMarketAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getSetMarketInstructionAsync> &
+    SelfPlanAndSendFunctions;
   setPause: (
     input: SetPauseAsyncInput,
     config?: { programAddress?: Address | HasAddress },
@@ -455,6 +574,8 @@ export type OutcomeTokensPluginInstructions = {
 
 export type OutcomeTokensPluginPdas = {
   config: typeof findConfigPda;
+  market: typeof findMarketPda;
+  mint: typeof findMintPda;
   trader: typeof findTraderPda;
 };
 
@@ -475,9 +596,32 @@ export function outcomeTokensProgram(
       outcomeTokens: {
         accounts: {
           config: addSelfFetchFunctions(client, getConfigCodec()),
+          market: addSelfFetchFunctions(client, getMarketCodec()),
           trader: addSelfFetchFunctions(client, getTraderCodec()),
         },
         instructions: {
+          createMarket: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getCreateMarketInstructionAsync(
+                { ...input, payer: input.payer ?? client.payer },
+                {
+                  programAddress:
+                    instructionConfig?.programAddress ?? config.programAddress,
+                },
+              ),
+            ),
+          createOutcomeMint: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getCreateOutcomeMintInstructionAsync(
+                { ...input, payer: input.payer ?? client.payer },
+                {
+                  programAddress:
+                    instructionConfig?.programAddress ?? config.programAddress,
+                },
+              ),
+            ),
           initialize: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -508,6 +652,14 @@ export function outcomeTokensProgram(
                   instructionConfig?.programAddress ?? config.programAddress,
               }),
             ),
+          setMarket: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getSetMarketInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
           setPause: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -520,6 +672,16 @@ export function outcomeTokensProgram(
         pdas: {
           config: (pdaConfig) =>
             findConfigPda({
+              programAddress:
+                pdaConfig?.programAddress ?? config.programAddress,
+            }),
+          market: (seeds, pdaConfig) =>
+            findMarketPda(seeds, {
+              programAddress:
+                pdaConfig?.programAddress ?? config.programAddress,
+            }),
+          mint: (seeds, pdaConfig) =>
+            findMintPda(seeds, {
               programAddress:
                 pdaConfig?.programAddress ?? config.programAddress,
             }),

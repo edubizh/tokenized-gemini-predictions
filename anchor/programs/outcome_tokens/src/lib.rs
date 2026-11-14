@@ -31,4 +31,42 @@ pub mod outcome_tokens {
     pub fn register_trader(ctx: Context<RegisterTrader>) -> Result<()> {
         handle_register_trader(ctx)
     }
+
+    pub fn create_market(
+        ctx: Context<CreateMarket>,
+        symbol_hash: [u8; 32],
+        symbol: String,
+        close_ts: i64,
+        place_cutoff_secs: u32,
+        tick_px: u16,
+        max_supply_units: u64,
+    ) -> Result<()> {
+        handle_create_market(
+            ctx,
+            symbol_hash,
+            symbol,
+            close_ts,
+            place_cutoff_secs,
+            tick_px,
+            max_supply_units,
+        )
+    }
+
+    pub fn create_outcome_mint(
+        ctx: Context<CreateOutcomeMint>,
+        side: Side,
+        name: String,
+        ticker: String,
+        uri: String,
+    ) -> Result<()> {
+        handle_create_outcome_mint(ctx, side, name, ticker, uri)
+    }
+
+    pub fn set_market(
+        ctx: Context<SetMarket>,
+        status: Option<MarketStatus>,
+        close_ts: Option<i64>,
+    ) -> Result<()> {
+        handle_set_market(ctx, status, close_ts)
+    }
 }

@@ -6,7 +6,10 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from "./createMarket.js";
+export * from "./createOutcomeMint.js";
 export * from "./initialize.js";
 export * from "./registerTrader.js";
 export * from "./setConfig.js";
+export * from "./setMarket.js";
 export * from "./setPause.js";

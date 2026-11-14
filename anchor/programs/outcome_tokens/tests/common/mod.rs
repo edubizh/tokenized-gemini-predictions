@@ -30,6 +30,7 @@ use {
         },
         error::ErrorCode,
         instructions::{InitializeArgs, SetConfigArgs},
+        state::{MarketStatus, Side},
     },
     solana_keypair::Keypair,
     solana_message::{v0, VersionedMessage},
@@ -47,6 +48,14 @@ pub const ORDER_TTL_SECS: u32 = 60;
 pub const MIN_ORDER_UNITS: u64 = 100;
 pub const MAX_ORDER_UNITS: u64 = 1_000_000;
 pub const SETTLE_DELAY_SECS: u32 = 60;
+
+// Market parameters written by `create_market_with_mints`.
+pub const MARKET_SYMBOL: &str = "TEST-MARKET-1";
+/// The market closes this long after its creation.
+pub const CLOSE_AFTER_SECS: i64 = 86_400;
+pub const PLACE_CUTOFF_SECS: u32 = 300;
+pub const TICK_PX: u16 = 100;
+pub const MAX_SUPPLY_UNITS: u64 = 10_000_000;
 
 // --- Environment -----------------------------------------------------------------------
 
@@ -337,9 +346,9 @@ pub fn market_address(symbol_hash: &[u8; 32]) -> Pubkey {
     Pubkey::find_program_address(&[MARKET_SEED, symbol_hash], &outcome_tokens::id()).0
 }
 
-pub fn mint_address(market: &Pubkey, side: u8) -> Pubkey {
+pub fn mint_address(market: &Pubkey, side: Side) -> Pubkey {
     Pubkey::find_program_address(
-        &[MINT_SEED, market.as_ref(), &[side]],
+        &[MINT_SEED, market.as_ref(), &[side as u8]],
         &outcome_tokens::id(),
     )
     .0
@@ -454,6 +463,157 @@ pub fn register_trader(env: &mut Env, user: &Pubkey) {
     let registrar = env.registrar.pubkey();
     let instruction = register_trader_ix(env, &registrar, &registrar, user);
     send_ok(&mut env.svm, &[instruction], &[&env.registrar]);
+}
+
+// --- Markets ---------------------------------------------------------------------------
+
+pub fn symbol_hash(symbol: &str) -> [u8; 32] {
+    solana_sha256_hasher::hash(symbol.as_bytes()).to_bytes()
+}
+
+/// The arguments `create_market_with_mints` sends for `symbol`. Tests replace single
+/// fields to probe one check at a time.
+pub fn create_market_args(env: &Env, symbol: &str) -> outcome_tokens::instruction::CreateMarket {
+    outcome_tokens::instruction::CreateMarket {
+        symbol_hash: symbol_hash(symbol),
+        symbol: symbol.to_string(),
+        close_ts: now(&env.svm) + CLOSE_AFTER_SECS,
+        place_cutoff_secs: PLACE_CUTOFF_SECS,
+        tick_px: TICK_PX,
+        max_supply_units: MAX_SUPPLY_UNITS,
+    }
+}
+
+/// The market address follows `args.symbol_hash`, as a client would derive it.
+pub fn create_market_ix(
+    env: &Env,
+    relayer: &Pubkey,
+    payer: &Pubkey,
+    args: outcome_tokens::instruction::CreateMarket,
+) -> Instruction {
+    instruction(
+        outcome_tokens::accounts::CreateMarket {
+            relayer: *relayer,
+            payer: *payer,
+            config: env.config,
+            market: market_address(&args.symbol_hash),
+            system_program: system_program::ID,
+        },
+        args,
+    )
+}
+
+/// Metadata `create_market_with_mints` gives the outcome mint of `side`.
+pub fn outcome_mint_args(side: Side) -> outcome_tokens::instruction::CreateOutcomeMint {
+    let (name, ticker, uri) = match side {
+        Side::Yes => (
+            "Test Market 1 YES",
+            "TM1-YES",
+            "https://example.invalid/tm1-yes.json",
+        ),
+        Side::No => (
+            "Test Market 1 NO",
+            "TM1-NO",
+            "https://example.invalid/tm1-no.json",
+        ),
+    };
+    outcome_tokens::instruction::CreateOutcomeMint {
+        side,
+        name: name.to_string(),
+        ticker: ticker.to_string(),
+        uri: uri.to_string(),
+    }
+}
+
+pub fn create_outcome_mint_ix(
+    env: &Env,
+    relayer: &Pubkey,
+    payer: &Pubkey,
+    market: &Pubkey,
+    args: outcome_tokens::instruction::CreateOutcomeMint,
+) -> Instruction {
+    instruction(
+        outcome_tokens::accounts::CreateOutcomeMint {
+            relayer: *relayer,
+            payer: *payer,
+            config: env.config,
+            market: *market,
+            mint: mint_address(market, args.side),
+            token_program: spl_token_2022::ID,
+            system_program: system_program::ID,
+        },
+        args,
+    )
+}
+
+pub fn set_market_ix(
+    env: &Env,
+    authority: &Pubkey,
+    market: &Pubkey,
+    status: Option<MarketStatus>,
+    close_ts: Option<i64>,
+) -> Instruction {
+    instruction(
+        outcome_tokens::accounts::SetMarket {
+            authority: *authority,
+            config: env.config,
+            market: *market,
+        },
+        outcome_tokens::instruction::SetMarket { status, close_ts },
+    )
+}
+
+/// An open market with both outcome mints.
+pub struct MarketKeys {
+    pub market: Pubkey,
+    pub yes_mint: Pubkey,
+    pub no_mint: Pubkey,
+    pub close_ts: i64,
+}
+
+impl MarketKeys {
+    pub fn mint(&self, side: Side) -> Pubkey {
+        match side {
+            Side::Yes => self.yes_mint,
+            Side::No => self.no_mint,
+        }
+    }
+}
+
+/// Creates the market for `symbol` with the fixture's parameters and both outcome mints,
+/// signed and paid for by the relayer.
+pub fn create_market_with_mints(env: &mut Env, symbol: &str) -> MarketKeys {
+    let relayer = env.relayer.pubkey();
+    let args = create_market_args(env, symbol);
+    let market = market_address(&args.symbol_hash);
+    let close_ts = args.close_ts;
+    let instructions = [
+        create_market_ix(env, &relayer, &relayer, args),
+        create_outcome_mint_ix(
+            env,
+            &relayer,
+            &relayer,
+            &market,
+            outcome_mint_args(Side::Yes),
+        ),
+        create_outcome_mint_ix(
+            env,
+            &relayer,
+            &relayer,
+            &market,
+            outcome_mint_args(Side::No),
+        ),
+    ];
+    // One transaction per instruction: together they exceed the default compute budget.
+    for instruction in instructions {
+        send_ok(&mut env.svm, &[instruction], &[&env.relayer]);
+    }
+    MarketKeys {
+        market,
+        yes_mint: mint_address(&market, Side::Yes),
+        no_mint: mint_address(&market, Side::No),
+        close_ts,
+    }
 }
 
 // --- Tokens ----------------------------------------------------------------------------

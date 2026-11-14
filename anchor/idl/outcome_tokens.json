@@ -8,6 +8,237 @@
   },
   "instructions": [
     {
+      "name": "create_market",
+      "discriminator": [
+        103,
+        226,
+        97,
+        235,
+        200,
+        188,
+        251,
+        254
+      ],
+      "accounts": [
+        {
+          "name": "relayer",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "symbol_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "symbol_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "symbol",
+          "type": "string"
+        },
+        {
+          "name": "close_ts",
+          "type": "i64"
+        },
+        {
+          "name": "place_cutoff_secs",
+          "type": "u32"
+        },
+        {
+          "name": "tick_px",
+          "type": "u16"
+        },
+        {
+          "name": "max_supply_units",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "create_outcome_mint",
+      "discriminator": [
+        32,
+        99,
+        98,
+        183,
+        5,
+        91,
+        226,
+        235
+      ],
+      "accounts": [
+        {
+          "name": "relayer",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.symbol_hash",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "here; an `init` constraint would run before the check on `market` and report an",
+            "existing mint as a System program error."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "arg",
+                "path": "side"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "side",
+          "type": {
+            "defined": {
+              "name": "Side"
+            }
+          }
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "ticker",
+          "type": "string"
+        },
+        {
+          "name": "uri",
+          "type": "string"
+        }
+      ]
+    },
+    {
       "name": "initialize",
       "discriminator": [
         175,
@@ -223,6 +454,88 @@
       ]
     },
     {
+      "name": "set_market",
+      "discriminator": [
+        24,
+        133,
+        119,
+        187,
+        28,
+        115,
+        163,
+        81
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The relayer or the admin."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.symbol_hash",
+                "account": "Market"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "status",
+          "type": {
+            "option": {
+              "defined": {
+                "name": "MarketStatus"
+              }
+            }
+          }
+        },
+        {
+          "name": "close_ts",
+          "type": {
+            "option": "i64"
+          }
+        }
+      ]
+    },
+    {
       "name": "set_pause",
       "discriminator": [
         63,
@@ -282,6 +595,19 @@
         250,
         204,
         130
+      ]
+    },
+    {
+      "name": "Market",
+      "discriminator": [
+        219,
+        190,
+        213,
+        55,
+        0,
+        227,
+        198,
+        154
       ]
     },
     {
@@ -767,6 +1093,119 @@
       }
     },
     {
+      "name": "Market",
+      "docs": [
+        "One venue instrument. PDA `[\"market\", symbol_hash]`.",
+        "",
+        "The market account is the mint authority of both outcome mints, the authority over",
+        "their metadata, and the authority of the redemption vault."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "symbol_hash",
+            "docs": [
+              "sha256 of the `symbol` bytes."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "yes_mint",
+            "docs": [
+              "`Pubkey::default()` until created."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "no_mint",
+            "docs": [
+              "`Pubkey::default()` until created."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "A `MarketStatus`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "close_ts",
+            "docs": [
+              "Venue expiry. Advisory: the relayer may update it."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "place_cutoff_secs",
+            "docs": [
+              "No new orders within this many seconds of `close_ts`."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "tick_px",
+            "docs": [
+              "Order prices must be multiples of this."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_supply_units",
+            "docs": [
+              "Supply cap of each outcome mint."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "yes_payout",
+            "docs": [
+              "Micro-dollars per unit, set at settlement."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "no_payout",
+            "docs": [
+              "Micro-dollars per unit, set at settlement."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "redeem_after",
+            "docs": [
+              "Redemption opens at this time. Zero until settled."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "MarketCreated",
       "type": {
         "kind": "struct",
@@ -806,6 +1245,26 @@
           {
             "name": "redeem_after",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketStatus",
+      "docs": [
+        "Lifecycle of a market. Accounts and events store it as its number."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Halted"
+          },
+          {
+            "name": "Settled"
           }
         ]
       }
@@ -1057,6 +1516,23 @@
           {
             "name": "market",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Side",
+      "docs": [
+        "Outcome of a market. Accounts and events store it as its number."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Yes"
+          },
+          {
+            "name": "No"
           }
         ]
       }
