@@ -20,6 +20,7 @@ const EVENTS = "/v1/prediction-markets/events";
 const HISTORY = "/v1/prediction-markets/orders/history";
 const ACTIVE = "/v1/prediction-markets/orders/active";
 const POSITIONS = "/v1/prediction-markets/positions";
+const SETTLED_POSITIONS = "/v1/prediction-markets/positions/settled";
 const BALANCES = "/v1/balances";
 
 export interface GeminiSandboxVenueOptions {
@@ -252,7 +253,25 @@ export class GeminiSandboxVenue implements Venue {
     }
     const contracts: unknown[] = isRecord(body) && Array.isArray(body.contracts) ? body.contracts : [];
     const row = contracts.filter(isRecord).find((candidate) => upper(candidate.instrumentSymbol) === wanted);
-    return row === undefined ? null : toContractInfo(wanted, eventTicker, row);
+    return row === undefined ? null : toContractInfo(wanted, eventTicker, row, isRecord(body) ? body : {});
+  }
+
+  /**
+   * The payout of the account's settled position in the contract. No row means the account was
+   * flat at resolution. A payout that cannot be read is an error, never "nothing paid".
+   */
+  async settledPayoutMicros(symbol: string): Promise<bigint | null> {
+    const wanted = symbol.toUpperCase();
+    const eventTicker = this.#eventTickers.get(wanted) ?? eventTickerOf(wanted);
+    if (eventTicker === null) throw new Error(`no event ticker for ${symbol}`);
+    const body = await this.#signedRead(SETTLED_POSITIONS, {}, { eventTicker, limit: "20" });
+    const row = rowsOf(body, "positions").find((candidate) => upper(candidate.instrumentSymbol) === wanted);
+    if (row === undefined) return null;
+    try {
+      return parseMicros(text(row.payout) ?? "");
+    } catch {
+      throw new Error(`settled position for ${symbol}: unreadable payout`);
+    }
   }
 
   /**
@@ -269,7 +288,7 @@ export class GeminiSandboxVenue implements Venue {
         if (symbol === null) continue;
         this.#eventTickers.set(symbol, event.ticker);
         try {
-          contracts.push(toContractInfo(symbol, event.ticker, row));
+          contracts.push(toContractInfo(symbol, event.ticker, row, event));
         } catch {
           // Not describable, so not offered.
         }
@@ -453,9 +472,10 @@ function eventTickerOf(symbol: string): string | null {
 /**
  * States and the resolution side are read leniently (unknown values pass through or become
  * null) and an unreadable date becomes an invalid Date. The price and quantity grid is not
- * guessed: an unreadable increment throws.
+ * guessed: an unreadable increment throws. Display fields come from the event (title, series)
+ * and the contract (label, strike, settlement value) and are left out or null when absent.
  */
-function toContractInfo(symbol: string, eventTicker: string, row: Row): ContractInfo {
+function toContractInfo(symbol: string, eventTicker: string, row: Row, event: Row): ContractInfo {
   const grid = (field: string, decimals: number): bigint => {
     try {
       return parseDecimal(text(row[field]) ?? "", decimals);
@@ -475,6 +495,11 @@ function toContractInfo(symbol: string, eventTicker: string, row: Row): Contract
     unitIncrement: grid("quantityIncrement", 2),
     minUnits: grid("quantityMinimum", 2),
     resolutionSide: side === "yes" || side === "no" ? side : null,
+    ...(typeof event.title === "string" ? { title: event.title } : {}),
+    ...(typeof row.label === "string" ? { label: row.label } : {}),
+    ...(typeof event.series === "string" ? { series: event.series } : {}),
+    strike: isRecord(row.strike) ? text(row.strike.value) : null,
+    settlementValue: text(row.settlementValue),
   };
 }
 

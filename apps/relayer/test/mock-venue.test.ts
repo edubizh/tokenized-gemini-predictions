@@ -335,6 +335,42 @@ describe("MockVenue.resolve", () => {
   });
 });
 
+describe("MockVenue.settledPayoutMicros", () => {
+  it("reports what the resolution paid: the payout of a winner, zero for a loser", async () => {
+    const winner = venueWith();
+    winner.setBook(SYMBOL, { bids: [], asks: [[1_700n, 300n]] });
+    await winner.placeOrder(request());
+    expect(await winner.settledPayoutMicros(SYMBOL)).toBeNull(); // not resolved yet
+    winner.resolve(SYMBOL, "yes");
+    expect(await winner.settledPayoutMicros(SYMBOL)).toBe(3_000_000n);
+
+    const loser = venueWith();
+    loser.setBook(SYMBOL, { bids: [], asks: [[1_700n, 300n]] });
+    await loser.placeOrder(request());
+    loser.resolve(SYMBOL, "no");
+    expect(await loser.settledPayoutMicros(SYMBOL)).toBe(0n);
+  });
+
+  it("reports null when the position was flat at resolution", async () => {
+    const venue = venueWith();
+    venue.resolve(SYMBOL, "yes");
+    expect(await venue.settledPayoutMicros(SYMBOL)).toBeNull();
+    expect(await venue.settledPayoutMicros("GEMI-NOPE")).toBeNull();
+  });
+});
+
+describe("MockVenue.listContracts", () => {
+  it("lists the active contracts with their display fields", async () => {
+    const venue = venueWith();
+    venue.addContract(contract({ symbol: "GEMI-ETH-TEST", eventTicker: "ETH-TEST", title: "ETH test", label: "Up", series: "ETH15M", strike: "3000.10" }));
+    venue.addContract(contract({ symbol: "GEMI-OLD-TEST", eventTicker: "OLD-TEST" }));
+    venue.resolve("GEMI-OLD-TEST", "no");
+    const listed = await venue.listContracts();
+    expect(listed.map((info) => info.symbol)).toEqual([SYMBOL, "GEMI-ETH-TEST"]);
+    expect(listed[1]).toMatchObject({ title: "ETH test", label: "Up", series: "ETH15M", strike: "3000.10" });
+  });
+});
+
 describe("MockVenue market data", () => {
   it("returns null for an unknown contract and an empty top of book", async () => {
     const venue = venueWith();

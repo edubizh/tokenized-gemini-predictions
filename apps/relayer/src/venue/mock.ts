@@ -36,6 +36,8 @@ export class MockVenue implements Venue {
   private readonly contracts = new Map<string, ContractInfo>();
   private readonly books = new Map<string, MockBook>();
   private readonly positions = new Map<string, bigint>();
+  /** What `resolve` paid for each position that was not flat. */
+  private readonly settledPayouts = new Map<string, bigint>();
   /** Orders the venue accepted, by client order id. */
   private readonly orders = new Map<string, RecordedOrder>();
   private readonly faults: FaultMode[] = [];
@@ -85,7 +87,9 @@ export class MockVenue implements Venue {
     this.contracts.set(symbol, { ...contract, status: "settled", marketState: "closed", resolutionSide: side });
     const position = this.positions.get(symbol) ?? 0n;
     const winningUnits = side === "yes" ? position : -position;
-    if (winningUnits > 0n) this.cash += winningUnits * PAYOUT_PER_UNIT;
+    const payout = winningUnits > 0n ? winningUnits * PAYOUT_PER_UNIT : 0n;
+    this.cash += payout;
+    if (position !== 0n) this.settledPayouts.set(symbol, payout);
     this.positions.delete(symbol);
   }
 
@@ -128,6 +132,14 @@ export class MockVenue implements Venue {
   async contract(symbol: string): Promise<ContractInfo | null> {
     const contract = this.contracts.get(symbol);
     return contract === undefined ? null : { ...contract };
+  }
+
+  async listContracts(): Promise<ContractInfo[]> {
+    return [...this.contracts.values()].filter((contract) => contract.status === "active").map((contract) => ({ ...contract }));
+  }
+
+  async settledPayoutMicros(symbol: string): Promise<bigint | null> {
+    return this.settledPayouts.get(symbol) ?? null;
   }
 
   async topOfBook(symbol: string): Promise<TopOfBook> {

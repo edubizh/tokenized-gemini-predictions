@@ -17,6 +17,16 @@ export interface ContractInfo {
   unitIncrement: bigint;
   minUnits: bigint;
   resolutionSide: "yes" | "no" | null;
+  /** Event title, for display. */
+  title?: string;
+  /** Contract label, for example "Up". YES means the label is true. */
+  label?: string;
+  /** Event series, for example "BTC15M". */
+  series?: string;
+  /** Reference price in dollars as the venue prints it; null while it is not known. */
+  strike?: string | null;
+  /** Final reference value in dollars as the venue prints it; null until resolved. */
+  settlementValue?: string | null;
 }
 
 /** Best bid and ask in YES price space. A null price means that side of the book is empty. */
@@ -41,5 +51,12 @@ export interface Venue {
   /** Available USD in micro-dollars. */
   cashMicros(): Promise<bigint>;
   contract(symbol: string): Promise<ContractInfo | null>;
+  /** The contracts the venue currently lists as active. */
+  listContracts(): Promise<ContractInfo[]>;
+  /**
+   * What the venue paid the account for its position in a resolved contract, in micro-dollars.
+   * Null when the venue reports no settled position: the account was flat at resolution.
+   */
+  settledPayoutMicros(symbol: string): Promise<bigint | null>;
   topOfBook(symbol: string): Promise<TopOfBook>;
 }

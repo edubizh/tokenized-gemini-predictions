@@ -621,6 +621,53 @@ describe("netPosition and cashMicros", () => {
   });
 });
 
+describe("settledPayoutMicros", () => {
+  const settledRow = (fields: Record<string, unknown> = {}) => ({
+    instrumentSymbol: SYMBOL,
+    position: 12,
+    positionQuantity: "12",
+    outcome: "yes",
+    payout: "12",
+    resolutionSide: "yes",
+    settledAt: "2026-11-14T03:00:09.000Z",
+    ...fields,
+  });
+
+  it("reads the payout of the symbol's settled position in micro-dollars", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => ({ positions: [settledRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-DOWN", payout: "3" }), settledRow()] }));
+    await expect(drive(venue.settledPayoutMicros(SYMBOL), 3_000)).resolves.toBe(12_000_000n);
+    expect(http.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/v1/prediction-markets/positions/settled",
+      query: `?eventTicker=${EVENT}&limit=20`,
+      payload: { request: "/v1/prediction-markets/positions/settled" },
+    });
+
+    http.respond(() => ({ positions: [settledRow({ outcome: "no", payout: "0" })] }));
+    await expect(drive(venue.settledPayoutMicros(SYMBOL), 3_000)).resolves.toBe(0n);
+    http.respond(() => ({ positions: [settledRow({ payout: "0.5" })] }));
+    await expect(drive(venue.settledPayoutMicros(SYMBOL), 3_000)).resolves.toBe(500_000n);
+  });
+
+  it("returns null when the venue has no settled position for the symbol", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => ({ positions: [settledRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-DOWN" })] }));
+    await expect(drive(venue.settledPayoutMicros(SYMBOL), 3_000)).resolves.toBeNull();
+    http.respond(() => ({ positions: [] }));
+    await expect(drive(venue.settledPayoutMicros(SYMBOL), 3_000)).resolves.toBeNull();
+  });
+
+  it("rejects an unreadable payout and a symbol with no event part instead of reporting nothing paid", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => ({ positions: [settledRow({ payout: "twelve" })] }));
+    await expect(drive(venue.settledPayoutMicros(SYMBOL), 3_000)).rejects.toThrow(`settled position for ${SYMBOL}: unreadable payout`);
+    const before = http.calls.length;
+    await expect(venue.settledPayoutMicros("NOEVENT")).rejects.toThrow("no event ticker for NOEVENT");
+    expect(http.calls).toHaveLength(before);
+  });
+});
+
 function contractRow(fields: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     ticker: "UP",
@@ -652,8 +699,46 @@ describe("contract and listContracts", () => {
       unitIncrement: 1n,
       minUnits: 1n,
       resolutionSide: null,
+      strike: null,
+      settlementValue: null,
     });
     expect(http.calls[0]).toMatchObject({ method: "GET", path: `/v1/prediction-markets/events/${EVENT}`, payload: null });
+  });
+
+  it("fills the display fields from the event and the contract", async () => {
+    const { venue, http } = await connected();
+    const strike = { type: "reference", value: "64000.50", availableAt: "2026-11-14T02:45:00.000Z" };
+    http.respond(() => ({
+      ticker: EVENT,
+      title: "Demo price today at 10pm",
+      series: "DEMO15M",
+      contracts: [contractRow({ label: "Up", strike, settlementValue: 64100.125, status: "settled", resolutionSide: "yes" })],
+    }));
+    await expect(drive(venue.contract(SYMBOL), 1_000)).resolves.toMatchObject({
+      title: "Demo price today at 10pm",
+      series: "DEMO15M",
+      label: "Up",
+      strike: "64000.50",
+      settlementValue: "64100.125",
+    });
+
+    // Before the window starts the reference price is not known yet.
+    http.respond(() => ({ ticker: EVENT, contracts: [contractRow({ strike: { type: "reference", value: null }, settlementValue: "64100.5" })] }));
+    const early = await drive(venue.contract(SYMBOL), 1_000);
+    expect(early).toMatchObject({ strike: null, settlementValue: "64100.5" });
+    expect(early).not.toHaveProperty("title");
+    expect(early).not.toHaveProperty("label");
+    expect(early).not.toHaveProperty("series");
+  });
+
+  it("lists contracts with the display fields of their event", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => ({
+      data: [{ ticker: EVENT, title: "Demo price today at 10pm", series: "DEMO15M", contracts: [contractRow({ label: "Up", strike: { type: "reference", value: "64000.50" } })] }],
+    }));
+    await expect(drive(venue.listContracts(), 1_000)).resolves.toEqual([
+      expect.objectContaining({ symbol: SYMBOL, title: "Demo price today at 10pm", series: "DEMO15M", label: "Up", strike: "64000.50", settlementValue: null }),
+    ]);
   });
 
   it("passes unknown states through and reads the resolution side leniently", async () => {
