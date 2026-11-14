@@ -1,0 +1,112 @@
+.timeline {
+  display: grid;
+}
+
+.step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+  align-items: start;
+  padding-bottom: var(--space-4);
+}
+
+.step:last-child {
+  padding-bottom: 0;
+}
+
+/* The line that joins one mark to the next. */
+.step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 7.5px;
+  top: 22px;
+  bottom: 0;
+  width: 1px;
+  background: var(--rule);
+}
+
+.step[data-status="done"]:not(:last-child)::before {
+  background: var(--rule-strong);
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  color: var(--ink);
+}
+
+.pulse,
+.hollow {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--rounded-full);
+}
+
+.pulse {
+  background: var(--ink);
+  animation: wait 1.4s ease-in-out infinite;
+}
+
+.hollow {
+  border: 1px solid var(--rule-strong);
+}
+
+.dash {
+  width: 9px;
+  height: 1px;
+  background: var(--ink-3);
+}
+
+@keyframes wait {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.title {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  font-weight: var(--weight-medium);
+}
+
+.description {
+  max-width: 60ch;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+}
+
+.step[data-status="pending"] .title {
+  color: var(--ink-2);
+}
+
+.step[data-status="pending"] .description {
+  color: var(--ink-3);
+}
+
+.meta {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  padding-top: 3px;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.time {
+  font-family: var(--font-mono);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+    background: transparent;
+    border: 2px solid var(--ink);
+  }
+}

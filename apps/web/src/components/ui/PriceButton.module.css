@@ -1,0 +1,61 @@
+.button {
+  display: inline-grid;
+  justify-items: center;
+  align-content: center;
+  gap: 1px;
+  width: 4.5rem;
+  height: 44px;
+  background: var(--side-tint);
+  border: 1px solid var(--side);
+  border-radius: var(--rounded-md);
+  color: var(--side);
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform var(--duration) var(--ease);
+}
+
+.yes {
+  --side: var(--yes);
+  --side-strong: var(--yes-strong);
+  --side-tint: var(--yes-tint);
+}
+
+.no {
+  --side: var(--no);
+  --side-strong: var(--no-strong);
+  --side-tint: var(--no-tint);
+}
+
+.side {
+  font-size: var(--text-xs);
+  line-height: 1.2;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+}
+
+.price {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.2;
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--side);
+  color: var(--paper);
+}
+
+.button:active:not(:disabled) {
+  background: var(--side-strong);
+  border-color: var(--side-strong);
+  color: var(--paper);
+  transform: translateY(1px);
+}
+
+.button:disabled {
+  background: var(--paper-sunken);
+  border-color: var(--rule);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}

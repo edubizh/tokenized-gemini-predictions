@@ -1,0 +1,131 @@
+.root {
+  position: relative;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 10px 0 var(--space-3);
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--rounded-md);
+  cursor: pointer;
+}
+
+.trigger:hover,
+.trigger[aria-expanded="true"] {
+  background: var(--paper-sunken);
+  border-color: var(--ink-2);
+}
+
+.address {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+}
+
+.caret {
+  color: var(--ink-2);
+}
+
+.menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 17.5rem;
+  max-width: calc(100vw - 2 * var(--gutter));
+  padding: var(--space-1) 0;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--rounded-md);
+  box-shadow: var(--menu-shadow);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .menu {
+    animation: open 150ms var(--ease);
+    transform-origin: top right;
+  }
+}
+
+@keyframes open {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.identity {
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  margin-bottom: var(--space-1);
+  border-bottom: 1px solid var(--rule);
+}
+
+.caption {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--ink-3);
+}
+
+.full {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-sm);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.item:hover,
+.item:focus-visible {
+  background: var(--paper-sunken);
+}
+
+.item:focus-visible {
+  outline-offset: -2px;
+}
+
+.item[aria-disabled="true"] {
+  cursor: progress;
+  color: var(--ink-2);
+}
+
+.aside {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+
+.result {
+  padding: 0 var(--space-4) var(--space-2);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--ink-2);
+}
+
+.resultError {
+  color: var(--negative);
+}
+
+.last {
+  margin-top: var(--space-1);
+  border-top: 1px solid var(--rule);
+  min-height: 40px;
+}

@@ -1,0 +1,138 @@
+.bar {
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+}
+
+.inner {
+  display: flex;
+  align-items: stretch;
+  column-gap: var(--space-6);
+  max-width: var(--page-max);
+  min-height: 56px;
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.nav {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-5);
+}
+
+.link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+.link:hover {
+  color: var(--ink);
+}
+
+/* The current page: a 2px ink underline sitting on the bar's rule. */
+.link[aria-current="page"] {
+  color: var(--ink);
+}
+
+.link[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 2px;
+  background: var(--ink);
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-left: auto;
+}
+
+.balance {
+  display: grid;
+  justify-items: end;
+  line-height: 1.2;
+}
+
+.balanceLabel {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+
+.balanceValue {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Narrow: two lines. Wordmark and account menu above; navigation and the balance below, sharing
+ * one rule. The right-hand group dissolves so its two parts can sit on different lines.
+ */
+@media (max-width: 44rem) {
+  .inner {
+    flex-wrap: wrap;
+    column-gap: 0;
+  }
+
+  .right {
+    display: contents;
+  }
+
+  .wordmark {
+    order: 1;
+    min-height: 52px;
+    margin-right: auto;
+  }
+
+  .right > :not(.balance) {
+    order: 2;
+    align-self: center;
+  }
+
+  .nav,
+  .balance {
+    min-height: 44px;
+    border-top: 1px solid var(--rule);
+  }
+
+  .nav {
+    order: 3;
+    flex: 1 1 auto;
+    gap: var(--space-4);
+    margin-left: calc(-1 * var(--gutter));
+    padding-left: var(--gutter);
+  }
+
+  .balance {
+    order: 4;
+    align-content: center;
+    margin-right: calc(-1 * var(--gutter));
+    padding-right: var(--gutter);
+  }
+
+  /* Without navigation the balance stays on the first line. */
+  .wordmark + .right > .balance {
+    order: 2;
+    min-height: 52px;
+    margin-right: var(--space-3);
+    padding-right: 0;
+    border-top: 0;
+  }
+}

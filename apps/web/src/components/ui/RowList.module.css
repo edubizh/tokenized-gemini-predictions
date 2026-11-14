@@ -1,0 +1,103 @@
+.list {
+  border-top: 1px solid var(--rule);
+}
+
+.header,
+.row {
+  display: grid;
+  grid-template-columns: var(--columns);
+  column-gap: var(--space-5);
+  align-items: center;
+  padding-inline: var(--space-2);
+  border-bottom: 1px solid var(--rule);
+}
+
+.header {
+  min-height: 32px;
+}
+
+.heading {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.row {
+  min-height: 56px;
+  padding-block: var(--space-2);
+}
+
+.row:hover,
+.row:focus-within {
+  background: var(--paper-sunken);
+}
+
+.cell {
+  min-width: 0;
+}
+
+.right {
+  text-align: right;
+  justify-self: end;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.cellLabel {
+  display: none;
+}
+
+.detail {
+  grid-column: 1 / -1;
+  padding-block: var(--space-3) var(--space-2);
+}
+
+/* Narrow: a row stacks into two lines. The header goes, so each value carries its own label. */
+@media (max-width: 40rem) {
+  .header {
+    display: none;
+  }
+
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-5);
+    padding-block: var(--space-3);
+  }
+
+  .primary {
+    flex: 1 1 100%;
+  }
+
+  .cell.right {
+    text-align: left;
+  }
+
+  .cellLabel {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: var(--leading-xs);
+    font-weight: var(--weight-medium);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .actions {
+    margin-left: auto;
+  }
+
+  .detail {
+    flex: 1 1 100%;
+  }
+}

@@ -1,0 +1,11 @@
+.skeleton {
+  display: block;
+  max-width: 100%;
+  background: var(--paper-sunken);
+  border-radius: var(--rounded-sm);
+}
+
+.inline {
+  display: inline-block;
+  vertical-align: middle;
+}

@@ -4,10 +4,25 @@ import type { NextConfig } from "next";
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 
 const config: NextConfig = {
-  // The app lives in a pnpm workspace; point both resolvers at the workspace root.
-  turbopack: { root: repoRoot },
+  turbopack: {
+    // The app lives in a pnpm workspace; point the resolver at the workspace root.
+    root: repoRoot,
+    rules: {
+      // See loaders/ts-import-extension.cjs.
+      "*.ts": {
+        condition: { path: /clients\/js\/src\// },
+        loaders: [path.join(import.meta.dirname, "loaders/ts-import-extension.cjs")],
+        as: "*.ts",
+      },
+    },
+  },
   outputFileTracingRoot: repoRoot,
-  transpilePackages: ["@outcome/program-client"],
+  // Both are TypeScript source packages from this workspace.
+  transpilePackages: ["@outcome/program-client", "@outcome/relayer"],
+  // No generated rule files in the app directory.
+  agentRules: false,
+  // The development indicator floats over the page; the design has no floating elements.
+  devIndicators: false,
 };
 
 export default config;
