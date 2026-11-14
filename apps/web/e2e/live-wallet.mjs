@@ -48,21 +48,28 @@ try {
   await page.waitForURL(/\/(welcome|markets)/, { timeout: 90_000 });
   console.log("logged in with the wallet:", new URL(page.url()).pathname);
 
-  // First run: test funds. The welcome screen says whether this wallet is registered already.
+  // No page reloads from here on: a reload drops the connection to an external wallet, and this
+  // check is about the first session after logging in. A new wallet is sent to the welcome screen
+  // by the app itself; a registered one lands on the markets.
   const welcome = '[data-testid="welcome"]';
-  await page.goto(`${BASE}/welcome`, { waitUntil: "networkidle" });
-  await page.waitForSelector(`${welcome}:not([data-state="loading"])`, { timeout: 90_000 });
-  console.log("welcome state:", await page.getAttribute(welcome, "data-state"));
-  if ((await page.getAttribute(welcome, "data-state")) === "ready") {
-    await page.click('[data-testid="get-test-funds"]');
-    await page.waitForSelector(`${welcome}[data-state="done"], ${welcome}[data-state="error"], ${welcome}[data-state="already"]`, { timeout: 120_000 });
-    console.log("after Get test funds:", await page.getAttribute(welcome, "data-state"));
-    await shoot("wallet-welcome");
+  const marketsTable = page.getByRole("table", { name: "Markets", exact: true });
+  await Promise.race([
+    page.waitForSelector(`${welcome}:not([data-state="loading"])`, { timeout: 90_000 }),
+    marketsTable.waitFor({ timeout: 90_000 }),
+  ]);
+  if (new URL(page.url()).pathname === "/welcome") {
+    console.log("welcome state:", await page.getAttribute(welcome, "data-state"));
+    if ((await page.getAttribute(welcome, "data-state")) === "ready") {
+      await page.click('[data-testid="get-test-funds"]');
+      await page.waitForSelector(`${welcome}[data-state="done"], ${welcome}[data-state="error"], ${welcome}[data-state="already"]`, { timeout: 120_000 });
+      console.log("after Get test funds:", await page.getAttribute(welcome, "data-state"));
+      await shoot("wallet-welcome");
+    }
+    await page.getByRole("link", { name: "Markets", exact: true }).first().click();
   }
 
   // One order, signed by the wallet.
-  await page.goto(`${BASE}/markets`, { waitUntil: "networkidle" });
-  await page.getByRole("table", { name: "Markets", exact: true }).waitFor({ timeout: 60_000 });
+  await marketsTable.waitFor({ timeout: 60_000 });
   const rows = page.getByRole("row").filter({ has: page.getByRole("link", { name: new RegExp(`^Buy ${side}`) }) });
   const row = underlyingArg ? rows.filter({ hasText: `${underlyingArg} Up` }).first() : rows.first();
   if ((await row.count()) === 0) throw new Error("no market takes orders on that side right now");
@@ -93,7 +100,8 @@ try {
 } catch (error) {
   console.log("FAILED:", error instanceof Error ? error.message.split("\n")[0] : String(error));
   await shoot("wallet-failure").catch(() => {});
-  console.log("page text:", (await text(page.locator("body")).catch(() => "")).slice(0, 500));
+  const ticketText = await text(page.locator('[data-testid="ticket"]')).catch(() => "");
+  console.log(ticketText ? `ticket: ${ticketText.slice(-500)}` : `page text: ${(await text(page.locator("body")).catch(() => "")).slice(0, 500)}`);
 } finally {
   await browser.close();
   if (problems.length > 0) {
