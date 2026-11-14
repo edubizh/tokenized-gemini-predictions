@@ -15,10 +15,14 @@ import {
   fetchEncodedAccounts,
   fixDecoderSize,
   fixEncoderSize,
+  getAddressDecoder,
+  getAddressEncoder,
   getBytesDecoder,
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
+  getU64Decoder,
+  getU64Encoder,
   getU8Decoder,
   getU8Encoder,
   transformEncoder,
@@ -39,122 +43,130 @@ import {
   type ReadonlyUint8Array,
 } from "@solana/kit";
 
-export const SPIKE_MARKET_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
-  8, 193, 46, 48, 153, 62, 168, 55,
+export const TRADER_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
+  74, 133, 32, 105, 47, 50, 5, 238,
 ]);
 
-export function getSpikeMarketDiscriminatorBytes(): ReadonlyUint8Array {
-  return fixEncoderSize(getBytesEncoder(), 8).encode(
-    SPIKE_MARKET_DISCRIMINATOR,
-  );
+export function getTraderDiscriminatorBytes(): ReadonlyUint8Array {
+  return fixEncoderSize(getBytesEncoder(), 8).encode(TRADER_DISCRIMINATOR);
 }
 
-export type SpikeMarket = {
+export type Trader = {
   discriminator: ReadonlyUint8Array;
-  symbolHash: ReadonlyUint8Array;
+  user: Address;
+  /** Nonce of the user's next order. It only increases, so order addresses never repeat. */
+  nextNonce: bigint;
   bump: number;
+  reserved: ReadonlyUint8Array;
 };
 
-export type SpikeMarketArgs = { symbolHash: ReadonlyUint8Array; bump: number };
+export type TraderArgs = {
+  user: Address | HasAddress;
+  /** Nonce of the user's next order. It only increases, so order addresses never repeat. */
+  nextNonce: number | bigint;
+  bump: number;
+  reserved: ReadonlyUint8Array;
+};
 
-/** Gets the encoder for {@link SpikeMarketArgs} account data. */
-export function getSpikeMarketEncoder(): FixedSizeEncoder<SpikeMarketArgs> {
+/** Gets the encoder for {@link TraderArgs} account data. */
+export function getTraderEncoder(): FixedSizeEncoder<TraderArgs> {
   return transformEncoder(
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
-      ["symbolHash", fixEncoderSize(getBytesEncoder(), 32)],
+      ["user", getAddressEncoder()],
+      ["nextNonce", getU64Encoder()],
       ["bump", getU8Encoder()],
+      ["reserved", fixEncoderSize(getBytesEncoder(), 32)],
     ]),
-    (value) => ({ ...value, discriminator: SPIKE_MARKET_DISCRIMINATOR }),
+    (value) => ({ ...value, discriminator: TRADER_DISCRIMINATOR }),
   );
 }
 
-/** Gets the decoder for {@link SpikeMarket} account data. */
-export function getSpikeMarketDecoder(): FixedSizeDecoder<SpikeMarket> {
+/** Gets the decoder for {@link Trader} account data. */
+export function getTraderDecoder(): FixedSizeDecoder<Trader> {
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
-    ["symbolHash", fixDecoderSize(getBytesDecoder(), 32)],
+    ["user", getAddressDecoder()],
+    ["nextNonce", getU64Decoder()],
     ["bump", getU8Decoder()],
+    ["reserved", fixDecoderSize(getBytesDecoder(), 32)],
   ]);
 }
 
-/** Gets the codec for {@link SpikeMarket} account data. */
-export function getSpikeMarketCodec(): FixedSizeCodec<
-  SpikeMarketArgs,
-  SpikeMarket
-> {
-  return combineCodec(getSpikeMarketEncoder(), getSpikeMarketDecoder());
+/** Gets the codec for {@link Trader} account data. */
+export function getTraderCodec(): FixedSizeCodec<TraderArgs, Trader> {
+  return combineCodec(getTraderEncoder(), getTraderDecoder());
 }
 
-export function decodeSpikeMarket<TAddress extends string = string>(
+export function decodeTrader<TAddress extends string = string>(
   encodedAccount: EncodedAccount<TAddress>,
-): Account<SpikeMarket, TAddress>;
-export function decodeSpikeMarket<TAddress extends string = string>(
+): Account<Trader, TAddress>;
+export function decodeTrader<TAddress extends string = string>(
   encodedAccount: MaybeEncodedAccount<TAddress>,
-): MaybeAccount<SpikeMarket, TAddress>;
-export function decodeSpikeMarket<TAddress extends string = string>(
+): MaybeAccount<Trader, TAddress>;
+export function decodeTrader<TAddress extends string = string>(
   encodedAccount: EncodedAccount<TAddress> | MaybeEncodedAccount<TAddress>,
-): Account<SpikeMarket, TAddress> | MaybeAccount<SpikeMarket, TAddress> {
+): Account<Trader, TAddress> | MaybeAccount<Trader, TAddress> {
   return decodeAccount(
     encodedAccount as MaybeEncodedAccount<TAddress>,
-    getSpikeMarketDecoder(),
+    getTraderDecoder(),
   );
 }
 
-export async function fetchSpikeMarket<TAddress extends string = string>(
+export async function fetchTrader<TAddress extends string = string>(
   rpc:
     | Parameters<typeof fetchEncodedAccount>[0]
     | ClientWithRpc<GetAccountInfoApi>,
   address: Address<TAddress> | HasAddress<TAddress>,
   config?: FetchAccountConfig,
-): Promise<Account<SpikeMarket, TAddress>> {
-  const maybeAccount = await fetchMaybeSpikeMarket(rpc, address, config);
+): Promise<Account<Trader, TAddress>> {
+  const maybeAccount = await fetchMaybeTrader(rpc, address, config);
   assertAccountExists(maybeAccount);
   return maybeAccount;
 }
 
-export async function fetchMaybeSpikeMarket<TAddress extends string = string>(
+export async function fetchMaybeTrader<TAddress extends string = string>(
   rpc:
     | Parameters<typeof fetchEncodedAccount>[0]
     | ClientWithRpc<GetAccountInfoApi>,
   address: Address<TAddress> | HasAddress<TAddress>,
   config?: FetchAccountConfig,
-): Promise<MaybeAccount<SpikeMarket, TAddress>> {
+): Promise<MaybeAccount<Trader, TAddress>> {
   const maybeAccount = await fetchEncodedAccount(
     "rpc" in rpc ? rpc.rpc : rpc,
     typeof address === "string" ? address : address.address,
     config,
   );
-  return decodeSpikeMarket(maybeAccount);
+  return decodeTrader(maybeAccount);
 }
 
-export async function fetchAllSpikeMarket(
+export async function fetchAllTrader(
   rpc:
     | Parameters<typeof fetchEncodedAccounts>[0]
     | ClientWithRpc<GetMultipleAccountsApi>,
   addresses: Array<Address | HasAddress>,
   config?: FetchAccountsConfig,
-): Promise<Account<SpikeMarket>[]> {
-  const maybeAccounts = await fetchAllMaybeSpikeMarket(rpc, addresses, config);
+): Promise<Account<Trader>[]> {
+  const maybeAccounts = await fetchAllMaybeTrader(rpc, addresses, config);
   assertAccountsExist(maybeAccounts);
   return maybeAccounts;
 }
 
-export async function fetchAllMaybeSpikeMarket(
+export async function fetchAllMaybeTrader(
   rpc:
     | Parameters<typeof fetchEncodedAccounts>[0]
     | ClientWithRpc<GetMultipleAccountsApi>,
   addresses: Array<Address | HasAddress>,
   config?: FetchAccountsConfig,
-): Promise<MaybeAccount<SpikeMarket>[]> {
+): Promise<MaybeAccount<Trader>[]> {
   const maybeAccounts = await fetchEncodedAccounts(
     "rpc" in rpc ? rpc.rpc : rpc,
     addresses.map((a) => (typeof a === "string" ? a : a.address)),
     config,
   );
-  return maybeAccounts.map((maybeAccount) => decodeSpikeMarket(maybeAccount));
+  return maybeAccounts.map((maybeAccount) => decodeTrader(maybeAccount));
 }
 
-export function getSpikeMarketSize(): number {
-  return 41;
+export function getTraderSize(): number {
+  return 81;
 }

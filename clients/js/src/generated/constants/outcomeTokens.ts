@@ -8,6 +8,12 @@
 
 import type { ReadonlyUint8Array } from "@solana/kit";
 
+export const CONFIG_SEED: ReadonlyUint8Array = new Uint8Array([
+  99, 111, 110, 102, 105, 103,
+]);
+
+export const CUTOFF_MIN_SECS: number = 30;
+
 export const ESCROW_SEED: ReadonlyUint8Array = new Uint8Array([
   101, 115, 99, 114, 111, 119,
 ]);
@@ -15,6 +21,10 @@ export const ESCROW_SEED: ReadonlyUint8Array = new Uint8Array([
 export const MARKET_SEED: ReadonlyUint8Array = new Uint8Array([
   109, 97, 114, 107, 101, 116,
 ]);
+
+export const MAX_FEE_BASE: bigint = 50000n;
+
+export const MAX_FEE_PER_UNIT: bigint = 200n;
 
 export const MINT_SEED: ReadonlyUint8Array = new Uint8Array([
   109, 105, 110, 116,
@@ -25,3 +35,25 @@ export const ORDER_SEED: ReadonlyUint8Array = new Uint8Array([
 ]);
 
 export const OUTCOME_DECIMALS: number = 2;
+
+export const PAUSE_FILL: number = 2;
+
+export const PAUSE_PLACE: number = 1;
+
+export const PAYOUT_TOTAL: bigint = 10000n;
+
+export const PX_MAX: number = 9999;
+
+export const REDEEM_SEED: ReadonlyUint8Array = new Uint8Array([
+  114, 101, 100, 101, 101, 109,
+]);
+
+export const STABLE_DECIMALS: number = 6;
+
+export const TRADER_SEED: ReadonlyUint8Array = new Uint8Array([
+  116, 114, 97, 100, 101, 114,
+]);
+
+export const TTL_MAX_SECS: number = 900;
+
+export const TTL_MIN_SECS: number = 30;

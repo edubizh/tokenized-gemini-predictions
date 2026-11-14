@@ -8,45 +8,54 @@
   },
   "instructions": [
     {
-      "name": "spike_create_market",
+      "name": "initialize",
       "discriminator": [
-        72,
-        199,
-        199,
+        175,
+        175,
+        109,
         31,
-        62,
-        170,
-        17,
-        115
+        13,
+        152,
+        155,
+        237
       ],
       "accounts": [
         {
           "name": "authority",
+          "docs": [
+            "The program's upgrade authority. Becomes the admin."
+          ],
+          "signer": true
+        },
+        {
+          "name": "payer",
           "writable": true,
           "signer": true
         },
         {
-          "name": "market",
+          "name": "config",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  109,
-                  97,
-                  114,
-                  107,
-                  101,
-                  116
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
                 ]
-              },
-              {
-                "kind": "arg",
-                "path": "symbol_hash"
               }
             ]
           }
+        },
+        {
+          "name": "stable_mint"
+        },
+        {
+          "name": "treasury"
         },
         {
           "name": "program",
@@ -56,377 +65,82 @@
           "name": "program_data"
         },
         {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
         {
-          "name": "symbol_hash",
+          "name": "args",
           "type": {
-            "array": [
-              "u8",
-              32
-            ]
+            "defined": {
+              "name": "InitializeArgs"
+            }
           }
-        },
-        {
-          "name": "symbol",
-          "type": "string"
         }
       ]
     },
     {
-      "name": "spike_create_mint",
+      "name": "register_trader",
       "discriminator": [
-        197,
-        230,
-        50,
-        59,
-        189,
-        71,
-        173,
-        71
+        75,
+        243,
+        224,
+        167,
+        1,
+        5,
+        51,
+        32
       ],
       "accounts": [
+        {
+          "name": "registrar",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
         {
           "name": "payer",
           "writable": true,
           "signer": true
         },
         {
-          "name": "market",
+          "name": "config",
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  109,
-                  97,
-                  114,
-                  107,
-                  101,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "market.symbol_hash",
-                "account": "SpikeMarket"
-              }
-            ]
-          }
-        },
-        {
-          "name": "mint",
-          "docs": [
-            "Token-2022 mint whose metadata lives on the mint account itself. No freeze authority."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  105,
+                  99,
+                  111,
                   110,
-                  116
+                  102,
+                  105,
+                  103
                 ]
-              },
-              {
-                "kind": "account",
-                "path": "market"
-              },
-              {
-                "kind": "arg",
-                "path": "side"
               }
             ]
           }
         },
         {
-          "name": "token_program",
-          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+          "name": "user"
         },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "side",
-          "type": "u8"
-        },
-        {
-          "name": "name",
-          "type": "string"
-        },
-        {
-          "name": "symbol",
-          "type": "string"
-        },
-        {
-          "name": "uri",
-          "type": "string"
-        }
-      ]
-    },
-    {
-      "name": "spike_escrow",
-      "discriminator": [
-        117,
-        135,
-        179,
-        214,
-        78,
-        235,
-        31,
-        8
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "order",
+          "name": "trader",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  111,
+                  116,
                   114,
-                  100,
-                  101,
-                  114
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "user"
-              },
-              {
-                "kind": "arg",
-                "path": "nonce"
-              }
-            ]
-          }
-        },
-        {
-          "name": "escrow",
-          "docs": [
-            "Classic SPL Token account owned by the order."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  101,
-                  115,
-                  99,
-                  114,
-                  111,
-                  119
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "order"
-              }
-            ]
-          }
-        },
-        {
-          "name": "stable_mint"
-        },
-        {
-          "name": "user_token",
-          "writable": true
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "nonce",
-          "type": "u64"
-        },
-        {
-          "name": "amount",
-          "type": "u64"
-        },
-        {
-          "name": "ttl_secs",
-          "type": "i64"
-        }
-      ]
-    },
-    {
-      "name": "spike_mint",
-      "discriminator": [
-        208,
-        191,
-        8,
-        133,
-        76,
-        167,
-        78,
-        13
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "signer": true
-        },
-        {
-          "name": "market",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
                   97,
-                  114,
-                  107,
-                  101,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "market.symbol_hash",
-                "account": "SpikeMarket"
-              }
-            ]
-          }
-        },
-        {
-          "name": "mint",
-          "writable": true
-        },
-        {
-          "name": "user_token",
-          "docs": [
-            "The user's associated token account under the Token-2022 program."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "user"
-              },
-              {
-                "kind": "account",
-                "path": "token_program"
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "token_program",
-          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
-        }
-      ],
-      "args": [
-        {
-          "name": "amount",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "spike_release",
-      "discriminator": [
-        92,
-        110,
-        25,
-        140,
-        168,
-        135,
-        232,
-        69
-      ],
-      "accounts": [
-        {
-          "name": "caller",
-          "docs": [
-            "Anyone may release an expired order."
-          ],
-          "signer": true
-        },
-        {
-          "name": "user",
-          "writable": true,
-          "relations": [
-            "order"
-          ]
-        },
-        {
-          "name": "order",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  111,
-                  114,
                   100,
                   101,
                   114
@@ -434,152 +148,923 @@
               },
               {
                 "kind": "account",
-                "path": "order.user",
-                "account": "SpikeOrder"
-              },
-              {
-                "kind": "account",
-                "path": "order.nonce",
-                "account": "SpikeOrder"
+                "path": "user"
               }
             ]
           }
         },
         {
-          "name": "escrow",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  101,
-                  115,
-                  99,
-                  114,
-                  111,
-                  119
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "order"
-              }
-            ]
-          }
-        },
-        {
-          "name": "stable_mint"
-        },
-        {
-          "name": "destination",
-          "docs": [
-            "Any token account of the escrowed mint that the order's user owns."
-          ],
-          "writable": true
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
+    },
+    {
+      "name": "set_config",
+      "discriminator": [
+        108,
+        158,
+        154,
+        175,
+        212,
+        98,
+        52,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "new_treasury",
+          "docs": [
+            "When present, replaces `config.treasury`."
+          ],
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "SetConfigArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_pause",
+      "discriminator": [
+        63,
+        32,
+        154,
+        2,
+        56,
+        103,
+        79,
+        45
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The admin or the relayer."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "flags",
+          "type": "u8"
+        }
+      ]
     }
   ],
   "accounts": [
     {
-      "name": "SpikeMarket",
+      "name": "Config",
       "discriminator": [
-        8,
-        193,
-        46,
-        48,
-        153,
-        62,
-        168,
-        55
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
       ]
     },
     {
-      "name": "SpikeOrder",
+      "name": "Trader",
       "discriminator": [
-        228,
-        165,
-        224,
-        48,
-        236,
+        74,
+        133,
+        32,
+        105,
+        47,
+        50,
+        5,
+        238
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ConfigChanged",
+      "discriminator": [
+        147,
+        25,
+        86,
+        98,
+        98,
+        77,
+        78,
+        192
+      ]
+    },
+    {
+      "name": "Initialized",
+      "discriminator": [
+        208,
+        213,
+        115,
+        98,
+        115,
+        82,
+        201,
+        209
+      ]
+    },
+    {
+      "name": "MarketCreated",
+      "discriminator": [
+        88,
+        184,
+        130,
+        231,
+        226,
+        84,
+        6,
+        58
+      ]
+    },
+    {
+      "name": "MarketSettled",
+      "discriminator": [
+        237,
+        212,
+        22,
+        175,
+        201,
+        117,
+        215,
+        99
+      ]
+    },
+    {
+      "name": "MarketStatusChanged",
+      "discriminator": [
+        53,
+        72,
+        160,
+        209,
+        15,
+        222,
+        46,
+        157
+      ]
+    },
+    {
+      "name": "OrderCancelled",
+      "discriminator": [
+        108,
+        56,
+        128,
+        68,
+        168,
+        113,
+        168,
+        239
+      ]
+    },
+    {
+      "name": "OrderFilled",
+      "discriminator": [
+        120,
+        124,
+        109,
+        66,
+        249,
+        116,
+        174,
+        30
+      ]
+    },
+    {
+      "name": "OrderPlaced",
+      "discriminator": [
+        96,
+        130,
+        204,
+        234,
+        169,
+        219,
+        216,
+        227
+      ]
+    },
+    {
+      "name": "OutcomeMintCreated",
+      "discriminator": [
+        49,
+        205,
+        198,
+        150,
         138,
-        230,
-        96
+        242,
+        236,
+        31
+      ]
+    },
+    {
+      "name": "Redeemed",
+      "discriminator": [
+        14,
+        29,
+        183,
+        71,
+        31,
+        165,
+        107,
+        38
+      ]
+    },
+    {
+      "name": "SettlementRevoked",
+      "discriminator": [
+        226,
+        194,
+        4,
+        208,
+        111,
+        190,
+        149,
+        74
+      ]
+    },
+    {
+      "name": "TraderRegistered",
+      "discriminator": [
+        8,
+        197,
+        38,
+        177,
+        214,
+        57,
+        9,
+        194
       ]
     }
   ],
   "errors": [
     {
       "code": 6000,
-      "name": "NotUpgradeAuthority",
-      "msg": "Signer is not the program's upgrade authority"
+      "name": "Unauthorized",
+      "msg": "Signer is not allowed to do this"
     },
     {
       "code": 6001,
-      "name": "SymbolHashMismatch",
-      "msg": "Symbol hash does not equal sha256(symbol)"
+      "name": "BadConfig",
+      "msg": "Configuration value is out of range"
     },
     {
       "code": 6002,
-      "name": "InvalidSide",
-      "msg": "Side must be 0 or 1"
+      "name": "Paused",
+      "msg": "This action is paused"
     },
     {
       "code": 6003,
-      "name": "ZeroAmount",
-      "msg": "Amount must be greater than zero"
+      "name": "RealStablecoinNotAllowed",
+      "msg": "Real stablecoin mints are not allowed in this build"
     },
     {
       "code": 6004,
-      "name": "InvalidTtl",
-      "msg": "Time to live must be greater than zero"
+      "name": "BadSymbol",
+      "msg": "Symbol must be 1 to 64 characters from A-Z, 0-9 and '-'"
     },
     {
       "code": 6005,
-      "name": "NotExpired",
-      "msg": "Order has not expired yet"
+      "name": "BadSymbolHash",
+      "msg": "Symbol hash does not equal sha256(symbol)"
     },
     {
       "code": 6006,
-      "name": "Overflow",
+      "name": "MintAlreadyCreated",
+      "msg": "The outcome mint for this side already exists"
+    },
+    {
+      "code": 6007,
+      "name": "MintsNotReady",
+      "msg": "Both outcome mints must exist first"
+    },
+    {
+      "code": 6008,
+      "name": "MarketNotOpen",
+      "msg": "Market is not open"
+    },
+    {
+      "code": 6009,
+      "name": "AlreadySettled",
+      "msg": "Market is already settled"
+    },
+    {
+      "code": 6010,
+      "name": "NotSettled",
+      "msg": "Market is not settled"
+    },
+    {
+      "code": 6011,
+      "name": "TooCloseToClose",
+      "msg": "Too close to the market's close time"
+    },
+    {
+      "code": 6012,
+      "name": "BadQuantity",
+      "msg": "Quantity is out of range"
+    },
+    {
+      "code": 6013,
+      "name": "BadPrice",
+      "msg": "Price is out of range"
+    },
+    {
+      "code": 6014,
+      "name": "OffTick",
+      "msg": "Price is not a multiple of the market tick"
+    },
+    {
+      "code": 6015,
+      "name": "FeeCapTooHigh",
+      "msg": "Fee cap is too high"
+    },
+    {
+      "code": 6016,
+      "name": "FillExceedsOrder",
+      "msg": "Fill quantity must be positive and at most the order quantity"
+    },
+    {
+      "code": 6017,
+      "name": "CostOutOfRange",
+      "msg": "Cost is outside the range the order allows"
+    },
+    {
+      "code": 6018,
+      "name": "ProceedsOutOfRange",
+      "msg": "Proceeds are outside the range the order allows"
+    },
+    {
+      "code": 6019,
+      "name": "FeeExceedsCap",
+      "msg": "Fee exceeds the order's fee cap"
+    },
+    {
+      "code": 6020,
+      "name": "SupplyCapExceeded",
+      "msg": "Fill would exceed the market's supply cap"
+    },
+    {
+      "code": 6021,
+      "name": "OrderExpired",
+      "msg": "Order has expired"
+    },
+    {
+      "code": 6022,
+      "name": "OrderNotExpired",
+      "msg": "Order has not expired yet"
+    },
+    {
+      "code": 6023,
+      "name": "WrongKind",
+      "msg": "Order is of the other kind"
+    },
+    {
+      "code": 6024,
+      "name": "WrongMarket",
+      "msg": "Order belongs to another market"
+    },
+    {
+      "code": 6025,
+      "name": "WrongMint",
+      "msg": "Mint is not the expected one"
+    },
+    {
+      "code": 6026,
+      "name": "WrongOwner",
+      "msg": "Token account is not owned by the expected wallet"
+    },
+    {
+      "code": 6027,
+      "name": "BadPayout",
+      "msg": "Payouts must add up to 10,000"
+    },
+    {
+      "code": 6028,
+      "name": "RedeemLocked",
+      "msg": "Redemption is not open yet"
+    },
+    {
+      "code": 6029,
+      "name": "RevokeWindowClosed",
+      "msg": "Settlement can no longer be revoked"
+    },
+    {
+      "code": 6030,
+      "name": "MathOverflow",
       "msg": "Arithmetic overflow"
     }
   ],
   "types": [
     {
-      "name": "SpikeMarket",
+      "name": "Config",
       "docs": [
-        "Mint authority for one market's outcome mints. Stores its own seeds so it can sign."
+        "Program-wide settings and roles. PDA `[\"config\"]`."
       ],
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "symbol_hash",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
+            "name": "admin",
+            "docs": [
+              "The program's upgrade authority at `initialize`. Cannot be changed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "relayer",
+            "docs": [
+              "Fills and cancels orders, creates markets."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "settler",
+            "docs": [
+              "Settles markets."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "registrar",
+            "docs": [
+              "Registers traders after login."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "stable_mint",
+            "docs": [
+              "Cannot be changed after `initialize`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "docs": [
+              "Stable token account that receives `cost + fee` on buys and revoked settlement",
+              "funds."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "order_ttl_secs",
+            "type": "u32"
+          },
+          {
+            "name": "min_order_units",
+            "docs": [
+              "Applies to buys."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_order_units",
+            "docs": [
+              "Applies to buys and sells."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "settle_delay_secs",
+            "docs": [
+              "Redemption opens this long after `settle_market`."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "pause_flags",
+            "docs": [
+              "Bits `PAUSE_PLACE` and `PAUSE_FILL`."
+            ],
+            "type": "u8"
           },
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
           }
         ]
       }
     },
     {
-      "name": "SpikeOrder",
+      "name": "ConfigChanged",
       "docs": [
-        "One escrowed order. Token authority of its escrow account."
+        "Emitted by `set_config` and `set_pause`; the new values are read from the Config account."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": []
+      }
+    },
+    {
+      "name": "InitializeArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "relayer",
+            "type": "pubkey"
+          },
+          {
+            "name": "settler",
+            "type": "pubkey"
+          },
+          {
+            "name": "registrar",
+            "type": "pubkey"
+          },
+          {
+            "name": "order_ttl_secs",
+            "type": "u32"
+          },
+          {
+            "name": "min_order_units",
+            "type": "u64"
+          },
+          {
+            "name": "max_order_units",
+            "type": "u64"
+          },
+          {
+            "name": "settle_delay_secs",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Initialized",
+      "type": {
+        "kind": "struct",
+        "fields": []
+      }
+    },
+    {
+      "name": "MarketCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketSettled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "yes_payout",
+            "type": "u64"
+          },
+          {
+            "name": "no_payout",
+            "type": "u64"
+          },
+          {
+            "name": "funding",
+            "type": "u64"
+          },
+          {
+            "name": "redeem_after",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketStatusChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": "u8"
+          },
+          {
+            "name": "close_ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "order",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "by",
+            "docs": [
+              "The signer that cancelled the order."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderFilled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "order",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": "u8"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "fill_qty",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Cost of a buy, proceeds of a sell."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "fee",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderPlaced",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "order",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": "u8"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "qty_units",
+            "type": "u64"
+          },
+          {
+            "name": "limit_px",
+            "type": "u16"
+          },
+          {
+            "name": "max_fee",
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OutcomeMintCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Redeemed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "payout",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SetConfigArgs",
+      "docs": [
+        "Every field is optional: `None` keeps the current value."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "relayer",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "settler",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "registrar",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "order_ttl_secs",
+            "type": {
+              "option": "u32"
+            }
+          },
+          {
+            "name": "min_order_units",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "max_order_units",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "settle_delay_secs",
+            "type": {
+              "option": "u32"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SettlementRevoked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Trader",
+      "docs": [
+        "A wallet that may place orders. PDA `[\"trader\", user]`, created by the registrar."
       ],
       "type": {
         "kind": "struct",
@@ -589,22 +1074,55 @@
             "type": "pubkey"
           },
           {
-            "name": "nonce",
+            "name": "next_nonce",
+            "docs": [
+              "Nonce of the user's next order. It only increases, so order addresses never repeat."
+            ],
             "type": "u64"
-          },
-          {
-            "name": "expires_at",
-            "type": "i64"
           },
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TraderRegistered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
           }
         ]
       }
     }
   ],
   "constants": [
+    {
+      "name": "CONFIG_SEED",
+      "type": "bytes",
+      "value": "[99, 111, 110, 102, 105, 103]"
+    },
+    {
+      "name": "CUTOFF_MIN_SECS",
+      "docs": [
+        "Shortest allowed gap between the last order placement and a market's close time."
+      ],
+      "type": "u32",
+      "value": "30"
+    },
     {
       "name": "ESCROW_SEED",
       "type": "bytes",
@@ -614,6 +1132,19 @@
       "name": "MARKET_SEED",
       "type": "bytes",
       "value": "[109, 97, 114, 107, 101, 116]"
+    },
+    {
+      "name": "MAX_FEE_BASE",
+      "type": "u64",
+      "value": "50000"
+    },
+    {
+      "name": "MAX_FEE_PER_UNIT",
+      "docs": [
+        "An order's fee cap may not exceed `qty_units * MAX_FEE_PER_UNIT + MAX_FEE_BASE`."
+      ],
+      "type": "u64",
+      "value": "200"
     },
     {
       "name": "MINT_SEED",
@@ -628,10 +1159,71 @@
     {
       "name": "OUTCOME_DECIMALS",
       "docs": [
-        "Outcome tokens have two decimals: one base unit is 0.01 contract."
+        "Outcome tokens have two decimals: one unit is 0.01 contract."
       ],
       "type": "u8",
       "value": "2"
+    },
+    {
+      "name": "PAUSE_FILL",
+      "docs": [
+        "Pause bit: no fills."
+      ],
+      "type": "u8",
+      "value": "2"
+    },
+    {
+      "name": "PAUSE_PLACE",
+      "docs": [
+        "Pause bit: no new orders."
+      ],
+      "type": "u8",
+      "value": "1"
+    },
+    {
+      "name": "PAYOUT_TOTAL",
+      "docs": [
+        "`yes_payout + no_payout` of a settled market, in micro-dollars per unit."
+      ],
+      "type": "u64",
+      "value": "10000"
+    },
+    {
+      "name": "PX_MAX",
+      "docs": [
+        "Prices are micro-dollars per unit, from 1 to this value."
+      ],
+      "type": "u16",
+      "value": "9999"
+    },
+    {
+      "name": "REDEEM_SEED",
+      "type": "bytes",
+      "value": "[114, 101, 100, 101, 101, 109]"
+    },
+    {
+      "name": "STABLE_DECIMALS",
+      "docs": [
+        "The stablecoin is a classic SPL Token mint with six decimals: one base unit is one",
+        "micro-dollar."
+      ],
+      "type": "u8",
+      "value": "6"
+    },
+    {
+      "name": "TRADER_SEED",
+      "type": "bytes",
+      "value": "[116, 114, 97, 100, 101, 114]"
+    },
+    {
+      "name": "TTL_MAX_SECS",
+      "type": "u32",
+      "value": "900"
+    },
+    {
+      "name": "TTL_MIN_SECS",
+      "type": "u32",
+      "value": "30"
     }
   ]
 }

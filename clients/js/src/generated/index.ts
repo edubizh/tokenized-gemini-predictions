@@ -9,6 +9,7 @@
 export * from "./accounts/index.js";
 export * from "./constants/index.js";
 export * from "./errors/index.js";
+export * from "./events/index.js";
 export * from "./instructions/index.js";
 export * from "./pdas/index.js";
 export * from "./programs/index.js";

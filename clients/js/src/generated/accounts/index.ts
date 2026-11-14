@@ -6,5 +6,5 @@
  * @see https://github.com/codama-idl/codama
  */
 
-export * from "./spikeMarket.js";
-export * from "./spikeOrder.js";
+export * from "./config.js";
+export * from "./trader.js";

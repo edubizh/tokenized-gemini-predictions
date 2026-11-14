@@ -15,40 +15,136 @@ import {
 } from "@solana/kit";
 import { OUTCOME_TOKENS_PROGRAM_ADDRESS } from "../programs/index.js";
 
-/** NotUpgradeAuthority: Signer is not the program's upgrade authority */
-export const OUTCOME_TOKENS_ERROR__NOT_UPGRADE_AUTHORITY = 0x1770; // 6000
-/** SymbolHashMismatch: Symbol hash does not equal sha256(symbol) */
-export const OUTCOME_TOKENS_ERROR__SYMBOL_HASH_MISMATCH = 0x1771; // 6001
-/** InvalidSide: Side must be 0 or 1 */
-export const OUTCOME_TOKENS_ERROR__INVALID_SIDE = 0x1772; // 6002
-/** ZeroAmount: Amount must be greater than zero */
-export const OUTCOME_TOKENS_ERROR__ZERO_AMOUNT = 0x1773; // 6003
-/** InvalidTtl: Time to live must be greater than zero */
-export const OUTCOME_TOKENS_ERROR__INVALID_TTL = 0x1774; // 6004
-/** NotExpired: Order has not expired yet */
-export const OUTCOME_TOKENS_ERROR__NOT_EXPIRED = 0x1775; // 6005
-/** Overflow: Arithmetic overflow */
-export const OUTCOME_TOKENS_ERROR__OVERFLOW = 0x1776; // 6006
+/** Unauthorized: Signer is not allowed to do this */
+export const OUTCOME_TOKENS_ERROR__UNAUTHORIZED = 0x1770; // 6000
+/** BadConfig: Configuration value is out of range */
+export const OUTCOME_TOKENS_ERROR__BAD_CONFIG = 0x1771; // 6001
+/** Paused: This action is paused */
+export const OUTCOME_TOKENS_ERROR__PAUSED = 0x1772; // 6002
+/** RealStablecoinNotAllowed: Real stablecoin mints are not allowed in this build */
+export const OUTCOME_TOKENS_ERROR__REAL_STABLECOIN_NOT_ALLOWED = 0x1773; // 6003
+/** BadSymbol: Symbol must be 1 to 64 characters from A-Z, 0-9 and '-' */
+export const OUTCOME_TOKENS_ERROR__BAD_SYMBOL = 0x1774; // 6004
+/** BadSymbolHash: Symbol hash does not equal sha256(symbol) */
+export const OUTCOME_TOKENS_ERROR__BAD_SYMBOL_HASH = 0x1775; // 6005
+/** MintAlreadyCreated: The outcome mint for this side already exists */
+export const OUTCOME_TOKENS_ERROR__MINT_ALREADY_CREATED = 0x1776; // 6006
+/** MintsNotReady: Both outcome mints must exist first */
+export const OUTCOME_TOKENS_ERROR__MINTS_NOT_READY = 0x1777; // 6007
+/** MarketNotOpen: Market is not open */
+export const OUTCOME_TOKENS_ERROR__MARKET_NOT_OPEN = 0x1778; // 6008
+/** AlreadySettled: Market is already settled */
+export const OUTCOME_TOKENS_ERROR__ALREADY_SETTLED = 0x1779; // 6009
+/** NotSettled: Market is not settled */
+export const OUTCOME_TOKENS_ERROR__NOT_SETTLED = 0x177a; // 6010
+/** TooCloseToClose: Too close to the market's close time */
+export const OUTCOME_TOKENS_ERROR__TOO_CLOSE_TO_CLOSE = 0x177b; // 6011
+/** BadQuantity: Quantity is out of range */
+export const OUTCOME_TOKENS_ERROR__BAD_QUANTITY = 0x177c; // 6012
+/** BadPrice: Price is out of range */
+export const OUTCOME_TOKENS_ERROR__BAD_PRICE = 0x177d; // 6013
+/** OffTick: Price is not a multiple of the market tick */
+export const OUTCOME_TOKENS_ERROR__OFF_TICK = 0x177e; // 6014
+/** FeeCapTooHigh: Fee cap is too high */
+export const OUTCOME_TOKENS_ERROR__FEE_CAP_TOO_HIGH = 0x177f; // 6015
+/** FillExceedsOrder: Fill quantity must be positive and at most the order quantity */
+export const OUTCOME_TOKENS_ERROR__FILL_EXCEEDS_ORDER = 0x1780; // 6016
+/** CostOutOfRange: Cost is outside the range the order allows */
+export const OUTCOME_TOKENS_ERROR__COST_OUT_OF_RANGE = 0x1781; // 6017
+/** ProceedsOutOfRange: Proceeds are outside the range the order allows */
+export const OUTCOME_TOKENS_ERROR__PROCEEDS_OUT_OF_RANGE = 0x1782; // 6018
+/** FeeExceedsCap: Fee exceeds the order's fee cap */
+export const OUTCOME_TOKENS_ERROR__FEE_EXCEEDS_CAP = 0x1783; // 6019
+/** SupplyCapExceeded: Fill would exceed the market's supply cap */
+export const OUTCOME_TOKENS_ERROR__SUPPLY_CAP_EXCEEDED = 0x1784; // 6020
+/** OrderExpired: Order has expired */
+export const OUTCOME_TOKENS_ERROR__ORDER_EXPIRED = 0x1785; // 6021
+/** OrderNotExpired: Order has not expired yet */
+export const OUTCOME_TOKENS_ERROR__ORDER_NOT_EXPIRED = 0x1786; // 6022
+/** WrongKind: Order is of the other kind */
+export const OUTCOME_TOKENS_ERROR__WRONG_KIND = 0x1787; // 6023
+/** WrongMarket: Order belongs to another market */
+export const OUTCOME_TOKENS_ERROR__WRONG_MARKET = 0x1788; // 6024
+/** WrongMint: Mint is not the expected one */
+export const OUTCOME_TOKENS_ERROR__WRONG_MINT = 0x1789; // 6025
+/** WrongOwner: Token account is not owned by the expected wallet */
+export const OUTCOME_TOKENS_ERROR__WRONG_OWNER = 0x178a; // 6026
+/** BadPayout: Payouts must add up to 10,000 */
+export const OUTCOME_TOKENS_ERROR__BAD_PAYOUT = 0x178b; // 6027
+/** RedeemLocked: Redemption is not open yet */
+export const OUTCOME_TOKENS_ERROR__REDEEM_LOCKED = 0x178c; // 6028
+/** RevokeWindowClosed: Settlement can no longer be revoked */
+export const OUTCOME_TOKENS_ERROR__REVOKE_WINDOW_CLOSED = 0x178d; // 6029
+/** MathOverflow: Arithmetic overflow */
+export const OUTCOME_TOKENS_ERROR__MATH_OVERFLOW = 0x178e; // 6030
 
 export type OutcomeTokensError =
-  | typeof OUTCOME_TOKENS_ERROR__INVALID_SIDE
-  | typeof OUTCOME_TOKENS_ERROR__INVALID_TTL
-  | typeof OUTCOME_TOKENS_ERROR__NOT_EXPIRED
-  | typeof OUTCOME_TOKENS_ERROR__NOT_UPGRADE_AUTHORITY
-  | typeof OUTCOME_TOKENS_ERROR__OVERFLOW
-  | typeof OUTCOME_TOKENS_ERROR__SYMBOL_HASH_MISMATCH
-  | typeof OUTCOME_TOKENS_ERROR__ZERO_AMOUNT;
+  | typeof OUTCOME_TOKENS_ERROR__ALREADY_SETTLED
+  | typeof OUTCOME_TOKENS_ERROR__BAD_CONFIG
+  | typeof OUTCOME_TOKENS_ERROR__BAD_PAYOUT
+  | typeof OUTCOME_TOKENS_ERROR__BAD_PRICE
+  | typeof OUTCOME_TOKENS_ERROR__BAD_QUANTITY
+  | typeof OUTCOME_TOKENS_ERROR__BAD_SYMBOL
+  | typeof OUTCOME_TOKENS_ERROR__BAD_SYMBOL_HASH
+  | typeof OUTCOME_TOKENS_ERROR__COST_OUT_OF_RANGE
+  | typeof OUTCOME_TOKENS_ERROR__FEE_CAP_TOO_HIGH
+  | typeof OUTCOME_TOKENS_ERROR__FEE_EXCEEDS_CAP
+  | typeof OUTCOME_TOKENS_ERROR__FILL_EXCEEDS_ORDER
+  | typeof OUTCOME_TOKENS_ERROR__MARKET_NOT_OPEN
+  | typeof OUTCOME_TOKENS_ERROR__MATH_OVERFLOW
+  | typeof OUTCOME_TOKENS_ERROR__MINT_ALREADY_CREATED
+  | typeof OUTCOME_TOKENS_ERROR__MINTS_NOT_READY
+  | typeof OUTCOME_TOKENS_ERROR__NOT_SETTLED
+  | typeof OUTCOME_TOKENS_ERROR__OFF_TICK
+  | typeof OUTCOME_TOKENS_ERROR__ORDER_EXPIRED
+  | typeof OUTCOME_TOKENS_ERROR__ORDER_NOT_EXPIRED
+  | typeof OUTCOME_TOKENS_ERROR__PAUSED
+  | typeof OUTCOME_TOKENS_ERROR__PROCEEDS_OUT_OF_RANGE
+  | typeof OUTCOME_TOKENS_ERROR__REAL_STABLECOIN_NOT_ALLOWED
+  | typeof OUTCOME_TOKENS_ERROR__REDEEM_LOCKED
+  | typeof OUTCOME_TOKENS_ERROR__REVOKE_WINDOW_CLOSED
+  | typeof OUTCOME_TOKENS_ERROR__SUPPLY_CAP_EXCEEDED
+  | typeof OUTCOME_TOKENS_ERROR__TOO_CLOSE_TO_CLOSE
+  | typeof OUTCOME_TOKENS_ERROR__UNAUTHORIZED
+  | typeof OUTCOME_TOKENS_ERROR__WRONG_KIND
+  | typeof OUTCOME_TOKENS_ERROR__WRONG_MARKET
+  | typeof OUTCOME_TOKENS_ERROR__WRONG_MINT
+  | typeof OUTCOME_TOKENS_ERROR__WRONG_OWNER;
 
 let outcomeTokensErrorMessages: Record<OutcomeTokensError, string> | undefined;
 if (process.env["NODE_ENV"] !== "production") {
   outcomeTokensErrorMessages = {
-    [OUTCOME_TOKENS_ERROR__INVALID_SIDE]: `Side must be 0 or 1`,
-    [OUTCOME_TOKENS_ERROR__INVALID_TTL]: `Time to live must be greater than zero`,
-    [OUTCOME_TOKENS_ERROR__NOT_EXPIRED]: `Order has not expired yet`,
-    [OUTCOME_TOKENS_ERROR__NOT_UPGRADE_AUTHORITY]: `Signer is not the program's upgrade authority`,
-    [OUTCOME_TOKENS_ERROR__OVERFLOW]: `Arithmetic overflow`,
-    [OUTCOME_TOKENS_ERROR__SYMBOL_HASH_MISMATCH]: `Symbol hash does not equal sha256(symbol)`,
-    [OUTCOME_TOKENS_ERROR__ZERO_AMOUNT]: `Amount must be greater than zero`,
+    [OUTCOME_TOKENS_ERROR__ALREADY_SETTLED]: `Market is already settled`,
+    [OUTCOME_TOKENS_ERROR__BAD_CONFIG]: `Configuration value is out of range`,
+    [OUTCOME_TOKENS_ERROR__BAD_PAYOUT]: `Payouts must add up to 10,000`,
+    [OUTCOME_TOKENS_ERROR__BAD_PRICE]: `Price is out of range`,
+    [OUTCOME_TOKENS_ERROR__BAD_QUANTITY]: `Quantity is out of range`,
+    [OUTCOME_TOKENS_ERROR__BAD_SYMBOL]: `Symbol must be 1 to 64 characters from A-Z, 0-9 and '-'`,
+    [OUTCOME_TOKENS_ERROR__BAD_SYMBOL_HASH]: `Symbol hash does not equal sha256(symbol)`,
+    [OUTCOME_TOKENS_ERROR__COST_OUT_OF_RANGE]: `Cost is outside the range the order allows`,
+    [OUTCOME_TOKENS_ERROR__FEE_CAP_TOO_HIGH]: `Fee cap is too high`,
+    [OUTCOME_TOKENS_ERROR__FEE_EXCEEDS_CAP]: `Fee exceeds the order's fee cap`,
+    [OUTCOME_TOKENS_ERROR__FILL_EXCEEDS_ORDER]: `Fill quantity must be positive and at most the order quantity`,
+    [OUTCOME_TOKENS_ERROR__MARKET_NOT_OPEN]: `Market is not open`,
+    [OUTCOME_TOKENS_ERROR__MATH_OVERFLOW]: `Arithmetic overflow`,
+    [OUTCOME_TOKENS_ERROR__MINT_ALREADY_CREATED]: `The outcome mint for this side already exists`,
+    [OUTCOME_TOKENS_ERROR__MINTS_NOT_READY]: `Both outcome mints must exist first`,
+    [OUTCOME_TOKENS_ERROR__NOT_SETTLED]: `Market is not settled`,
+    [OUTCOME_TOKENS_ERROR__OFF_TICK]: `Price is not a multiple of the market tick`,
+    [OUTCOME_TOKENS_ERROR__ORDER_EXPIRED]: `Order has expired`,
+    [OUTCOME_TOKENS_ERROR__ORDER_NOT_EXPIRED]: `Order has not expired yet`,
+    [OUTCOME_TOKENS_ERROR__PAUSED]: `This action is paused`,
+    [OUTCOME_TOKENS_ERROR__PROCEEDS_OUT_OF_RANGE]: `Proceeds are outside the range the order allows`,
+    [OUTCOME_TOKENS_ERROR__REAL_STABLECOIN_NOT_ALLOWED]: `Real stablecoin mints are not allowed in this build`,
+    [OUTCOME_TOKENS_ERROR__REDEEM_LOCKED]: `Redemption is not open yet`,
+    [OUTCOME_TOKENS_ERROR__REVOKE_WINDOW_CLOSED]: `Settlement can no longer be revoked`,
+    [OUTCOME_TOKENS_ERROR__SUPPLY_CAP_EXCEEDED]: `Fill would exceed the market's supply cap`,
+    [OUTCOME_TOKENS_ERROR__TOO_CLOSE_TO_CLOSE]: `Too close to the market's close time`,
+    [OUTCOME_TOKENS_ERROR__UNAUTHORIZED]: `Signer is not allowed to do this`,
+    [OUTCOME_TOKENS_ERROR__WRONG_KIND]: `Order is of the other kind`,
+    [OUTCOME_TOKENS_ERROR__WRONG_MARKET]: `Order belongs to another market`,
+    [OUTCOME_TOKENS_ERROR__WRONG_MINT]: `Mint is not the expected one`,
+    [OUTCOME_TOKENS_ERROR__WRONG_OWNER]: `Token account is not owned by the expected wallet`,
   };
 }
 

@@ -6,8 +6,7 @@
  * @see https://github.com/codama-idl/codama
  */
 
-export * from "./spikeCreateMarket.js";
-export * from "./spikeCreateMint.js";
-export * from "./spikeEscrow.js";
-export * from "./spikeMint.js";
-export * from "./spikeRelease.js";
+export * from "./initialize.js";
+export * from "./registerTrader.js";
+export * from "./setConfig.js";
+export * from "./setPause.js";

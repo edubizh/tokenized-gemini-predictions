@@ -10,19 +10,17 @@ import {
   getAddressEncoder,
   getBytesEncoder,
   getProgramDerivedAddress,
-  getU8Encoder,
   type Address,
   type HasAddress,
   type ProgramDerivedAddress,
 } from "@solana/kit";
 
-export type MintSeeds = {
-  market: Address | HasAddress;
-  side: number;
+export type TraderSeeds = {
+  user: Address | HasAddress;
 };
 
-export async function findMintPda(
-  seeds: MintSeeds,
+export async function findTraderPda(
+  seeds: TraderSeeds,
   config: { programAddress?: Address | HasAddress | undefined } = {},
 ): Promise<ProgramDerivedAddress> {
   const {
@@ -36,9 +34,8 @@ export async function findMintPda(
   return await getProgramDerivedAddress({
     programAddress,
     seeds: [
-      getBytesEncoder().encode(new Uint8Array([109, 105, 110, 116])),
-      getAddressEncoder().encode(seeds.market),
-      getU8Encoder().encode(seeds.side),
+      getBytesEncoder().encode(new Uint8Array([116, 114, 97, 100, 101, 114])),
+      getAddressEncoder().encode(seeds.user),
     ],
   });
 }

@@ -36,50 +36,41 @@ import {
   type SelfPlanAndSendFunctions,
 } from "@solana/kit/program-client-core";
 import {
-  getSpikeMarketCodec,
-  getSpikeOrderCodec,
-  type SpikeMarket,
-  type SpikeMarketArgs,
-  type SpikeOrder,
-  type SpikeOrderArgs,
+  getConfigCodec,
+  getTraderCodec,
+  type Config,
+  type ConfigArgs,
+  type Trader,
+  type TraderArgs,
 } from "../accounts/index.js";
 import {
-  getSpikeCreateMarketInstructionAsync,
-  getSpikeCreateMintInstructionAsync,
-  getSpikeEscrowInstructionAsync,
-  getSpikeMintInstructionAsync,
-  getSpikeReleaseInstructionAsync,
-  parseSpikeCreateMarketInstruction,
-  parseSpikeCreateMintInstruction,
-  parseSpikeEscrowInstruction,
-  parseSpikeMintInstruction,
-  parseSpikeReleaseInstruction,
-  type ParsedSpikeCreateMarketInstruction,
-  type ParsedSpikeCreateMintInstruction,
-  type ParsedSpikeEscrowInstruction,
-  type ParsedSpikeMintInstruction,
-  type ParsedSpikeReleaseInstruction,
-  type SpikeCreateMarketAsyncInput,
-  type SpikeCreateMintAsyncInput,
-  type SpikeEscrowAsyncInput,
-  type SpikeMintAsyncInput,
-  type SpikeReleaseAsyncInput,
+  getInitializeInstructionAsync,
+  getRegisterTraderInstructionAsync,
+  getSetConfigInstructionAsync,
+  getSetPauseInstructionAsync,
+  parseInitializeInstruction,
+  parseRegisterTraderInstruction,
+  parseSetConfigInstruction,
+  parseSetPauseInstruction,
+  type InitializeAsyncInput,
+  type ParsedInitializeInstruction,
+  type ParsedRegisterTraderInstruction,
+  type ParsedSetConfigInstruction,
+  type ParsedSetPauseInstruction,
+  type RegisterTraderAsyncInput,
+  type SetConfigAsyncInput,
+  type SetPauseAsyncInput,
 } from "../instructions/index.js";
-import {
-  findEscrowPda,
-  findMarketPda,
-  findMintPda,
-  findOrderPda,
-} from "../pdas/index.js";
+import { findConfigPda, findTraderPda } from "../pdas/index.js";
 
 export const OUTCOME_TOKENS_PROGRAM_ADDRESS =
   "8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn" as Address<"8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn">;
 
 export const OutcomeTokensAccount = {
-  0: "SpikeMarket",
-  1: "SpikeOrder",
-  SpikeMarket: 0,
-  SpikeOrder: 1,
+  0: "Config",
+  1: "Trader",
+  Config: 0,
+  Trader: 1,
 } as const;
 
 export type OutcomeTokensAccount = (typeof OutcomeTokensAccount)[Exclude<
@@ -95,23 +86,23 @@ export function identifyOutcomeTokensAccount(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([8, 193, 46, 48, 153, 62, 168, 55]),
+        new Uint8Array([155, 12, 170, 224, 30, 250, 204, 130]),
       ),
       0,
     )
   ) {
-    return OutcomeTokensAccount.SpikeMarket;
+    return OutcomeTokensAccount.Config;
   }
   if (
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([228, 165, 224, 48, 236, 138, 230, 96]),
+        new Uint8Array([74, 133, 32, 105, 47, 50, 5, 238]),
       ),
       0,
     )
   ) {
-    return OutcomeTokensAccount.SpikeOrder;
+    return OutcomeTokensAccount.Trader;
   }
   throw new SolanaError(
     SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_ACCOUNT,
@@ -119,17 +110,188 @@ export function identifyOutcomeTokensAccount(
   );
 }
 
+export const OutcomeTokensEvent = {
+  0: "ConfigChanged",
+  1: "Initialized",
+  2: "MarketCreated",
+  3: "MarketSettled",
+  4: "MarketStatusChanged",
+  5: "OrderCancelled",
+  6: "OrderFilled",
+  7: "OrderPlaced",
+  8: "OutcomeMintCreated",
+  9: "Redeemed",
+  10: "SettlementRevoked",
+  11: "TraderRegistered",
+  ConfigChanged: 0,
+  Initialized: 1,
+  MarketCreated: 2,
+  MarketSettled: 3,
+  MarketStatusChanged: 4,
+  OrderCancelled: 5,
+  OrderFilled: 6,
+  OrderPlaced: 7,
+  OutcomeMintCreated: 8,
+  Redeemed: 9,
+  SettlementRevoked: 10,
+  TraderRegistered: 11,
+} as const;
+
+export type OutcomeTokensEvent = (typeof OutcomeTokensEvent)[Exclude<
+  keyof typeof OutcomeTokensEvent,
+  number
+>];
+
+export function identifyOutcomeTokensEvent(
+  event: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
+): OutcomeTokensEvent {
+  const data = "data" in event ? event.data : event;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([147, 25, 86, 98, 98, 77, 78, 192]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensEvent.ConfigChanged;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([208, 213, 115, 98, 115, 82, 201, 209]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensEvent.Initialized;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([88, 184, 130, 231, 226, 84, 6, 58]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensEvent.MarketCreated;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([237, 212, 22, 175, 201, 117, 215, 99]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensEvent.MarketSettled;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([53, 72, 160, 209, 15, 222, 46, 157]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensEvent.MarketStatusChanged;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([108, 56, 128, 68, 168, 113, 168, 239]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensEvent.OrderCancelled;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([120, 124, 109, 66, 249, 116, 174, 30]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensEvent.OrderFilled;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([96, 130, 204, 234, 169, 219, 216, 227]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensEvent.OrderPlaced;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([49, 205, 198, 150, 138, 242, 236, 31]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensEvent.OutcomeMintCreated;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([14, 29, 183, 71, 31, 165, 107, 38]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensEvent.Redeemed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([226, 194, 4, 208, 111, 190, 149, 74]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensEvent.SettlementRevoked;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([8, 197, 38, 177, 214, 57, 9, 194]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensEvent.TraderRegistered;
+  }
+  throw new Error(
+    "The provided event could not be identified as a outcomeTokens event.",
+  );
+}
+
 export const OutcomeTokensInstruction = {
-  0: "SpikeCreateMarket",
-  1: "SpikeCreateMint",
-  2: "SpikeEscrow",
-  3: "SpikeMint",
-  4: "SpikeRelease",
-  SpikeCreateMarket: 0,
-  SpikeCreateMint: 1,
-  SpikeEscrow: 2,
-  SpikeMint: 3,
-  SpikeRelease: 4,
+  0: "Initialize",
+  1: "RegisterTrader",
+  2: "SetConfig",
+  3: "SetPause",
+  Initialize: 0,
+  RegisterTrader: 1,
+  SetConfig: 2,
+  SetPause: 3,
 } as const;
 
 export type OutcomeTokensInstruction =
@@ -146,56 +308,45 @@ export function identifyOutcomeTokensInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([72, 199, 199, 31, 62, 170, 17, 115]),
+        new Uint8Array([175, 175, 109, 31, 13, 152, 155, 237]),
       ),
       0,
     )
   ) {
-    return OutcomeTokensInstruction.SpikeCreateMarket;
+    return OutcomeTokensInstruction.Initialize;
   }
   if (
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([197, 230, 50, 59, 189, 71, 173, 71]),
+        new Uint8Array([75, 243, 224, 167, 1, 5, 51, 32]),
       ),
       0,
     )
   ) {
-    return OutcomeTokensInstruction.SpikeCreateMint;
+    return OutcomeTokensInstruction.RegisterTrader;
   }
   if (
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([117, 135, 179, 214, 78, 235, 31, 8]),
+        new Uint8Array([108, 158, 154, 175, 212, 98, 52, 66]),
       ),
       0,
     )
   ) {
-    return OutcomeTokensInstruction.SpikeEscrow;
+    return OutcomeTokensInstruction.SetConfig;
   }
   if (
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([208, 191, 8, 133, 76, 167, 78, 13]),
+        new Uint8Array([63, 32, 154, 2, 56, 103, 79, 45]),
       ),
       0,
     )
   ) {
-    return OutcomeTokensInstruction.SpikeMint;
-  }
-  if (
-    containsBytes(
-      data,
-      fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([92, 110, 25, 140, 168, 135, 232, 69]),
-      ),
-      0,
-    )
-  ) {
-    return OutcomeTokensInstruction.SpikeRelease;
+    return OutcomeTokensInstruction.SetPause;
   }
   throw new SolanaError(
     SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_INSTRUCTION,
@@ -207,59 +358,49 @@ export type ParsedOutcomeTokensInstruction<
   TProgram extends string = "8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn",
 > =
   | ({
-      instructionType: typeof OutcomeTokensInstruction.SpikeCreateMarket;
-    } & ParsedSpikeCreateMarketInstruction<TProgram>)
+      instructionType: typeof OutcomeTokensInstruction.Initialize;
+    } & ParsedInitializeInstruction<TProgram>)
   | ({
-      instructionType: typeof OutcomeTokensInstruction.SpikeCreateMint;
-    } & ParsedSpikeCreateMintInstruction<TProgram>)
+      instructionType: typeof OutcomeTokensInstruction.RegisterTrader;
+    } & ParsedRegisterTraderInstruction<TProgram>)
   | ({
-      instructionType: typeof OutcomeTokensInstruction.SpikeEscrow;
-    } & ParsedSpikeEscrowInstruction<TProgram>)
+      instructionType: typeof OutcomeTokensInstruction.SetConfig;
+    } & ParsedSetConfigInstruction<TProgram>)
   | ({
-      instructionType: typeof OutcomeTokensInstruction.SpikeMint;
-    } & ParsedSpikeMintInstruction<TProgram>)
-  | ({
-      instructionType: typeof OutcomeTokensInstruction.SpikeRelease;
-    } & ParsedSpikeReleaseInstruction<TProgram>);
+      instructionType: typeof OutcomeTokensInstruction.SetPause;
+    } & ParsedSetPauseInstruction<TProgram>);
 
 export function parseOutcomeTokensInstruction<TProgram extends string>(
   instruction: Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array>,
 ): ParsedOutcomeTokensInstruction<TProgram> {
   const instructionType = identifyOutcomeTokensInstruction(instruction);
   switch (instructionType) {
-    case OutcomeTokensInstruction.SpikeCreateMarket: {
+    case OutcomeTokensInstruction.Initialize: {
       assertIsInstructionWithAccounts(instruction);
       return {
-        instructionType: OutcomeTokensInstruction.SpikeCreateMarket,
-        ...parseSpikeCreateMarketInstruction(instruction),
+        instructionType: OutcomeTokensInstruction.Initialize,
+        ...parseInitializeInstruction(instruction),
       };
     }
-    case OutcomeTokensInstruction.SpikeCreateMint: {
+    case OutcomeTokensInstruction.RegisterTrader: {
       assertIsInstructionWithAccounts(instruction);
       return {
-        instructionType: OutcomeTokensInstruction.SpikeCreateMint,
-        ...parseSpikeCreateMintInstruction(instruction),
+        instructionType: OutcomeTokensInstruction.RegisterTrader,
+        ...parseRegisterTraderInstruction(instruction),
       };
     }
-    case OutcomeTokensInstruction.SpikeEscrow: {
+    case OutcomeTokensInstruction.SetConfig: {
       assertIsInstructionWithAccounts(instruction);
       return {
-        instructionType: OutcomeTokensInstruction.SpikeEscrow,
-        ...parseSpikeEscrowInstruction(instruction),
+        instructionType: OutcomeTokensInstruction.SetConfig,
+        ...parseSetConfigInstruction(instruction),
       };
     }
-    case OutcomeTokensInstruction.SpikeMint: {
+    case OutcomeTokensInstruction.SetPause: {
       assertIsInstructionWithAccounts(instruction);
       return {
-        instructionType: OutcomeTokensInstruction.SpikeMint,
-        ...parseSpikeMintInstruction(instruction),
-      };
-    }
-    case OutcomeTokensInstruction.SpikeRelease: {
-      assertIsInstructionWithAccounts(instruction);
-      return {
-        instructionType: OutcomeTokensInstruction.SpikeRelease,
-        ...parseSpikeReleaseInstruction(instruction),
+        instructionType: OutcomeTokensInstruction.SetPause,
+        ...parseSetPauseInstruction(instruction),
       };
     }
     default:
@@ -283,45 +424,38 @@ export type OutcomeTokensPlugin = {
 };
 
 export type OutcomeTokensPluginAccounts = {
-  spikeMarket: ReturnType<typeof getSpikeMarketCodec> &
-    SelfFetchFunctions<SpikeMarketArgs, SpikeMarket>;
-  spikeOrder: ReturnType<typeof getSpikeOrderCodec> &
-    SelfFetchFunctions<SpikeOrderArgs, SpikeOrder>;
+  config: ReturnType<typeof getConfigCodec> &
+    SelfFetchFunctions<ConfigArgs, Config>;
+  trader: ReturnType<typeof getTraderCodec> &
+    SelfFetchFunctions<TraderArgs, Trader>;
 };
 
 export type OutcomeTokensPluginInstructions = {
-  spikeCreateMarket: (
-    input: SpikeCreateMarketAsyncInput,
+  initialize: (
+    input: MakeOptional<InitializeAsyncInput, "payer">,
     config?: { programAddress?: Address | HasAddress },
-  ) => ReturnType<typeof getSpikeCreateMarketInstructionAsync> &
+  ) => ReturnType<typeof getInitializeInstructionAsync> &
     SelfPlanAndSendFunctions;
-  spikeCreateMint: (
-    input: MakeOptional<SpikeCreateMintAsyncInput, "payer">,
+  registerTrader: (
+    input: MakeOptional<RegisterTraderAsyncInput, "payer">,
     config?: { programAddress?: Address | HasAddress },
-  ) => ReturnType<typeof getSpikeCreateMintInstructionAsync> &
+  ) => ReturnType<typeof getRegisterTraderInstructionAsync> &
     SelfPlanAndSendFunctions;
-  spikeEscrow: (
-    input: SpikeEscrowAsyncInput,
+  setConfig: (
+    input: SetConfigAsyncInput,
     config?: { programAddress?: Address | HasAddress },
-  ) => ReturnType<typeof getSpikeEscrowInstructionAsync> &
+  ) => ReturnType<typeof getSetConfigInstructionAsync> &
     SelfPlanAndSendFunctions;
-  spikeMint: (
-    input: SpikeMintAsyncInput,
+  setPause: (
+    input: SetPauseAsyncInput,
     config?: { programAddress?: Address | HasAddress },
-  ) => ReturnType<typeof getSpikeMintInstructionAsync> &
-    SelfPlanAndSendFunctions;
-  spikeRelease: (
-    input: SpikeReleaseAsyncInput,
-    config?: { programAddress?: Address | HasAddress },
-  ) => ReturnType<typeof getSpikeReleaseInstructionAsync> &
+  ) => ReturnType<typeof getSetPauseInstructionAsync> &
     SelfPlanAndSendFunctions;
 };
 
 export type OutcomeTokensPluginPdas = {
-  market: typeof findMarketPda;
-  mint: typeof findMintPda;
-  order: typeof findOrderPda;
-  escrow: typeof findEscrowPda;
+  config: typeof findConfigPda;
+  trader: typeof findTraderPda;
 };
 
 export type OutcomeTokensPluginRequirements = ClientWithRpc<
@@ -340,22 +474,14 @@ export function outcomeTokensProgram(
     return extendClient(client, {
       outcomeTokens: {
         accounts: {
-          spikeMarket: addSelfFetchFunctions(client, getSpikeMarketCodec()),
-          spikeOrder: addSelfFetchFunctions(client, getSpikeOrderCodec()),
+          config: addSelfFetchFunctions(client, getConfigCodec()),
+          trader: addSelfFetchFunctions(client, getTraderCodec()),
         },
         instructions: {
-          spikeCreateMarket: (input, instructionConfig) =>
+          initialize: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
-              getSpikeCreateMarketInstructionAsync(input, {
-                programAddress:
-                  instructionConfig?.programAddress ?? config.programAddress,
-              }),
-            ),
-          spikeCreateMint: (input, instructionConfig) =>
-            addSelfPlanAndSendFunctions(
-              client,
-              getSpikeCreateMintInstructionAsync(
+              getInitializeInstructionAsync(
                 { ...input, payer: input.payer ?? client.payer },
                 {
                   programAddress:
@@ -363,49 +489,42 @@ export function outcomeTokensProgram(
                 },
               ),
             ),
-          spikeEscrow: (input, instructionConfig) =>
+          registerTrader: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
-              getSpikeEscrowInstructionAsync(input, {
+              getRegisterTraderInstructionAsync(
+                { ...input, payer: input.payer ?? client.payer },
+                {
+                  programAddress:
+                    instructionConfig?.programAddress ?? config.programAddress,
+                },
+              ),
+            ),
+          setConfig: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getSetConfigInstructionAsync(input, {
                 programAddress:
                   instructionConfig?.programAddress ?? config.programAddress,
               }),
             ),
-          spikeMint: (input, instructionConfig) =>
+          setPause: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
-              getSpikeMintInstructionAsync(input, {
-                programAddress:
-                  instructionConfig?.programAddress ?? config.programAddress,
-              }),
-            ),
-          spikeRelease: (input, instructionConfig) =>
-            addSelfPlanAndSendFunctions(
-              client,
-              getSpikeReleaseInstructionAsync(input, {
+              getSetPauseInstructionAsync(input, {
                 programAddress:
                   instructionConfig?.programAddress ?? config.programAddress,
               }),
             ),
         },
         pdas: {
-          market: (seeds, pdaConfig) =>
-            findMarketPda(seeds, {
+          config: (pdaConfig) =>
+            findConfigPda({
               programAddress:
                 pdaConfig?.programAddress ?? config.programAddress,
             }),
-          mint: (seeds, pdaConfig) =>
-            findMintPda(seeds, {
-              programAddress:
-                pdaConfig?.programAddress ?? config.programAddress,
-            }),
-          order: (seeds, pdaConfig) =>
-            findOrderPda(seeds, {
-              programAddress:
-                pdaConfig?.programAddress ?? config.programAddress,
-            }),
-          escrow: (seeds, pdaConfig) =>
-            findEscrowPda(seeds, {
+          trader: (seeds, pdaConfig) =>
+            findTraderPda(seeds, {
               programAddress:
                 pdaConfig?.programAddress ?? config.programAddress,
             }),
