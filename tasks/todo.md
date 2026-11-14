@@ -2,7 +2,7 @@
 
 Goal: prediction-market positions from the Gemini Predictions sandbox as SPL tokens on Solana devnet, behind a login. Design: [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md). Scope: [docs/SCOPE.md](../docs/SCOPE.md).
 
-The build runs in vertical slices. Each slice ends with something that runs, and has a stated exit test. Nothing in a later slice starts until the exit test of the one before it passes.
+The build runs in vertical slices. Each slice ends with something that runs, and has a stated exit test. S0a, S0b and S0c are independent spikes and can run in any order; every other slice starts only after the exit tests it depends on have passed.
 
 ## Prerequisites (owner)
 
@@ -24,7 +24,7 @@ Needs only Node and the sandbox key. This is the one unknown that could stop the
 - [ ] Hold a position through expiry; record the settlement and payout records
 - [ ] Save scrubbed transcripts as fixtures
 
-Exit: a fill with derivable quantity and cost, a settled payout record, and written answers to the open questions (netting, fee field, client order id in history). Stop and contact Gemini if a fresh sandbox account cannot trade.
+Exit: a fill with derivable quantity and cost, a settled payout record, and written answers to the open questions (netting, fee field, client order id in history). If a fresh sandbox account cannot trade, stop and reassess before building anything on top.
 
 ## S0b. Toolchain spike
 
@@ -92,17 +92,13 @@ Exit: buy, sell part, settle, redeem the rest on one market, with reconciliation
 - [ ] More login methods and external wallets, with one trading address per user
 - [ ] Hosted demo on the mock venue (or sandbox mode behind an allow-list); Postgres if more than one process needs the ledger
 
-## S6. Depends on Gemini
+## Out of plan
 
-- [ ] Send the outreach questions (public display of sandbox data, naming, non-transferable receipts, OAuth review, partner route)
-- [ ] Production own-account API smoke test with no tokens, to capture real fee and settlement records
-- [ ] Per-user account-linking mode with non-transferable receipts, only with Gemini's written agreement
+This is a personal project. It stays on devnet and the sandbox, and nothing here involves contacting anyone. What a version with real users would take is described in docs/SCOPE.md for context only.
 
 ## Open decisions
 
-- [ ] Repository name: keep, or move to a neutral name (see the Gemini Marks clause in docs/SCOPE.md)
 - [ ] License for this repository
-- [ ] Whether and when to contact Gemini
 
 ## Review
 

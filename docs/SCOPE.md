@@ -66,6 +66,6 @@ Requirements of the build, each backed by a test from the first slice that runs 
 | CFTC Staff Letter 26-25 | https://www.cftc.gov/csl/26-25/download |
 | Gemini developer documentation | https://developer.gemini.com |
 
-## Re-check procedure
+## Staying in scope
 
-Before any step beyond devnet and sandbox: re-read the current rulebook (Rules 3.1, 5.17 and 11.1), the member agreement, the User Agreement, the API Agreement and the Market Data Agreement, check the CFTC filing list for a newer rulebook, and get Gemini's answer in writing. Before anyone else's real money is involved, get advice from a derivatives lawyer.
+This is a personal project and it stays on devnet and the sandbox. Anything beyond that is out of plan. It would first need a fresh read of the current rulebook (Rules 3.1, 5.17 and 11.1), the member agreement, the User Agreement, the API Agreement and the Market Data Agreement, then the exchange's written agreement and legal advice.
