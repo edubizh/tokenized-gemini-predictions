@@ -10,7 +10,8 @@ The build runs in vertical slices. Each slice ends with something that runs, and
 - [ ] Sandbox API key: account scope (key starts with `account-`), Trader role only, "Uses a time-based nonce" on, "Requires Heartbeat" off, IP allowlist unrestricted. Values go in `.env` (see `.env.example`)
 - [ ] Toolchain installed: Rust, Solana CLI 4.1.2, Anchor 1.2.2 (through AVM), pnpm 12
 - [ ] About 5 devnet SOL on the deployer address (before the first devnet deploy)
-- [ ] Privy development app: App ID, App Secret, email login on, test accounts on (before S2)
+- [ ] Privy development app: App ID, App Secret, email and wallet login on, test accounts on (before S2)
+- [ ] Phantom browser extension with a throwaway wallet in Testnet Mode, for trying wallet login by hand (optional)
 
 ## S0a. Sandbox spike (go / no-go)
 
@@ -57,7 +58,8 @@ Exit:
 ## S0c. Login spike
 
 - [ ] Next.js 16 with Privy: email login with a test account creates an embedded Solana wallet
-- [ ] A transaction built with `@solana/kit` is signed through Privy and confirms on devnet
+- [ ] Wallet login: the login window lists Phantom, Solflare, Backpack, detected wallets and WalletConnect; a wallet signs in with Sign-In With Solana
+- [ ] A transaction built with `@solana/kit` is signed through Privy (embedded wallet and external wallet) and confirms on devnet
 - [ ] `next build` passes
 
 Exit: explorer shows the signature. Fallback: Wallet Standard with Sign-In With Solana.
@@ -68,7 +70,7 @@ Exit: explorer shows the signature. Fallback: Wallet Standard with Sign-In With 
 - [ ] Markets, Ticket, Activity (timeline, receipt, Reclaim), Portfolio, Redeem
 - [ ] Devnet / sandbox banner and footer notice
 
-Exit: a new email account completes test funds, buy, settle and redeem on two consecutive 15-minute contracts using only the browser.
+Exit: a new email account completes test funds, buy, settle and redeem on two consecutive 15-minute contracts using only the browser, and a wallet login (Phantom) completes the same flow once.
 
 ## S3. Breadth: the v1 demo
 
@@ -89,7 +91,7 @@ Exit: buy, sell part, settle, redeem the rest on one market, with reconciliation
 ## S5. Hardening and optional hosting
 
 - [ ] Browser end-to-end test with a login test account; failure-injection runs
-- [ ] More login methods and external wallets, with one trading address per user
+- [ ] More login methods (Google, passkey)
 - [ ] Hosted demo on the mock venue (or sandbox mode behind an allow-list); Postgres if more than one process needs the ledger
 
 ## Out of plan

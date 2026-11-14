@@ -118,7 +118,8 @@ A persistent I1 breach or any I2 failure pauses new orders.
 
 ## Web app
 
-- Login with email through Privy; an embedded Solana wallet is created on first login. More login methods and external wallets come after v1.
+- Login through Privy, two ways. With email: an embedded Solana wallet is created on first login. With an existing Solana wallet: Phantom, Solflare, Backpack, any other detected wallet, or WalletConnect by QR code, using Sign-In With Solana. Each account has one trading wallet: the embedded wallet for email logins, the connected wallet for wallet logins.
+- External wallets on devnet: Phantom needs its Testnet Mode switched on. The wallet only signs; the app broadcasts through its own devnet connection.
 - An onboarding route verifies the login token server-side, registers the wallet as a Trader, and sends starter funds (devnet SOL and dUSD) once per account.
 - Pages: Markets (a curated set of contracts that are tradable now), Ticket (bid, ask, limit, fee cap), Activity (per-order timeline, receipt, and a Reclaim button once an order has expired), Portfolio and Redeem. The in-app portfolio is the canonical view of balances.
 - Transactions are built with `@solana/kit` and the generated client, use a blockhash fetched at click time, are simulated first, signed through Privy, and broadcast unchanged.
