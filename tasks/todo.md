@@ -48,9 +48,11 @@ Exit: passed (2026-11-14). Program id `8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1P
 
 One 15-minute market, YES side, no UI.
 
-- [ ] Program: `initialize`, `register_trader`, `create_market`, `create_outcome_mint`, `place_buy`, `fill_buy`, `cancel_order`, `settle_market`, `redeem`, with account layouts frozen (including fields used by later slices)
+- [x] Program, part 1: `initialize`, `set_config`, `set_pause`, `register_trader`, `create_market`, `create_outcome_mint`, `set_market`, `place_buy`, `fill_buy`, `cancel_order`, with account layouts frozen (124 tests; deployed to devnet)
+- [ ] Program, part 2: `settle_market`, `revoke_settlement`, `redeem`
 - [ ] LiteSVM tests for every instruction and invariant, plus the adversarial cases listed in the architecture doc
-- [ ] Relayer: order polling, SQLite journal, sandbox adapter, fill aggregation with second-source check, on-chain fill or cancel, settlement from the single-event endpoint
+- [x] Relayer, part 1: SQLite journal, fill aggregation, order pipeline with crash recovery, mock venue, sandbox adapter (522 tests; live sandbox order placed and filled through the adapter)
+- [ ] Relayer, part 2: Solana adapter, market manager, settlement watcher, reconciliation, daemon and local API
 - [ ] Devnet and sandbox start-up guards
 - [ ] Scripts: bootstrap (deploy, initialize, dUSD mint, treasury float), `demo-buy`, `demo-redeem`
 
