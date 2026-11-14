@@ -28,6 +28,7 @@
   },
   "exports": {
     "./money": "./src/money.ts",
-    "./api-types": "./src/api/types.ts"
+    "./api-types": "./src/api/types.ts",
+    "./rpc": "./src/chain/rpc.ts"
   }
 }

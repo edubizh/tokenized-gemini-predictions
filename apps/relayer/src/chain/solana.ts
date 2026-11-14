@@ -3,7 +3,6 @@
 import { createHash } from "node:crypto";
 import {
   address,
-  createSolanaRpc,
   fetchEncodedAccount,
   getBase58Decoder,
   getBase64Encoder,
@@ -41,6 +40,7 @@ import {
 } from "@solana-program/token";
 import { fetchMint as fetchOutcomeMint, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { fetchSysvarClock } from "@solana/sysvars";
+import { createRetryingRpc } from "./rpc.ts";
 import type { Chain, ChainConfig, ChainMarket, ChainOrder, MarketChain, NewChainMarket } from "./chain.ts";
 import { orderClosure, type OrderClosure } from "./events.ts";
 import { toChainConfig, toChainMarket, toChainOrder } from "./mapping.ts";
@@ -79,7 +79,7 @@ const CLOSURE_READS = 3;
 const CLOSURE_READ_DELAY_MS = 500;
 
 export function createSolanaChain(options: SolanaChainOptions): Chain & MarketChain & { close(): void } {
-  const rpc = createSolanaRpc(options.rpcUrl);
+  const rpc = createRetryingRpc(options.rpcUrl);
   const programId = address(options.programId);
   const program = { programAddress: programId };
   const commitment = options.commitment ?? "confirmed";

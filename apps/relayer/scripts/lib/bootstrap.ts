@@ -8,7 +8,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   address,
-  createSolanaRpc,
   fetchEncodedAccount,
   getAddressDecoder,
   getAddressEncoder,
@@ -31,6 +30,7 @@ import {
   getMintToInstruction,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
+import { createRetryingRpc } from "../../src/chain/rpc.ts";
 import { ensureKeypairFile, loadKeypairSigner } from "../../src/chain/keys.ts";
 import { createSender, waitForSignature, type ChainRpc } from "../../src/chain/send.ts";
 
@@ -102,7 +102,7 @@ export function assertClusterAllowed(cluster: Cluster, rpcUrl: string, genesisHa
 export async function bootstrap(options: BootstrapOptions): Promise<BootstrapResult> {
   const { cluster, rpcUrl, repoRoot } = options;
   const log = options.log ?? ((line: string) => console.log(line));
-  const rpc = createSolanaRpc(rpcUrl);
+  const rpc = createRetryingRpc(rpcUrl);
   assertClusterAllowed(cluster, rpcUrl, await rpc.getGenesisHash().send());
 
   const programId = OUTCOME_TOKENS_PROGRAM_ADDRESS;
