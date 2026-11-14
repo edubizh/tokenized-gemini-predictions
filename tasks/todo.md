@@ -52,11 +52,11 @@ One 15-minute market, YES side, no UI.
 - [x] Program, part 2: `settle_market`, `revoke_settlement`, `redeem`, and the later-slice instructions `place_sell`, `fill_sell` (182 tests in all; the complete program is deployed to devnet and configured there)
 - [x] LiteSVM tests for every instruction and invariant, plus the adversarial cases listed in the architecture doc (substitution, donation, expiry boundaries, role separation, two-user lifecycle)
 - [x] Relayer, part 1: SQLite journal, fill aggregation, order pipeline with crash recovery, mock venue, sandbox adapter (522 tests; live sandbox order placed and filled through the adapter)
-- [ ] Relayer, part 2: Solana adapter, market manager, settlement watcher, reconciliation, daemon and local API
-- [ ] Devnet and sandbox start-up guards
-- [ ] Scripts: bootstrap (deploy, initialize, dUSD mint, treasury float), `demo-buy`, `demo-redeem`
+- [x] Relayer, part 2: Solana adapter, market manager, settlement watcher, reconciliation, daemon and local API (698 tests)
+- [x] Devnet and sandbox start-up guards
+- [x] Scripts: `bootstrap` (role keys, dUSD mint, treasury float, initialize), `demo` (a test user: setup, buy, sell, redeem, reclaim), `local-e2e` (a full run on a local validator with the mock venue)
 
-Exit:
+Exit: passed on devnet with the sandbox (2026-11-14), except item 4, which is covered by the pipeline's crash tests and has not been forced on live infrastructure.
 1. The user's YES balance equals the sandbox filled quantity times 100.
 2. An unfillable limit is cancelled with a full refund.
 3. With the relayer stopped, anyone can refund the order after its deadline.
