@@ -3,22 +3,22 @@
   display: inline-block;
   padding-block: 4px;
   margin-block: -4px;
+  font-weight: var(--weight-medium);
   white-space: nowrap;
 }
 
-.mono {
-  font-family: var(--font-mono);
-  font-weight: var(--weight-medium);
-  font-variant-numeric: tabular-nums;
+/* On narrow and touch screens the same trick makes it a full touch target. */
+@media (max-width: 40rem), (pointer: coarse) {
+  .link {
+    padding-block: 14px;
+    margin-block: -14px;
+  }
 }
 
 .arrow {
   display: inline-block;
-  margin-left: 0.25em;
-  font-family: var(--font-sans);
-  font-size: 0.85em;
-  color: var(--ink-3);
-  text-decoration: none;
+  margin-left: 0.3em;
+  color: var(--forest-soft);
 }
 
 .link:hover .arrow {

@@ -1,7 +1,7 @@
 .skeleton {
   display: block;
   max-width: 100%;
-  background: var(--paper-sunken);
+  background: var(--line);
   border-radius: var(--rounded-sm);
 }
 

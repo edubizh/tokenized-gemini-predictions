@@ -9,7 +9,7 @@ import { useAccount } from "@/lib/privy/account";
 import { AccountMenu, type FaucetStatus } from "./AccountMenu";
 import { Footer } from "./Footer";
 import { LoginDialog } from "./LoginDialog";
-import { TopBar } from "./TopBar";
+import { Navbar } from "./Navbar";
 import { WalletWaiting } from "./WalletWaiting";
 import styles from "./Shell.module.css";
 
@@ -64,8 +64,8 @@ export function useFaucet(): { status: FaucetStatus; request(): void } {
   return { status, request: () => void request() };
 }
 
-/** The top bar wired to the login state and the wallet's balances. */
-function ConnectedTopBar() {
+/** The navbar wired to the login state and the wallet's balances. */
+function ConnectedNavbar() {
   const pathname = usePathname();
   const config = useConfig();
   const account = useAccount();
@@ -85,28 +85,24 @@ function ConnectedTopBar() {
     );
   } else if (account.ready && !account.authenticated) {
     right = (
-      <Button size="row" onClick={account.login} data-testid="login-top">
+      <Button size="row" variant="primary" onClick={account.login} data-testid="login-top">
         Log in
       </Button>
     );
   }
 
-  return (
-    <TopBar
-      pathname={pathname}
-      showNav={loggedIn}
-      balanceMicros={loggedIn && config.bootstrapped ? (account.balances?.stableMicros ?? null) : undefined}
-      account={right}
-    />
-  );
+  return <Navbar pathname={pathname} cluster={config.cluster} balanceMicros={loggedIn && config.bootstrapped ? (account.balances?.stableMicros ?? null) : undefined} account={right} />;
 }
 
-/** The frame of every page: top bar, the page column, footer. The network strip sits above it. */
+/** The frame of every page: the see-through navbar, the page column, the footer. */
 export function Shell({ children }: { children: ReactNode }) {
   return (
     <>
-      <ConnectedTopBar />
-      <main className={styles.main}>
+      <a className={styles.skip} href="#content">
+        Skip to content
+      </a>
+      <ConnectedNavbar />
+      <main id="content" className={styles.main}>
         <WalletWaiting pinned />
         {children}
       </main>

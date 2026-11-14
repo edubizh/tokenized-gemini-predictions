@@ -6,8 +6,9 @@ type Variant = "primary" | "secondary" | "quiet";
 type Size = "default" | "row";
 
 interface CommonProps {
+  /** One `primary` per view; `secondary` for the rest; `quiet` inside rows and notices. */
   variant?: Variant;
-  /** 40px by default; 32px inside rows. */
+  /** 44px by default; `row` is the compact size for controls inside rows. */
   size?: Size;
   /** Stretches to the width of its container. */
   block?: boolean;
@@ -15,7 +16,7 @@ interface CommonProps {
 }
 
 export interface ButtonProps extends CommonProps, Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
-  /** A short status that replaces the label while work is in progress ("Signing", "Sending"). */
+  /** A short status that replaces the label while work is in progress ("Check your wallet", "Sending"). */
   busy?: string | false;
 }
 
@@ -23,7 +24,7 @@ function classes(variant: Variant, size: Size, block: boolean | undefined, extra
   return [styles.button, styles[variant], size === "row" ? styles.row : "", block ? styles.block : "", extra ?? ""].filter(Boolean).join(" ");
 }
 
-/** A busy button keeps the width of its label and shows the status in its place. */
+/** A busy button keeps the width of its label, shows the status in its place and ignores presses. */
 export function Button({ variant = "secondary", size = "default", block, busy = false, disabled, children, className, type = "button", onClick, ...rest }: ButtonProps) {
   const isBusy = typeof busy === "string";
   return (

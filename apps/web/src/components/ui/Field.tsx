@@ -7,7 +7,7 @@ export interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
   label: string;
   value: string;
   onChange(value: string): void;
-  /** Mono and right aligned, for prices and quantities. */
+  /** Right aligned at weight 500, for prices and quantities. */
   numeric?: boolean;
   /** Unit shown inside the control before the value, such as `$`. */
   prefix?: string;
@@ -18,7 +18,7 @@ export interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
   error?: string;
   /** Something to know before going on that does not make the value invalid. Replaces the helper. */
   warning?: string;
-  /** Plain minus and plus buttons beside the control. */
+  /** Minus and plus buttons beside the control. */
   stepper?: { onDecrement(): void; onIncrement(): void; canDecrement?: boolean; canIncrement?: boolean };
 }
 

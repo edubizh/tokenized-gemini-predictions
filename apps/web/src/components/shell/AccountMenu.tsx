@@ -19,7 +19,7 @@ export interface AccountMenuProps {
   onGetTestFunds(): void;
   faucet: FaucetStatus;
   onLogout(): void;
-  /** For the component gallery: render the menu open. */
+  /** For the reference page: render the menu open. */
   defaultOpen?: boolean;
 }
 
@@ -120,8 +120,8 @@ export function AccountMenu({ address, embedded, onGetTestFunds, faucet, onLogou
         onKeyDown={onButtonKeyDown}
       >
         <span className={styles.address}>{shortAddress(address)}</span>
-        <svg className={styles.caret} viewBox="0 0 10 6" width="10" height="6" aria-hidden="true">
-          <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <svg viewBox="0 0 10 6" width="10" height="6" aria-hidden="true">
+          <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
 
@@ -158,7 +158,7 @@ export function AccountMenu({ address, embedded, onGetTestFunds, faucet, onLogou
           <button
             type="button"
             role="menuitem"
-            className={`${styles.item} ${styles.last}`}
+            className={styles.item}
             onClick={() => {
               setOpen(false);
               onLogout();

@@ -17,11 +17,11 @@ export interface CountdownViewProps {
   remainingMs: number | null;
   /** Short words before the time: "closes in", "expires in", "opens in". */
   label: string;
-  /** `display` is for the single most important number on a screen. */
+  /** `display` is for the one number that matters on a screen. */
   size?: "inline" | "display";
   /** Words used when time is up. */
   closedText?: string;
-  /** Keeps the last two minutes in the ordinary colour, for deadlines that are always short. */
+  /** Leaves out the "closing" state of the last two minutes, for deadlines that are always short. */
   calm?: boolean;
 }
 

@@ -1,3 +1,26 @@
+/* The first thing the keyboard reaches; out of sight until it has focus. */
+.skip {
+  position: absolute;
+  z-index: 40;
+  top: var(--space-2);
+  left: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  height: var(--control);
+  padding: 0 var(--space-4);
+  background: var(--forest);
+  border-radius: var(--rounded-md);
+  color: var(--white);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+
+.skip:focus-visible {
+  transform: none;
+}
+
 .main {
   flex: 1;
   width: 100%;
@@ -13,5 +36,5 @@
 .lead {
   max-width: 62ch;
   margin-top: var(--space-2);
-  color: var(--ink-2);
+  color: var(--forest-soft);
 }

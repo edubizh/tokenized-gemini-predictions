@@ -6,44 +6,39 @@
 .visual {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.5em;
+  gap: 0.4em;
 }
 
-.label {
+.label,
+.note {
   font-size: var(--text-sm);
-  color: var(--ink-2);
+  color: var(--forest-soft);
 }
 
 .time {
-  font-family: var(--font-mono);
   font-weight: var(--weight-medium);
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
+  color: var(--forest);
 }
 
-.note {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  color: var(--ink-3);
+/* The last two minutes: heavier, and the word says so. There is no warning colour. */
+.countdown[data-state="closing"] .time {
+  font-weight: var(--weight-semibold);
 }
 
-.countdown[data-state="closing"] .time,
 .countdown[data-state="closing"] .note {
-  color: var(--caution);
+  color: var(--forest);
+  font-weight: var(--weight-medium);
 }
 
 .display .visual {
   gap: var(--space-3);
 }
 
-.display .time {
-  font-size: var(--text-2xl);
-  line-height: var(--leading-2xl);
-  letter-spacing: -0.01em;
-}
-
+.display .time,
 .display[data-state="closed"] .note {
-  font-family: var(--font-mono);
   font-size: var(--text-2xl);
   line-height: var(--leading-2xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
+  color: var(--forest);
 }

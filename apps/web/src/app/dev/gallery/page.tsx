@@ -1,11 +1,16 @@
 import { notFound } from "next/navigation";
+import { Shell } from "@/components/shell/Shell";
 import { Gallery } from "@/features/gallery/Gallery";
 
-export const metadata = { title: "Component gallery" };
+export const metadata = { title: "Design reference" };
 export const dynamic = "force-dynamic";
 
-/** Development only: every component in every state, fed by fixtures. */
+/** Development only: the reference page of the design system, inside the real shell. */
 export default function GalleryPage() {
   if (process.env.NODE_ENV === "production") notFound();
-  return <Gallery anchorMs={Date.now()} />;
+  return (
+    <Shell>
+      <Gallery anchorMs={Date.now()} />
+    </Shell>
+  );
 }

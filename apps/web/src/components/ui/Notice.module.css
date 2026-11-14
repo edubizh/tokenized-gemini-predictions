@@ -1,18 +1,64 @@
 .notice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3) var(--space-5);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--rule-strong);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+  row-gap: var(--space-3);
+  align-items: start;
+  padding: 14px var(--space-4);
+  background: var(--white);
+  border: 1px solid var(--line);
   border-radius: var(--rounded-md);
-  background: var(--paper-sunken);
-  color: var(--ink);
+  color: var(--forest);
+}
+
+.positive {
+  background: var(--jade-tint);
+  border-color: transparent;
+}
+
+.negative {
+  background: var(--clay-tint);
+  border-color: transparent;
+}
+
+/* The mark sits on the first line of the title. */
+.mark,
+.spinner {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: var(--rounded-full);
+}
+
+.mark {
+  background: var(--forest);
+}
+
+.positive .mark {
+  background: var(--jade);
+}
+
+.negative .mark {
+  background: var(--clay);
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  margin-top: 4px;
+  margin-inline: -2px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  animation: turn 900ms linear infinite;
+}
+
+@keyframes turn {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .text {
-  flex: 1 1 16rem;
   min-width: 0;
 }
 
@@ -22,42 +68,30 @@
   font-weight: var(--weight-semibold);
 }
 
+.negative .title {
+  color: var(--clay);
+}
+
 .body {
-  max-width: 68ch;
+  max-width: 65ch;
   margin-top: 2px;
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
 }
 
-.action {
-  flex: none;
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-self: center;
+  gap: var(--space-2);
 }
 
-.caution {
-  background: var(--caution-tint);
-  border-color: var(--caution);
-}
-
-.caution .title {
-  color: var(--caution);
-}
-
-.negative {
-  background: var(--negative-tint);
-  border-color: var(--negative);
-}
-
-.negative .title {
-  color: var(--negative);
-}
-
-.positive {
-  background: var(--positive-tint);
-  border-color: var(--positive);
-}
-
-.positive .title {
-  color: var(--positive);
+/* Narrow: the actions go under the text. */
+@media (max-width: 40rem) {
+  .actions {
+    grid-column: 2 / -1;
+  }
 }
 
 @media (prefers-reduced-motion: no-preference) {

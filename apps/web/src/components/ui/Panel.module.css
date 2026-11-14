@@ -1,0 +1,11 @@
+.panel {
+  padding: var(--space-5);
+  background: var(--white);
+  border-radius: var(--rounded-lg);
+}
+
+@media (max-width: 40rem) {
+  .panel {
+    padding: 20px;
+  }
+}

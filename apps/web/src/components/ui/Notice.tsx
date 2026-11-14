@@ -1,26 +1,34 @@
 import type { ReactNode } from "react";
 import styles from "./Notice.module.css";
 
-export type NoticeTone = "neutral" | "caution" | "negative" | "positive";
+/** `caution` is kept for pages of the previous design and is drawn as `neutral`. */
+export type NoticeTone = "neutral" | "positive" | "negative" | "caution";
 
 export interface NoticeProps {
   tone?: NoticeTone;
   title: string;
   /** One sentence: what happened and what to do next. */
   children?: ReactNode;
-  /** A button or link that resolves the problem. */
+  /** Up to two buttons or links: the way forward, and for a wait, Retry and Cancel. */
   action?: ReactNode;
+  /** Something is being waited for: the mark becomes a spinner. */
+  busy?: boolean;
 }
 
-/** An inline block placed where the problem is. Errors are announced at once, the rest politely. */
-export function Notice({ tone = "neutral", title, children, action }: NoticeProps) {
+/**
+ * A message placed where it applies: waiting, done, went wrong, nothing here yet. Errors are
+ * announced at once, the rest politely.
+ */
+export function Notice({ tone = "neutral", title, children, action, busy }: NoticeProps) {
+  const look = tone === "positive" ? styles.positive : tone === "negative" ? styles.negative : "";
   return (
-    <div className={`${styles.notice} ${styles[tone]}`} role={tone === "negative" ? "alert" : "status"}>
+    <div className={`${styles.notice} ${look}`} role={tone === "negative" ? "alert" : "status"} aria-busy={busy || undefined}>
+      <span className={busy ? styles.spinner : styles.mark} aria-hidden="true" />
       <div className={styles.text}>
         <p className={styles.title}>{title}</p>
         {children && <p className={styles.body}>{children}</p>}
       </div>
-      {action && <div className={styles.action}>{action}</div>}
+      {action && <div className={styles.actions}>{action}</div>}
     </div>
   );
 }

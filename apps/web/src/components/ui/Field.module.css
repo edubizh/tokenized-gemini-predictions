@@ -14,36 +14,34 @@
   gap: var(--space-2);
 }
 
+/* White on a surface and on the page alike; the boundary is what says "field". */
 .control {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: 40px;
-  padding: 0 var(--space-3);
-  background: var(--paper-raised);
-  border: 1px solid var(--rule-strong);
+  height: var(--control);
+  padding: 0 14px;
+  background: var(--white);
+  border: 1px solid var(--edge);
   border-radius: var(--rounded-md);
   cursor: text;
-}
-
-.control:hover:not([data-disabled]) {
-  border-color: var(--ink-2);
+  transition: border-color var(--duration) var(--ease);
 }
 
 .control:focus-within {
-  outline: 2px solid var(--focus);
+  outline: 2px solid var(--jade);
   outline-offset: 2px;
-  border-color: var(--ink);
+  border-color: var(--forest);
 }
 
 .control[data-invalid] {
-  border-color: var(--negative);
+  border-color: var(--clay);
 }
 
 .control[data-disabled] {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -60,7 +58,7 @@
 }
 
 .input::placeholder {
-  color: var(--ink-3);
+  color: var(--forest-soft);
   opacity: 1;
 }
 
@@ -69,37 +67,30 @@
 }
 
 .numeric {
-  font-family: var(--font-mono);
   font-weight: var(--weight-medium);
-  font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
 .unit {
   flex: none;
-  font-family: var(--font-mono);
   font-size: var(--text-sm);
-  color: var(--ink-3);
+  color: var(--forest-soft);
 }
 
 .step {
   flex: none;
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
-  background: var(--paper);
-  border: 1px solid var(--rule-strong);
+  width: var(--control);
+  height: var(--control);
+  border: 1px solid var(--edge);
   border-radius: var(--rounded-md);
-  font-family: var(--font-mono);
   font-size: var(--text-lg);
   line-height: 1;
   cursor: pointer;
-}
-
-.step:hover:not(:disabled) {
-  background: var(--paper-sunken);
-  border-color: var(--ink-2);
+  transition:
+    border-color var(--duration) var(--ease),
+    transform var(--duration) var(--ease);
 }
 
 .step:active:not(:disabled) {
@@ -107,8 +98,15 @@
 }
 
 .step:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+}
+
+@media (hover: hover) {
+  .control:hover:not([data-disabled], [data-invalid]),
+  .step:hover:not(:disabled) {
+    border-color: var(--forest);
+  }
 }
 
 .helper,
@@ -116,13 +114,14 @@
 .error {
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
-  color: var(--ink-2);
+  color: var(--forest-soft);
+}
+
+/* No warning colour: something to know is said in forest. */
+.warning {
+  color: var(--forest);
 }
 
 .error {
-  color: var(--negative);
-}
-
-.warning {
-  color: var(--caution);
+  color: var(--clay);
 }

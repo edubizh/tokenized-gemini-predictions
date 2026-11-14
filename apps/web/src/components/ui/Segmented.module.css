@@ -1,0 +1,112 @@
+.group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.stretch {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+.segment {
+  position: relative;
+  display: block;
+  cursor: pointer;
+}
+
+/* The radio covers its face, invisible: the face is what is seen, the radio what is used. */
+.input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--edge);
+  border-radius: var(--rounded-md);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    background-color var(--duration) var(--ease),
+    border-color var(--duration) var(--ease);
+}
+
+.row .face {
+  height: var(--control-row);
+  padding: 0 14px;
+  font-size: var(--text-sm);
+}
+
+.word {
+  font-weight: var(--weight-medium);
+}
+
+.face[data-tone="yes"] {
+  background: var(--jade-tint);
+  border-color: var(--jade);
+}
+
+/* Chosen: filled. Forest for a neutral choice and for No, jade for Yes. */
+.input:checked + .face {
+  background: var(--forest);
+  border-color: var(--forest);
+  color: var(--white);
+}
+
+.input:checked + .face[data-tone="yes"] {
+  background: var(--jade);
+  border-color: var(--jade);
+}
+
+.input:checked + .face .word {
+  font-weight: var(--weight-semibold);
+}
+
+@media (hover: hover) {
+  .segment:hover .input:not(:checked, :disabled) + .face {
+    border-color: var(--forest);
+  }
+
+  .segment:hover .input:not(:checked, :disabled) + .face[data-tone="yes"] {
+    background: var(--jade-tint-hover);
+    border-color: var(--jade);
+  }
+
+  .segment:hover .input:checked:not(:disabled) + .face {
+    background: var(--forest-hover);
+    border-color: var(--forest-hover);
+  }
+
+  .segment:hover .input:checked:not(:disabled) + .face[data-tone="yes"] {
+    background: var(--jade-hover);
+    border-color: var(--jade-hover);
+  }
+}
+
+.input:focus-visible + .face {
+  outline: 2px solid var(--jade);
+  outline-offset: 2px;
+}
+
+.group:disabled .segment {
+  cursor: not-allowed;
+  opacity: 0.45;
+}

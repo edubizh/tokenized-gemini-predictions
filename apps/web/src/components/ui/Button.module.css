@@ -1,19 +1,24 @@
 .button {
   display: inline-grid;
   place-items: center;
-  height: 40px;
-  padding: 0 var(--space-4);
+  height: var(--control);
+  padding: 0 20px;
+  background: transparent;
   border: 1px solid transparent;
   border-radius: var(--rounded-md);
+  color: var(--forest);
   font-family: var(--font-sans);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
   line-height: 1;
   white-space: nowrap;
   text-decoration: none;
   cursor: pointer;
   user-select: none;
-  transition: transform var(--duration) var(--ease);
+  transition:
+    background-color var(--duration) var(--ease),
+    border-color var(--duration) var(--ease),
+    transform var(--duration) var(--ease);
 }
 
 .button:active:not(:disabled, [data-busy]) {
@@ -25,9 +30,11 @@
   grid-area: 1 / 1;
 }
 
+/* Compact, for controls inside rows and notices. Grows to a full touch target on narrow screens. */
 .row {
-  height: 32px;
-  padding: 0 var(--space-3);
+  height: var(--control-row);
+  padding: 0 14px;
+  font-size: var(--text-sm);
 }
 
 .block {
@@ -36,45 +43,71 @@
 }
 
 .primary {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--paper);
+  background: var(--forest);
+  border-color: var(--forest);
+  color: var(--white);
 }
 
-.primary:hover:not(:disabled, [data-busy]) {
-  background: color-mix(in oklch, var(--ink) 86%, var(--paper));
-  border-color: color-mix(in oklch, var(--ink) 86%, var(--paper));
-}
-
-.secondary {
-  background: var(--paper);
-  border-color: var(--rule-strong);
-  color: var(--ink);
-}
-
-.secondary:hover:not(:disabled, [data-busy]) {
-  background: var(--paper-sunken);
-  border-color: var(--ink-2);
+.secondary,
+.no {
+  border-color: var(--edge);
 }
 
 .quiet {
-  padding: 0 var(--space-1);
-  color: var(--ink);
+  padding: 0 var(--space-2);
 }
 
+/* Text with the underline of a link, so that it reads as an action without a pointer too. */
 .quiet .label {
   text-decoration: underline;
   text-decoration-thickness: 1px;
-  text-underline-offset: 0.2em;
-  text-decoration-color: transparent;
+  text-underline-offset: 0.25em;
+  text-decoration-color: var(--edge);
+  transition: text-decoration-color var(--duration) var(--ease);
 }
 
-.quiet:hover:not(:disabled, [data-busy]) .label {
-  text-decoration-color: currentColor;
+/* Yes and No at rest, as PriceButton draws them: the word, then the price. */
+.yes {
+  background: var(--jade-tint);
+  border-color: var(--jade);
+}
+
+.price {
+  min-width: 5.75rem;
+}
+
+.price .label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.side {
+  font-weight: var(--weight-medium);
+}
+
+@media (hover: hover) {
+  .primary:hover:not(:disabled, [data-busy]) {
+    background: var(--forest-hover);
+    border-color: var(--forest-hover);
+  }
+
+  .secondary:hover:not(:disabled, [data-busy]),
+  .no:hover:not(:disabled) {
+    border-color: var(--forest);
+  }
+
+  .quiet:hover:not(:disabled, [data-busy]) .label {
+    text-decoration-color: currentColor;
+  }
+
+  .yes:hover:not(:disabled) {
+    background: var(--jade-tint-hover);
+  }
 }
 
 .button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -93,25 +126,16 @@
 }
 
 .spinner {
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
   border: 1.5px solid currentColor;
   border-right-color: transparent;
   border-radius: var(--rounded-full);
-  opacity: 0.8;
   animation: turn 900ms linear infinite;
 }
 
 @keyframes turn {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spinner {
-    animation: none;
-    border-right-color: currentColor;
-    border-style: dotted;
   }
 }

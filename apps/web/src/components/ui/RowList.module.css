@@ -1,5 +1,8 @@
+/* A list is its own surface. */
 .list {
-  border-top: 1px solid var(--rule);
+  background: var(--white);
+  border-radius: var(--rounded-lg);
+  overflow: hidden;
 }
 
 .header,
@@ -8,36 +11,50 @@
   grid-template-columns: var(--columns);
   column-gap: var(--space-5);
   align-items: center;
-  padding-inline: var(--space-2);
-  border-bottom: 1px solid var(--rule);
+  padding-inline: var(--space-5);
 }
 
 .header {
-  min-height: 32px;
+  min-height: 44px;
 }
 
 .heading {
-  font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: var(--leading-xs);
   font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-  color: var(--ink-3);
+  color: var(--forest-soft);
 }
 
 .row {
-  min-height: 56px;
-  padding-block: var(--space-2);
+  min-height: 64px;
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--line);
+  transition: background-color var(--duration) var(--ease);
 }
 
-.row:hover,
 .row:focus-within {
-  background: var(--paper-sunken);
+  background: var(--peach);
+}
+
+@media (hover: hover) {
+  .row:hover {
+    background: var(--peach);
+  }
 }
 
 .cell {
   min-width: 0;
+}
+
+.primary {
+  font-weight: var(--weight-medium);
+}
+
+/* A link that is the row's main text gets a taller target; the margin keeps the line where it was. */
+.primary > a {
+  display: inline-block;
+  margin-block: -6px;
+  padding-block: 6px;
 }
 
 .right {
@@ -60,23 +77,33 @@
   padding-block: var(--space-3) var(--space-2);
 }
 
-/* Narrow: a row stacks into two lines. The header goes, so each value carries its own label. */
+/* Narrow: a row stacks. The header goes, so each value carries its own label. */
 @media (max-width: 40rem) {
   .header {
     display: none;
   }
 
-  /* Cells start on one line so their labels line up; a button centres on the values beside it. */
   .row {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-start;
     gap: var(--space-2) var(--space-5);
-    padding-block: var(--space-3);
+    padding: var(--space-4) 20px;
+  }
+
+  .row:first-child {
+    border-top: 0;
   }
 
   .primary {
     flex: 1 1 100%;
+  }
+
+  /* Stacked, the same link is a full touch target. */
+  .primary > a {
+    display: block;
+    margin-block: -10px;
+    padding-block: 10px;
   }
 
   .cell.right {
@@ -85,18 +112,15 @@
 
   .cellLabel {
     display: block;
-    font-family: var(--font-mono);
     font-size: var(--text-xs);
     line-height: var(--leading-xs);
     font-weight: var(--weight-medium);
-    letter-spacing: var(--tracking-caps);
-    text-transform: uppercase;
-    color: var(--ink-3);
+    color: var(--forest-soft);
   }
 
+  /* Actions take a line of their own, at the right: the same place in every row. */
   .actions {
-    align-self: center;
-    margin-left: auto;
+    flex: 1 1 100%;
   }
 
   .detail {
@@ -110,17 +134,26 @@
     display: none;
   }
 
-  /* Cells start on one line so their labels line up; a button centres on the values beside it. */
   .dense .row {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-start;
     gap: var(--space-2) var(--space-5);
-    padding-block: var(--space-3);
+    padding-block: var(--space-4);
+  }
+
+  .dense .row:first-child {
+    border-top: 0;
   }
 
   .dense .primary {
     flex: 1 1 100%;
+  }
+
+  .dense .primary > a {
+    display: block;
+    margin-block: -10px;
+    padding-block: 10px;
   }
 
   .dense .cell.right {
@@ -129,18 +162,14 @@
 
   .dense .cellLabel {
     display: block;
-    font-family: var(--font-mono);
     font-size: var(--text-xs);
     line-height: var(--leading-xs);
     font-weight: var(--weight-medium);
-    letter-spacing: var(--tracking-caps);
-    text-transform: uppercase;
-    color: var(--ink-3);
+    color: var(--forest-soft);
   }
 
   .dense .actions {
-    align-self: center;
-    margin-left: auto;
+    flex: 1 1 100%;
   }
 
   .dense .detail {

@@ -27,7 +27,7 @@ export interface RowListProps {
   children: ReactNode;
 }
 
-/** The ledger pattern: a header of small mono labels, then ruled rows with numbers in fixed columns. */
+/** Every list. Its own white surface: a line of small column labels, then rows with the main text left and numbers in fixed columns. */
 export function RowList({ label, columns, dense = false, children }: RowListProps) {
   const template = columns.map((column) => column.width ?? (column.primary ? "minmax(0, 1fr)" : "max-content")).join(" ");
   return (
@@ -51,7 +51,7 @@ export function RowList({ label, columns, dense = false, children }: RowListProp
 export interface RowProps {
   /** One node per column, in column order. */
   cells: readonly ReactNode[];
-  /** Content spanning the full width under the row, such as an expanded receipt. */
+  /** Content spanning the full width under the row, such as the details of an order. */
   detail?: ReactNode;
 }
 

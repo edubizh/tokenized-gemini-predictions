@@ -20,14 +20,10 @@
   content: "";
   position: absolute;
   left: 7.5px;
-  top: 22px;
-  bottom: 0;
+  top: 24px;
+  bottom: 2px;
   width: 1px;
-  background: var(--rule);
-}
-
-.step[data-status="done"]:not(:last-child)::before {
-  background: var(--rule-strong);
+  background: var(--line);
 }
 
 .mark {
@@ -36,34 +32,41 @@
   width: 16px;
   height: 16px;
   margin-top: 3px;
-  color: var(--ink);
+}
+
+/* Done: a jade disc with a white check. */
+.check {
+  border-radius: var(--rounded-full);
+  background: var(--jade);
+  color: var(--white);
 }
 
 .pulse,
 .hollow {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   border-radius: var(--rounded-full);
 }
 
+/* In progress: a jade dot that breathes. */
 .pulse {
-  background: var(--ink);
-  animation: wait 1.4s ease-in-out infinite;
+  background: var(--jade);
+  animation: wait 1.6s ease-in-out infinite;
 }
 
 .hollow {
-  border: 1px solid var(--rule-strong);
+  border: 1.5px solid var(--edge);
 }
 
 .dash {
-  width: 9px;
-  height: 1px;
-  background: var(--ink-3);
+  width: 8px;
+  height: 1.5px;
+  background: var(--edge);
 }
 
 @keyframes wait {
   50% {
-    opacity: 0.25;
+    opacity: 0.3;
   }
 }
 
@@ -77,15 +80,12 @@
   max-width: 60ch;
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
-  color: var(--ink-2);
+  color: var(--forest-soft);
 }
 
-.step[data-status="pending"] .title {
-  color: var(--ink-2);
-}
-
-.step[data-status="pending"] .description {
-  color: var(--ink-3);
+.step[data-status="pending"] .title,
+.step[data-status="skipped"] .title {
+  color: var(--forest-soft);
 }
 
 .meta {
@@ -98,15 +98,10 @@
 }
 
 .time {
-  font-family: var(--font-mono);
-  color: var(--ink-3);
+  color: var(--forest-soft);
   white-space: nowrap;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .pulse {
-    animation: none;
-    background: transparent;
-    border: 2px solid var(--ink);
-  }
+.body {
+  min-width: 0;
 }

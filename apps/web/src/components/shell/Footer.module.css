@@ -1,24 +1,33 @@
+/* Quiet, and always there: on the page, in small secondary text, with no line above it. */
 .footer {
   margin-top: var(--space-8);
-  border-top: 1px solid var(--rule);
 }
 
 .inner {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   justify-content: space-between;
-  gap: var(--space-2) var(--space-5);
+  gap: var(--space-1) var(--space-5);
   max-width: var(--page-max);
   margin-inline: auto;
-  padding: var(--space-4) var(--gutter) var(--space-5);
+  padding: var(--space-4) var(--gutter) var(--space-6);
   font-size: var(--text-xs);
-  line-height: var(--leading-xs);
-  color: var(--ink-3);
+  line-height: 1.5;
+  color: var(--forest-soft);
 }
 
-/* A standalone link, so it gets the 24px a pointer needs. */
 .inner a {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
+  color: var(--forest);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+@media (max-width: 40rem) {
+  .inner a {
+    min-height: 44px;
+  }
 }

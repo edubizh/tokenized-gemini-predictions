@@ -18,7 +18,7 @@ export interface TimelineStep {
 
 const STATUS_WORD: Record<StepStatus, string> = { done: "Done", current: "In progress", pending: "Not yet", skipped: "Did not happen" };
 
-/** A vertical list of steps, each stamped as it completes. */
+/** The steps of an order, top to bottom, each marked as it completes, with its time and its transaction. */
 export function Timeline({ steps, label }: { steps: readonly TimelineStep[]; label: string }) {
   return (
     <ol className={styles.timeline} aria-label={label}>
@@ -26,8 +26,8 @@ export function Timeline({ steps, label }: { steps: readonly TimelineStep[]; lab
         <li key={step.id} className={styles.step} data-status={step.status} aria-current={step.status === "current" ? "step" : undefined}>
           <span className={styles.mark} aria-hidden="true">
             {step.status === "done" && (
-              <svg viewBox="0 0 16 16" width="16" height="16">
-                <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="square" />
+              <svg className={styles.check} viewBox="0 0 16 16" width="16" height="16">
+                <path d="M4.5 8.4l2.4 2.4 4.6-5.3" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             )}
             {step.status === "current" && <span className={styles.pulse} />}

@@ -1,5 +1,5 @@
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { Reddit_Sans } from "next/font/google";
 
-// Shared by the root layout and the global error page, which replaces that layout.
-export const plexSans = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--plex-sans", display: "swap" });
-export const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--plex-mono", display: "swap" });
+// The one typeface, downloaded at build time and served from this app. It is a variable font, so
+// one file covers every weight. Shared by the root layout and the global error page.
+export const redditSans = Reddit_Sans({ subsets: ["latin"], variable: "--font-reddit-sans", display: "swap" });

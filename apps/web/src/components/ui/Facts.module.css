@@ -1,0 +1,43 @@
+.facts {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.label {
+  flex: none;
+  color: var(--forest-soft);
+}
+
+/* A long value, such as an address, wraps before it pushes past the edge. */
+.value {
+  min-width: 0;
+  font-weight: var(--weight-medium);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.total {
+  margin-top: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+}
+
+.total .label {
+  color: var(--forest);
+  font-weight: var(--weight-medium);
+}
+
+.total .value {
+  font-weight: var(--weight-semibold);
+}

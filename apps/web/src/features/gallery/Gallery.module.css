@@ -1,90 +1,45 @@
+/* The reference page of the design system. Development only. */
+
 .page {
   display: grid;
-  width: 100%;
-  max-width: var(--page-max);
-  margin-inline: auto;
-  padding: var(--space-6) var(--gutter) var(--space-8);
+  gap: var(--space-7);
+  padding-bottom: var(--space-5);
 }
 
-@media (min-width: 60rem) {
-  .page {
-    grid-template-columns: 11rem minmax(0, 1fr);
-    column-gap: var(--space-7);
-  }
+.lead,
+.note {
+  max-width: 65ch;
+  margin-top: var(--space-1);
+  color: var(--forest-soft);
 }
 
 .index {
-  display: none;
-}
-
-@media (min-width: 60rem) {
-  .index {
-    display: block;
-    position: sticky;
-    top: calc(var(--strip-height) + var(--space-6));
-    align-self: start;
-    max-height: calc(100dvh - var(--strip-height) - var(--space-7));
-    overflow: auto;
-    font-size: var(--text-sm);
-    line-height: 1.9;
-  }
-}
-
-.indexTitle {
-  margin-bottom: var(--space-2);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-  color: var(--ink-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
 }
 
 .index a {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
-  color: var(--ink-2);
-  text-decoration-color: transparent;
-}
-
-.index a:hover {
-  color: var(--ink);
-  text-decoration-color: currentColor;
-}
-
-.content {
-  min-width: 0;
-}
-
-.pageHead p {
-  margin-top: var(--space-2);
-  color: var(--ink-2);
-}
-
-.section {
-  margin-top: var(--space-7);
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--rule-strong);
 }
 
 .sectionHead {
   margin-bottom: var(--space-5);
 }
 
-.sectionNote {
-  max-width: 62ch;
-  margin-top: var(--space-1);
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
-  color: var(--ink-2);
+.subhead {
+  margin: var(--space-6) 0 var(--space-3);
 }
 
 .grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-6) var(--space-7);
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+  gap: var(--space-5);
+  align-items: start;
 }
 
 .stack {
@@ -94,219 +49,358 @@
 
 .specimen {
   min-width: 0;
-  max-width: 100%;
-}
-
-.wide {
-  width: 100%;
-}
-
-.wide + .wide {
-  margin-top: var(--space-6);
 }
 
 .caption {
   margin-bottom: var(--space-2);
-  font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: var(--leading-xs);
-  color: var(--ink-3);
+  font-weight: var(--weight-medium);
+  color: var(--forest-soft);
 }
 
-.inline {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.ticketWidth {
-  width: 19rem;
-  max-width: 100%;
-}
-
-.timelineWidth {
-  width: 26rem;
-  max-width: 100%;
-}
-
-.stamps {
+.stage {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-3);
 }
 
-/* Swatches and the type scale */
-.swatches {
+.full {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.soft {
+  color: var(--forest-soft);
+}
+
+/* Palette */
+.theme {
   display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-4);
 }
 
-.swatchRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3) var(--space-4);
+.derived {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: var(--space-5) var(--space-4);
+  margin-top: var(--space-6);
 }
 
-.swatch {
-  display: grid;
-  gap: 6px;
-  width: 6.5rem;
+.chip,
+.candidateChip,
+.pairSample {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--forest) 8%, transparent);
 }
 
 .chip {
-  height: 40px;
-  border: 1px solid var(--rule);
-  border-radius: var(--rounded-sm);
+  display: block;
+  height: 56px;
+  border-radius: var(--rounded-md);
+}
+
+.swatchLarge .chip {
+  height: 128px;
+  border-radius: var(--rounded-lg);
 }
 
 .swatchName {
-  font-family: var(--font-mono);
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.swatchLarge .swatchName {
+  margin-top: var(--space-3);
+  font-size: var(--text-base);
+  text-transform: capitalize;
+}
+
+.swatchValue {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-medium);
+}
+
+.swatchNote {
   font-size: var(--text-xs);
-  color: var(--ink-2);
+  line-height: var(--leading-xs);
+  color: var(--forest-soft);
 }
 
-.typeScale {
-  margin-top: var(--space-6);
-  border-top: 1px solid var(--rule);
+.candidates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: var(--space-4);
 }
 
+.candidateGroup {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+}
+
+.candidate {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.candidateChip {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--rounded-sm);
+}
+
+.candidateName {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.candidateFigures {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-weight: var(--weight-medium);
+}
+
+.candidateVerdict {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--forest-soft);
+}
+
+/* Contrast */
+.pair {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pairSample {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 3.25rem;
+  height: 2rem;
+  border-radius: var(--rounded-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+/* Type */
 .typeRow {
   display: grid;
   grid-template-columns: 3rem minmax(0, 1fr) auto;
-  column-gap: var(--space-4);
+  gap: var(--space-4);
   align-items: baseline;
-  padding: var(--space-3) var(--space-2);
-  border-bottom: 1px solid var(--rule);
+  padding-block: var(--space-3);
+}
+
+.typeRow:first-child {
+  padding-top: 0;
+}
+
+.typeRow:last-child {
+  padding-bottom: 0;
+}
+
+.typeRow + .typeRow {
+  border-top: 1px solid var(--line);
 }
 
 .typeName,
 .typeUse {
-  font-family: var(--font-mono);
   font-size: var(--text-xs);
-  color: var(--ink-3);
+  font-weight: var(--weight-medium);
+  color: var(--forest-soft);
+  white-space: nowrap;
+}
+
+/* A price standing on its own: the one use of jade as text. */
+.price {
+  color: var(--jade);
+  font-size: var(--text-2xl);
+  line-height: var(--leading-2xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
+}
+
+/* Shape and space */
+.radii {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+
+.radius {
+  display: block;
+  width: 72px;
+  height: 56px;
+  background: var(--jade-tint);
+  border: 1px solid var(--jade);
+}
+
+.spaces {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+}
+
+.space {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.spaceBar {
+  flex: none;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--forest);
+}
+
+/* Rows */
+.rowTitle {
+  text-decoration-color: transparent;
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.skeletons {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+/* A market from these parts: the question, then the trade panel, then the details. */
+.market {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.marketDetails {
+  display: grid;
+  align-content: start;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--forest-soft);
+}
+
+.question {
+  margin-top: var(--space-2);
+  font-size: var(--text-xl);
+  line-height: var(--leading-xl);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-5);
+  margin-top: var(--space-4);
+}
+
+.headline p {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.tradeForm {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.fine {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--forest-soft);
+}
+
+/* Shell: each state of the navbar drawn in place, inside a hairline frame. */
+.frame {
+  width: 100%;
+  border-radius: var(--rounded-lg);
+  box-shadow: 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+
+.frame footer {
+  margin-top: 0;
+}
+
+/* Room for the open menu, which hangs below the bar. */
+.frameTall {
+  min-height: 25rem;
+}
+
+@media (min-width: 48rem) {
+  .wide {
+    grid-column: span 2;
+  }
+}
+
+@media (min-width: 60rem) {
+  .market {
+    grid-template-columns: minmax(0, 1fr) var(--aside);
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      "head trade"
+      "details trade";
+    column-gap: var(--space-6);
+  }
+
+  .marketHead {
+    grid-area: head;
+  }
+
+  .marketDetails {
+    grid-area: details;
+  }
+
+  .trade {
+    grid-area: trade;
+    align-self: start;
+    position: sticky;
+    top: calc(var(--nav-height) + var(--space-5));
+  }
 }
 
 @media (max-width: 40rem) {
+  .index {
+    display: none;
+  }
+
+  .theme {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .typeRow {
-    grid-template-columns: 3rem minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .typeUse {
-    grid-column: 2;
+  .typeRow > :nth-child(2) {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
-}
-
-/* Row list cells */
-.market {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-.underlying {
-  flex: none;
-  width: 2.5rem;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-}
-
-.marketTitle {
-  min-width: 0;
-  font-weight: var(--weight-medium);
-}
-
-.order {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 var(--space-3);
-}
-
-.yes,
-.no {
-  width: 2rem;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0.04em;
-}
-
-.yes {
-  color: var(--yes);
-}
-
-.no {
-  color: var(--no);
-}
-
-.quantity {
-  width: 3.75rem;
-  text-align: right;
-}
-
-.pending {
-  font-size: var(--text-sm);
-  color: var(--ink-3);
-}
-
-.orderMarket {
-  font-size: var(--text-sm);
-  color: var(--ink-2);
-}
-
-.time {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  color: var(--ink-2);
-}
-
-/* Frames for shell parts and whole screens */
-.frame {
-  border: 1px solid var(--rule);
-}
-
-.footerFrame > footer {
-  margin-top: 0;
-  border-top: 0;
-}
-
-.screen {
-  padding: var(--space-5);
-  border: 1px solid var(--rule);
-}
-
-.menus {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-6);
-}
-
-.menuStage {
-  display: flex;
-  justify-content: flex-end;
-  align-items: flex-start;
-  width: 17.5rem;
-  max-width: 100%;
-  height: 20rem;
-}
-
-/* Trading components */
-.ticketColumn {
-  width: var(--ticket-column);
-  max-width: 100%;
-}
-
-.pathList {
-  border-top: 1px solid var(--rule);
-}
-
-.pathList > * + * {
-  margin-top: var(--space-5) !important;
-}
-
-.pathWidth {
-  max-width: 44rem;
-  border-top: 1px solid var(--rule);
 }
