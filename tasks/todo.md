@@ -159,9 +159,18 @@ The order below is the build order. P0 is read-only; P1, P2 and P3 are independe
 
 ## P0. Groundwork
 
-- [ ] How Polymarket, Kalshi, Gemini Predictions, Robinhood and two or three on-chain platforms lay out the markets index, the event page, the market page and the trade panel, ending in the list of parts these pages get here
-- [ ] The venue's full market model, measured on the live sandbox API: listing and pagination, binary and categorical events, price and quantity steps, market data (book, trades, price history), how strike ladders and long-dated events settle, review and invalid states, rate limits
-- [ ] The two wallet failures reproduced with real extensions in a test browser, with the cause of each
+- [x] How Polymarket, Kalshi, Gemini Predictions, Robinhood and two or three on-chain platforms lay out the markets index, the event page, the market page and the trade panel, ending in the list of parts these pages get here
+- [x] The venue's full market model, measured on the live sandbox API: listing and pagination, binary and categorical events, price and quantity steps, market data (book, trades, price history), how strike ladders and long-dated events settle, review and invalid states, rate limits
+- [x] The two wallet failures reproduced with real extensions in a test browser, with the cause of each
+
+Findings (2026-11-14):
+
+- The sandbox lists two kinds of event: an up-or-down contract over 5 or 15 minutes, and a ladder of five to eight "$X or above" contracts (hourly, daily, weekly, monthly; six crypto assets and six commodities). About 100 events and 320 contracts are listed at a time.
+- The contracts of a ladder are independent: each has its own book and settles by itself, so several can pay. Settlement arrives 5 to 53 seconds after expiry, per contract.
+- Every listed contract trades in one-cent price steps and 0.01-contract quantity steps, symbols are at most 28 characters, and a naming scheme fits every token name into 32 bytes and every ticker into 10. The program needs no change.
+- The sandbox's market makers quote only BTC, ETH, SOL and XRP contracts, and only late in a contract's life (15-minute contracts a few minutes into their window, hourly ladders from about a quarter past the hour, daily ladders in their last hour). Commodity, HYPE, ZEC, weekly and monthly contracts have never had an offer or a trade, and one account cannot trade with itself, so those can be listed but not bought on the sandbox.
+- Both wallet failures have one cause: current Phantom and MetaMask show a site's request in their browser side panel instead of opening a window, and the login window then waits for ever with a hint that points elsewhere. Phantom never answers the request if that panel is closed.
+- Other platforms' pages reduce to a short list of parts: an index with category and duration filters, one event page that holds the contracts, the price history, the book, the rules and the trade panel, a portfolio and an activity list.
 
 ## P1. Wallet login with real wallets (goal 3)
 
@@ -194,7 +203,7 @@ Exit: the reference page shows every primitive and state at both widths; contras
 - [ ] Token names and tickers for strike contracts (32 and 10 bytes)
 - [ ] Settlement and reconciliation for strike ladders and long-dated events: early resolution, review, invalid
 - [ ] The simulated venue offers the same variety, so the demo and the tests are deterministic
-- [ ] Program: tick, minimum quantity, close and cutoff times confirmed against the wider set of contracts; changed and redeployed only if something does not fit
+- [x] Program: tick, minimum quantity, close and cutoff times confirmed against the wider set of contracts: everything fits, so it is unchanged
 
 Exit: with the stack running, every active sandbox event and contract appears within a poll or two; a contract with offers can be bought and sold and then settles and redeems; a contract without offers says so; tests cover discovery, grouping and the new settlement cases.
 
