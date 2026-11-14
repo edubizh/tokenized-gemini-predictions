@@ -130,7 +130,9 @@ A restart resumes every unfinished order from the journal; it never places a sec
 - Pages: Markets (the live contracts with countdowns and prices), Market (the order ticket, which turns into the order's timeline once placed), Portfolio (positions, sell, redeem), Activity (every order with its receipt, and Reclaim for an expired one), System (how it works, relayer status, reconciliation).
 - Balances, positions and open orders are read from Solana in the browser. The relayer's API adds the venue's side: titles, prices, and what happened to each order.
 - Transactions are built with `@solana/kit` and the generated client, use a blockhash fetched at click time, are simulated first, signed through Privy, and broadcast unchanged.
-- A fixed notice marks every page as devnet and sandbox.
+- Without the relayer the app keeps working from Solana alone. A token is matched to its market through its mint (the mint's authority is the Market account, and the mint's metadata carries the name), so positions, Redeem, open orders and Reclaim stay available; listing markets and placing new orders wait for the relayer. On-chain deadlines are counted on the cluster clock, taken from the relayer's health answer or, while the relayer is away, from the cluster's Clock account.
+- After a page reload a wallet login is still signed in, but the wallet is no longer connected in the tab. Wherever a signature is needed the app offers Reconnect wallet in place of the action.
+- A fixed notice marks every page as devnet and names the venue in use (the sandbox or the simulated one).
 
 The design direction and component rules are in [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md).
 

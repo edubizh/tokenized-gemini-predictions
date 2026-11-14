@@ -26,7 +26,7 @@ The bridge is custodial: the program limits what the relayer can do to any one o
 | `anchor/` | The Solana program `outcome_tokens` (Anchor, Token-2022): 15 instructions, 188 tests on LiteSVM |
 | `clients/js/` | TypeScript client generated from the program's IDL |
 | `apps/relayer/` | The relayer: order pipeline with a write-ahead journal, sandbox and mock venue adapters, market manager, settlement watcher, reconciliation, a local API, and scripts |
-| `apps/web/` | The web app (Next.js, Privy): markets, order ticket with a live timeline, portfolio, activity, system status |
+| `apps/web/` | The web app (Next.js, Privy): markets, a ticket for buying and selling with a live timeline, portfolio, activity, system status; browser checks in `apps/web/e2e/` |
 | `docs/` | Architecture, scope, product and design notes |
 
 ## Status
@@ -38,7 +38,8 @@ Built, and verified end to end on Solana devnet against the Gemini Predictions s
 - an order with no offer at its limit was refunded in full;
 - with the relayer stopped, the user reclaimed an expired order's hold without it;
 - markets were settled on-chain from the sandbox's resolution about forty seconds after expiry, and tokens were redeemed;
-- the same flow was driven from the browser: login, test funds, an order from the ticket, a filled timeline.
+- the same flow was driven from the browser with an email login and with a wallet login: test funds, buys from the ticket with a live timeline, a sell-back, redemption after settlement, and an order after a page reload through Reconnect wallet;
+- with the relayer stopped, the web app kept showing balances, positions and open orders from Solana, and expired orders were reclaimed from the browser.
 
 Program id on devnet: `8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn`. The addresses of that deployment are in [`deployments/devnet.json`](deployments/devnet.json).
 
@@ -62,7 +63,7 @@ pnpm dev                  # relayer + web app; open http://localhost:3000
 
 The role keys of the devnet deployment listed above are not in the repository. To run your own copy, deploy the program under your own program id (`anchor keys sync`, `anchor build`, `anchor program deploy`), then run `pnpm bootstrap`: it creates the role keys under `.keys/`, a test stablecoin, the treasury accounts and the program configuration, and writes `deployments/devnet.json`. The upgrade authority needs a few devnet SOL.
 
-In the app: log in, press **Get test funds**, pick a market, place an order, and watch its timeline. When the market's fifteen minutes are over, redeem from the portfolio.
+In the app: log in, press **Get test funds**, pick a market, place an order, and watch its timeline. Tokens can be sold back from the same ticket while the market is open. When the market's fifteen minutes are over, redeem from the portfolio. The app is a local one: nothing here is hosted.
 
 Other commands:
 

@@ -76,33 +76,36 @@ Exit: passed (2026-11-14). Email login, embedded wallet, server-side token verif
 
 ## S2. Web app
 
-- [ ] Onboarding route: verify the login token, register the trader, send starter SOL and dUSD once
-- [ ] Markets, Ticket, Activity (timeline, receipt, Reclaim), Portfolio, Redeem
-- [ ] Devnet / sandbox banner and footer notice
+- [x] Onboarding route: verify the login token, register the trader, send starter SOL and dUSD once
+- [x] Markets, Ticket, Activity (timeline, receipt, Reclaim), Portfolio, Redeem
+- [x] Devnet / sandbox banner and footer notice
 
-Exit: a new email account completes test funds, buy, settle and redeem on two consecutive 15-minute contracts using only the browser, and a wallet login (Phantom) completes the same flow once.
+Exit: passed on devnet with the sandbox (2026-11-14), using only the browser. The email test account took test funds, bought on the 20:00 and 20:15 UTC contracts, saw both settled from the sandbox's result, redeemed a winning position for $1.00 and cleared the losing ones. A wallet login ran the same loop (test funds, a buy signed by the wallet, a winning redemption) and placed a further order after a page reload through Reconnect wallet. The wallet in these runs is a Wallet Standard test wallet injected into the page the way an extension registers itself; signing in with a real extension such as Phantom, or through WalletConnect, is a manual check that has not been done.
 
 ## S3. Breadth: the v1 demo
 
-- [ ] NO side; curated market rotation with the tradable-now check; token metadata
-- [ ] Fee pass-through from the venue's fill data; minimum order rules
-- [ ] `set_config`, `set_pause`, `set_market`, `revoke_settlement`; supply and order caps exercised
-- [ ] Reconciliation checks I1 to I3 and a reconciliation page; admin commands (status, pause, cancel-expired, void-market)
-- [ ] Mock venue; deterministic end-to-end suite; CI (program tests, type-check, lint)
+- [x] NO side; curated market rotation with the tradable-now check; token metadata
+- [x] Fee pass-through from the venue's fill data; minimum order rules
+- [x] `set_config`, `set_pause`, `set_market`, `revoke_settlement`; supply and order caps exercised (program tests)
+- [x] Reconciliation of the venue position against token supply, a treasury cover check, and a reconciliation table on the system page; admin commands `status`, `pause`, `cancel-expired`, `settle`
+- [ ] Not built: a trade-by-trade tie-out of the venue's cash balance, and a `void-market` command (a market held for review is settled by hand)
+- [x] Mock venue; a deterministic end-to-end run on a local validator (`pnpm e2e:local`); CI for the type-check and unit tests of the TypeScript packages
+- [ ] Not in CI: the program tests (they need the Solana toolchain) and a linter
 
-Exit: a one-hour run with at least 10 orders on at least 4 markets and both sides; reconciliation shows venue net position equal to (YES supply minus NO supply) per market; no order accounts left open; every settled market redeemable.
+Exit: met across the live runs of 2026-11-14 rather than in one timed hour. Between 18:47 and 20:17 UTC the relayer handled 16 orders from three test wallets on 8 sandbox contracts: buys on both sides and sells, 13 filled and 3 refunded. After every step reconciliation showed the venue's net position equal to YES supply minus NO supply, with no alerts; no order account was left open; every settled market paid on redemption.
 
 ## S4. Sell-back
 
-- [ ] `place_sell`, `fill_sell`, the buy-opposite order mapping, sell ticket with estimated proceeds
+- [x] `place_sell`, `fill_sell`, the buy-opposite order mapping, sell ticket with estimated proceeds
 
-Exit: buy, sell part, settle, redeem the rest on one market, with reconciliation clean throughout.
+Exit: passed on devnet with the sandbox (2026-11-14), from the browser. Bought 2.00 YES, sold 1.00 of it back (the relayer bought NO at the venue, the tokens were burned and $0.48 was paid), the market settled, and the rest was redeemed (it had lost, so it paid nothing). Reconciliation stayed balanced throughout. A first sale, with its minimum above a bid that had just moved, was not filled and the tokens came back.
 
 ## S5. Hardening and optional hosting
 
-- [ ] Browser end-to-end test with a login test account; failure-injection runs
-- [ ] More login methods (Google, passkey)
-- [ ] Hosted demo on the mock venue (or sandbox mode behind an allow-list); Postgres if more than one process needs the ledger
+- [x] Browser checks with a login test account: `apps/web/e2e/live-*.mjs` drive a live stack, `screens.mjs` drives every page and state against fixtures
+- [x] Failure injection: crash recovery in the pipeline's tests; with the relayer stopped, the app kept showing balances, positions and open orders from Solana, a position was cleared, and expired orders were reclaimed from the browser and from the command line
+- [ ] More login methods (Google, passkey): not planned
+- [ ] Hosted demo: not planned; this is a local app
 
 ## Out of plan
 
@@ -114,4 +117,32 @@ This is a personal project. It stays on devnet and the sandbox, and nothing here
 
 ## Review
 
-(Filled in as slices complete.)
+Finished on 2026-11-14.
+
+What was built:
+
+- **Program** `outcome_tokens` (Anchor 1.2.2, Token-2022): 15 instructions, 188 tests on LiteSVM, deployed and configured on devnet.
+- **Relayer**: order pipeline with a write-ahead journal and crash recovery, sandbox and mock venue adapters, market manager, settlement watcher, reconciliation, a local API and command-line tools; 699 unit tests.
+- **Web app** (Next.js, Privy): login with email or a Solana wallet, test funds, markets, an order ticket for buying and selling that turns into a live timeline, portfolio with redemption, activity with receipts and Reclaim, and a system page; 228 unit tests, and screenshots of every page and state from a fixtures mode.
+
+What was verified live on devnet against the sandbox, all on 2026-11-14 and all from the browser unless noted:
+
+| What | Result |
+|---|---|
+| Buy, email login | filled at the sandbox and minted 6 to 9 seconds after the click |
+| Buy with no offer at the limit (command line) | refunded in full |
+| Sell | filled: tokens burned and the proceeds paid in 8 seconds; with a minimum above the bid: tokens returned |
+| Settlement | recorded on-chain about 40 seconds after expiry, from the sandbox's result |
+| Redeem | $1.00 per winning token, confirmed in under 2 seconds; losing tokens cleared |
+| Wallet login | a buy signed by the wallet, a winning redemption, and an order after a page reload through Reconnect wallet |
+| Relayer stopped | pages kept working from Solana; a position was cleared; three expired orders were reclaimed, the newest on the first click the moment it expired |
+| Reconciliation | balanced after every step; no alerts |
+
+One defect was found by the live runs and fixed: with the relayer stopped, an order's expiry was counted on the local clock, so Reclaim was offered a few seconds before the program allowed it. The app now reads the cluster's clock itself while the relayer is away.
+
+Not done, and why:
+
+- A real extension wallet (Phantom) and WalletConnect have not been tried by hand. The login window lists them, and an injected Wallet Standard wallet covers the same code path in the browser checks.
+- Killing the relayer between the venue order and the on-chain fill has not been forced on live infrastructure; the pipeline's crash tests cover it.
+- The sandbox's market makers quote only part of the time. When a book is empty every order is refunded; `pnpm dev:mock` runs the same system against a simulated venue.
+- The known limits of the design are listed in [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
