@@ -12,7 +12,6 @@
     "e2e:local": "node scripts/local-e2e.ts"
   },
   "dependencies": {
-    "@gemini-markets/sdk": "0.1.1",
     "@outcome/program-client": "workspace:*",
     "@solana-program/system": "0.16.0",
     "@solana-program/token": "0.18.0",

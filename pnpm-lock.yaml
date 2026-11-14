@@ -217,9 +217,6 @@ importers:
 
   apps/relayer:
     dependencies:
-      '@gemini-markets/sdk':
-        specifier: 0.1.1
-        version: 0.1.1(ws@8.23.0(bufferutil@4.2.0)(utf-8-validate@5.0.10))
       '@outcome/program-client':
         specifier: workspace:*
         version: link:../../clients/js
@@ -652,18 +649,6 @@ packages:
 
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
-
-  '@gemini-markets/sdk@0.1.1':
-    resolution: {integrity: sha512-smA6AB6mzVTmTT9MhkRlOY/GuL+uow6zPVk0g85tLjN6WM4+j28IHePzRinjwc66BUfropYaudojmOUR4VLNeA==}
-    engines: {node: '>=22.4.0'}
-    peerDependencies:
-      '@opentelemetry/api': '>=1.9.0 <2'
-      ws: '>=8'
-    peerDependenciesMeta:
-      '@opentelemetry/api':
-        optional: true
-      ws:
-        optional: true
 
   '@gemini-wallet/core@0.3.2':
     resolution: {integrity: sha512-Z4aHi3ECFf5oWYWM3F1rW83GJfB9OvhBYPTmb5q+VyK3uvzvS48lwo+jwh2eOoCRWEuT/crpb9Vwp2QaS5JqgQ==}
@@ -4708,10 +4693,6 @@ snapshots:
       tabbable: 6.5.1
 
   '@floating-ui/utils@0.2.12': {}
-
-  '@gemini-markets/sdk@0.1.1(ws@8.23.0(bufferutil@4.2.0)(utf-8-validate@5.0.10))':
-    optionalDependencies:
-      ws: 8.23.0(bufferutil@4.2.0)(utf-8-validate@5.0.10)
 
   '@gemini-wallet/core@0.3.2(viem@2.57.8(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.6.7))':
     dependencies:
