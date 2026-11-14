@@ -1,5 +1,6 @@
-// The steps behind `scripts/demo.ts`: one test user (key in `.keys/demo-user-keypair.json`)
-// placing orders on-chain and following them through a running relayer's API.
+// The steps behind `scripts/demo.ts`: one test user (key in `.keys/demo-user-keypair.json`, or the
+// file named by DEMO_USER_KEYPAIR) placing orders on-chain and following them through a running
+// relayer's API.
 
 import path from "node:path";
 import {
@@ -113,8 +114,10 @@ export async function runCli(argv: readonly string[], env: Record<string, string
   const stableMint = address(deployment.stableMint);
   const sender = createSender({ rpc, programId, commitment: COMMITMENT, computeUnitLimit: 300_000, confirmTimeoutMs: 60_000 });
 
-  const userKeyPath = path.join(repoRoot, ".keys", "demo-user-keypair.json");
-  if (command === "setup" && (await ensureKeypairFile(userKeyPath))) say("created .keys/demo-user-keypair.json");
+  // DEMO_USER_KEYPAIR points every command at another test wallet's key file (a path relative to
+  // the repository root, or an absolute one).
+  const userKeyPath = path.resolve(repoRoot, process.env.DEMO_USER_KEYPAIR ?? path.join(".keys", "demo-user-keypair.json"));
+  if (command === "setup" && (await ensureKeypairFile(userKeyPath))) say(`created ${path.relative(repoRoot, userKeyPath)}`);
   const user: KeyPairSigner = await loadKeypairSigner(userKeyPath).catch(() => {
     throw new Error("no test user yet: run `scripts/demo.ts setup` first");
   });

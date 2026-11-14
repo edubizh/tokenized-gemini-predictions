@@ -30,5 +30,14 @@ export function createClock(): Clock {
   };
 }
 
-/** The app's one clock, aligned from the relayer's `/health`. */
+/** The app's one clock, aligned from the relayer's `/health`, or from the cluster itself while the relayer is away. */
 export const clock = createClock();
+
+/** The cluster's Clock account. */
+export const CLOCK_SYSVAR_ADDRESS = "SysvarC1ock11111111111111111111111111111111";
+
+/** The unix timestamp held in the Clock account's data: a little-endian i64 after four 8-byte fields. */
+export function clusterTimeFromSysvar(data: Uint8Array): number {
+  if (data.byteLength < 40) throw new Error("The cluster clock could not be read.");
+  return Number(new DataView(data.buffer, data.byteOffset, data.byteLength).getBigInt64(32, true));
+}

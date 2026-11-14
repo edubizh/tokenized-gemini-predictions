@@ -1,10 +1,10 @@
 // The one module hooks call for chain data. Two implementations behind one interface: Solana
 // through Kit, and the simulated chain of fixtures mode. The configuration chooses.
 
-import { address, fetchEncodedAccounts, getUtf8Encoder, type Address, type EncodedAccount } from "@solana/kit";
+import { address, fetchEncodedAccount, fetchEncodedAccounts, getUtf8Encoder, type Address, type EncodedAccount } from "@solana/kit";
 import { decodeMint, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { decodeMarket, decodeOrder, decodeTrader, findMarketPda, findTraderPda, MarketStatus } from "@outcome/program-client";
-import { clock } from "@/lib/clock";
+import { clock, CLOCK_SYSVAR_ADDRESS, clusterTimeFromSysvar } from "@/lib/clock";
 import type { PublicConfig } from "@/lib/config";
 import type { FixtureChain, FixtureChainMarket, MarketQuery } from "@/lib/fixtures/chain-types";
 import { fetchBalances as fetchRpcBalances, fetchTrader as fetchRpcTrader, type Balances, type TraderAccount } from "./accounts";
@@ -73,6 +73,8 @@ export interface ChainReads {
    * Solana does not hold is left out.
    */
   fetchMarkets(query: MarketQuery): Promise<ChainMarket[]>;
+  /** The cluster clock in unix seconds, read from Solana itself for when the relayer cannot be asked. */
+  fetchClusterTime(): Promise<number>;
 }
 
 /** How many of a trader's most recent order addresses are checked for an open order. */
@@ -263,6 +265,11 @@ function rpcReads(config: ReadsConfig): ChainReads {
       }
       return found;
     },
+    async fetchClusterTime() {
+      const account = await fetchEncodedAccount(rpc, address(CLOCK_SYSVAR_ADDRESS), { commitment: "confirmed" });
+      if (!account.exists) throw new Error("The cluster clock could not be read.");
+      return clusterTimeFromSysvar(account.data);
+    },
   };
 }
 
@@ -301,6 +308,9 @@ function fixtureReads(): ChainReads {
       for (const key of ["mints", "markets", "symbols"] as const) if (query[key]?.length) search.set(key, query[key].join(","));
       const { markets } = await get<{ markets: FixtureChainMarket[] }>(search);
       return markets.map((market) => ({ ...market, yesPayout: BigInt(market.yesPayout), noPayout: BigInt(market.noPayout) }));
+    },
+    async fetchClusterTime() {
+      return (await get<{ chainTime: number }>(new URLSearchParams({ read: "clock" }))).chainTime;
     },
   };
 }
