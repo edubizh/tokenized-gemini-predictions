@@ -1,0 +1,20 @@
+{
+  "idl": "anchor/idl/outcome_tokens.json",
+  "before": [],
+  "scripts": {
+    "js": {
+      "from": "@codama/renderers-js",
+      "args": [
+        "clients/js",
+        {
+          "deleteFolderBeforeRendering": true,
+          "erasableSyntax": true,
+          "formatCode": true,
+          "importExtension": "js",
+          "kitImportStrategy": "rootOnly",
+          "syncPackageJson": false
+        }
+      ]
+    }
+  }
+}

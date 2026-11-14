@@ -17,25 +17,32 @@ The build runs in vertical slices. Each slice ends with something that runs, and
 
 Needs only Node and the sandbox key. This is the one unknown that could stop the project, so it runs first.
 
-- [ ] Capture harness: authenticated WebSocket with every raw frame written to a log, plus REST snapshots of balances and positions
-- [ ] Accept the sandbox Prediction Markets terms; place a 1-contract BUY YES on a live 15-minute contract with a client order id
-- [ ] Record the fill event fields (quantity, price, trade id, fee), partial-fill and full-fill sequences, a no-fill, and rejections
-- [ ] Netting test: holding YES, buy NO; record position, cash movement and price space
-- [ ] Duplicate client order id behaviour; order history lookup by client order id
-- [ ] Hold a position through expiry; record the settlement and payout records
-- [ ] Save scrubbed transcripts as fixtures
+- [x] Capture harness: authenticated WebSocket with every raw frame written to a log, plus REST snapshots of balances and positions
+- [x] Terms already accepted on the account; placed a 1-contract BUY YES on a live 15-minute contract with a client order id
+- [x] Recorded the fill event fields (quantity, price, trade id, fee), partial-fill and full-fill sequences, a no-fill, and rejections
+- [x] Netting test: holding YES, buy NO; recorded position, cash movement and price space
+- [x] Duplicate client order id behaviour; order history lookup by client order id
+- [x] Held a position through expiry; recorded the settlement and payout records
+- [x] Fixtures: tests use synthetic frames shaped like the recorded ones (recorded payloads are not committed)
 
-Exit: a fill with derivable quantity and cost, a settled payout record, and written answers to the open questions (netting, fee field, client order id in history). If a fresh sandbox account cannot trade, stop and reassess before building anything on top.
+Exit: passed (2026-11-14). A fresh sandbox account trades through the API. Answers:
+- Fills are keyed by trade id. On a fill event the executed quantity is that execution; on the closing cancel event it is cumulative, so summing double-counts.
+- A fill-or-kill order ends with a single filled or cancelled event; an immediate-or-cancel order that fills completely still ends with a cancel event.
+- Netting holds: buying the opposite outcome reduces the position and releases a dollar per netted pair at once. A fully netted market gets no settlement record and no payout.
+- The sandbox charges no fee (the fee field is present and zero).
+- A client order id can be reused after its order closed, so the journal is the only guard against a second order. Order history returns the client order id.
+- Signed REST calls must be at least a second apart (the nonce is in seconds and must increase).
+- Settlement arrived 9 seconds after expiry; the settled-positions record carries the payout.
 
 ## S0b. Toolchain spike
 
-- [ ] `anchor init` in `anchor/`; one instruction that creates a Token-2022 mint (2 decimals, program-derived authority, metadata) and mints to an associated token account
-- [ ] LiteSVM test for it, including a clock-based expiry check and a classic-token transfer into a program-owned escrow
-- [ ] Pinned Codama generation into `clients/js/`; type-check against `@solana/kit` 8.6.0
-- [ ] Deploy to devnet and call the instruction from Node through the generated client
-- [ ] Write the installed versions into `docs/VERSIONS.md`
+- [x] `anchor init` in `anchor/`; one instruction that creates a Token-2022 mint (2 decimals, program-derived authority, metadata) and mints to an associated token account
+- [x] LiteSVM test for it, including a clock-based expiry check and a classic-token transfer into a program-owned escrow
+- [x] Pinned Codama generation into `clients/js/`; type-check against `@solana/kit` 8.6.0
+- [x] Deploy to devnet and call the instruction from Node through the generated client
+- [x] Write the installed versions into `docs/VERSIONS.md`
 
-Exit: confirmed devnet signature. Fallback if not green within one session: build S1 without a custom program (backend-held mint authority) behind the same relayer core.
+Exit: passed (2026-11-14). Program id `8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn` on devnet; 12 spike tests green; a spike mint with metadata created and 100 units minted on devnet through the generated client. The spike instructions are throwaway and are replaced by the real program in S1.
 
 ## S1. Headless slice: buy, mint, settle, redeem
 

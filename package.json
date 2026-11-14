@@ -1,0 +1,27 @@
+{
+  "name": "outcome-tokens",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.18.0",
+  "engines": {
+    "node": ">=24.6 <25"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "codegen": "codama run js"
+  },
+  "devDependencies": {
+    "@codama/nodes-from-anchor": "1.5.6",
+    "@codama/renderers-js": "2.9.0",
+    "@outcome/program-client": "workspace:*",
+    "@solana-program/token-2022": "0.20.1",
+    "@solana/kit": "catalog:",
+    "@solana/sysvars": "8.6.0",
+    "@types/node": "catalog:",
+    "codama": "1.11.0",
+    "tsx": "catalog:",
+    "typescript": "catalog:"
+  }
+}

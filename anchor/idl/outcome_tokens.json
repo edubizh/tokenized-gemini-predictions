@@ -1,0 +1,637 @@
+{
+  "address": "8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn",
+  "metadata": {
+    "name": "outcome_tokens",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Outcome token program"
+  },
+  "instructions": [
+    {
+      "name": "spike_create_market",
+      "discriminator": [
+        72,
+        199,
+        199,
+        31,
+        62,
+        170,
+        17,
+        115
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "symbol_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn"
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "symbol_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "symbol",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "spike_create_mint",
+      "discriminator": [
+        197,
+        230,
+        50,
+        59,
+        189,
+        71,
+        173,
+        71
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "market",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.symbol_hash",
+                "account": "SpikeMarket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "Token-2022 mint whose metadata lives on the mint account itself. No freeze authority."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "arg",
+                "path": "side"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "side",
+          "type": "u8"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "symbol",
+          "type": "string"
+        },
+        {
+          "name": "uri",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "spike_escrow",
+      "discriminator": [
+        117,
+        135,
+        179,
+        214,
+        78,
+        235,
+        31,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "arg",
+                "path": "nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "Classic SPL Token account owned by the order."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stable_mint"
+        },
+        {
+          "name": "user_token",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "nonce",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "ttl_secs",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "spike_mint",
+      "discriminator": [
+        208,
+        191,
+        8,
+        133,
+        76,
+        167,
+        78,
+        13
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "signer": true
+        },
+        {
+          "name": "market",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.symbol_hash",
+                "account": "SpikeMarket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "writable": true
+        },
+        {
+          "name": "user_token",
+          "docs": [
+            "The user's associated token account under the Token-2022 program."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "spike_release",
+      "discriminator": [
+        92,
+        110,
+        25,
+        140,
+        168,
+        135,
+        232,
+        69
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "docs": [
+            "Anyone may release an expired order."
+          ],
+          "signer": true
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "relations": [
+            "order"
+          ]
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order.user",
+                "account": "SpikeOrder"
+              },
+              {
+                "kind": "account",
+                "path": "order.nonce",
+                "account": "SpikeOrder"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stable_mint"
+        },
+        {
+          "name": "destination",
+          "docs": [
+            "Any token account of the escrowed mint that the order's user owns."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "SpikeMarket",
+      "discriminator": [
+        8,
+        193,
+        46,
+        48,
+        153,
+        62,
+        168,
+        55
+      ]
+    },
+    {
+      "name": "SpikeOrder",
+      "discriminator": [
+        228,
+        165,
+        224,
+        48,
+        236,
+        138,
+        230,
+        96
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "NotUpgradeAuthority",
+      "msg": "Signer is not the program's upgrade authority"
+    },
+    {
+      "code": 6001,
+      "name": "SymbolHashMismatch",
+      "msg": "Symbol hash does not equal sha256(symbol)"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidSide",
+      "msg": "Side must be 0 or 1"
+    },
+    {
+      "code": 6003,
+      "name": "ZeroAmount",
+      "msg": "Amount must be greater than zero"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidTtl",
+      "msg": "Time to live must be greater than zero"
+    },
+    {
+      "code": 6005,
+      "name": "NotExpired",
+      "msg": "Order has not expired yet"
+    },
+    {
+      "code": 6006,
+      "name": "Overflow",
+      "msg": "Arithmetic overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "SpikeMarket",
+      "docs": [
+        "Mint authority for one market's outcome mints. Stores its own seeds so it can sign."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "symbol_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SpikeOrder",
+      "docs": [
+        "One escrowed order. Token authority of its escrow account."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ],
+  "constants": [
+    {
+      "name": "ESCROW_SEED",
+      "type": "bytes",
+      "value": "[101, 115, 99, 114, 111, 119]"
+    },
+    {
+      "name": "MARKET_SEED",
+      "type": "bytes",
+      "value": "[109, 97, 114, 107, 101, 116]"
+    },
+    {
+      "name": "MINT_SEED",
+      "type": "bytes",
+      "value": "[109, 105, 110, 116]"
+    },
+    {
+      "name": "ORDER_SEED",
+      "type": "bytes",
+      "value": "[111, 114, 100, 101, 114]"
+    },
+    {
+      "name": "OUTCOME_DECIMALS",
+      "docs": [
+        "Outcome tokens have two decimals: one base unit is 0.01 contract."
+      ],
+      "type": "u8",
+      "value": "2"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@outcome/relayer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@gemini-markets/sdk": "0.1.1",
+    "ws": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/ws": "8.18.2",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

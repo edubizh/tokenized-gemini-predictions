@@ -21,6 +21,7 @@ out/
 target/
 .anchor/
 test-ledger/
+**/*.rs.bk
 
 # Local data
 *.db

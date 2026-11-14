@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The generated program plugin assigns `undefined` to optional properties.
+    "exactOptionalPropertyTypes": false
+  },
+  "include": ["src"]
+}
