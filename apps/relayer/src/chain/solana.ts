@@ -460,7 +460,9 @@ export function createSolanaChain(options: SolanaChainOptions): Chain & MarketCh
           },
           program,
         );
-        return await sender.send(settler, [instruction]);
+        const signature = await sender.send(settler, [instruction]);
+        log(`market ${symbol}: settled (${yesPayout}, ${noPayout}) in ${signature}`);
+        return signature;
       } catch (error) {
         let after: Awaited<ReturnType<typeof fetchMaybeMarket>>;
         try {

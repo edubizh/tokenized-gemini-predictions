@@ -47,6 +47,12 @@ function repo(deployments: Record<string, unknown> = { devnet: DEPLOYMENT }): st
 }
 
 describe("loadConfig", () => {
+  it("keeps a separate database per venue, so sandbox and mock markets never mix", () => {
+    const root = repo();
+    expect(loadConfig(SANDBOX_ENV, root).dbPath).toBe(path.join(root, ".data", "relayer-devnet-sandbox.sqlite"));
+    expect(loadConfig({ ...SANDBOX_ENV, VENUE: "mock" }, root).dbPath).toBe(path.join(root, ".data", "relayer-devnet-mock.sqlite"));
+  });
+
   it("applies the defaults for devnet and the sandbox", () => {
     const root = repo();
     expect(loadConfig(SANDBOX_ENV, root)).toEqual({
@@ -58,7 +64,7 @@ describe("loadConfig", () => {
       geminiApiSecret: "synthetic-secret",
       series: ["BTC15M", "ETH15M", "SOL15M", "XRP15M"],
       port: 8787,
-      dbPath: path.join(root, ".data", "relayer-devnet.sqlite"),
+      dbPath: path.join(root, ".data", "relayer-devnet-sandbox.sqlite"),
       relayerKeyPath: path.join(root, ".keys", "relayer-keypair.json"),
       settlerKeyPath: path.join(root, ".keys", "settler-keypair.json"),
       deploymentPath: path.join(root, "deployments", "devnet.json"),

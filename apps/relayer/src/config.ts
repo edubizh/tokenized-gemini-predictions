@@ -93,7 +93,7 @@ export function loadConfig(env: Record<string, string | undefined>, repoRoot: st
     geminiApiSecret: value("GEMINI_API_SECRET"),
     series,
     port,
-    dbPath: value("RELAYER_DB") ?? path.join(repoRoot, ".data", `relayer-${cluster}.sqlite`),
+    dbPath: value("RELAYER_DB") ?? path.join(repoRoot, ".data", `relayer-${cluster}-${venue}.sqlite`),
     relayerKeyPath: value("RELAYER_KEYPAIR") ?? path.join(repoRoot, ".keys", "relayer-keypair.json"),
     settlerKeyPath: value("SETTLER_KEYPAIR") ?? path.join(repoRoot, ".keys", "settler-keypair.json"),
     deploymentPath,
