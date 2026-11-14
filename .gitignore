@@ -6,6 +6,10 @@
 id.json
 *.pem
 
+# Local notes and fetched third-party material
+research/
+vendor/
+
 # Dependencies
 node_modules/
 
@@ -18,8 +22,16 @@ target/
 .anchor/
 test-ledger/
 
+# Local data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
 # Tooling
 .turbo/
+.vercel/
+.surfpool/
 coverage/
 *.log
 
