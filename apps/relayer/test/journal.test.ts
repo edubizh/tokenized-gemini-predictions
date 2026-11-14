@@ -20,6 +20,7 @@ function order(overrides: Partial<NewOrder> = {}): NewOrder {
   return {
     orderAddress: "OrderA",
     clientOrderId: "client-a",
+    user: "UserA",
     kind: "buy",
     side: "YES",
     symbol: "GEMI-BTC-TEST",
@@ -250,6 +251,18 @@ describe("queries", () => {
     ]);
     expect(journal.byState("failed", "chain_filled").map((row) => row.orderAddress)).toEqual(["Order0", "Order3"]);
     expect(journal.byState()).toEqual([]);
+  });
+
+  it("byUser returns that user's rows newest first, up to the limit", () => {
+    const journal = memory();
+    const users = ["UserA", "UserB", "UserA", "UserA"];
+    users.forEach((user, i) => journal.recordSeen(order({ user, orderAddress: `Order${i}`, clientOrderId: `client-${i}` })));
+    expect(journal.get("Order1")?.user).toBe("UserB");
+    expect(journal.byUser("UserA", 10).map((row) => row.orderAddress)).toEqual(["Order3", "Order2", "Order0"]);
+    expect(journal.byUser("UserA", 2).map((row) => row.orderAddress)).toEqual(["Order3", "Order2"]);
+    expect(journal.byUser("UserB", 10).map((row) => row.user)).toEqual(["UserB"]);
+    expect(journal.byUser("Nobody", 10)).toEqual([]);
+    expect(journal.byUser("UserA", 0)).toEqual([]);
   });
 
   it("houseInventoryUnits sums the signed fills of orphaned orders per symbol", () => {

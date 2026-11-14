@@ -39,6 +39,8 @@ export class MockVenue implements Venue {
   /** Orders the venue accepted, by client order id. */
   private readonly orders = new Map<string, RecordedOrder>();
   private readonly faults: FaultMode[] = [];
+  /** Client order ids `findOrder` reports as not closed yet. */
+  private readonly heldOpen = new Set<string>();
   private cash = 0n;
   private nextOrderId = 73_000_000_000_000_000n;
   private nextTradeId = 5_000_000_000_000_000n;
@@ -65,6 +67,15 @@ export class MockVenue implements Venue {
   /** Makes the next `placeOrder` misbehave. Faults queue up and each applies to one order. */
   failNext(mode: FaultMode): void {
     this.faults.push(mode);
+  }
+
+  /**
+   * Makes `findOrder` report the order with this client id as found but not closed, as a venue
+   * does while an order is still working. `holdOpen(id, false)` closes it again.
+   */
+  holdOpen(clientOrderId: string, open = true): void {
+    if (open) this.heldOpen.add(clientOrderId);
+    else this.heldOpen.delete(clientOrderId);
   }
 
   /** Settles the contract: a winning net position is paid out, any position is cleared. */
@@ -100,7 +111,7 @@ export class MockVenue implements Venue {
     return {
       found: true,
       venueOrderId: order.venueOrderId,
-      closed: true,
+      closed: !this.heldOpen.has(clientOrderId),
       filledUnits: order.filledUnits,
       avgPx: exact ? order.costMicros / order.filledUnits : null,
     };

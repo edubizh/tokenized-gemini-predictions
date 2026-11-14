@@ -19,6 +19,8 @@ export type OrderState =
 export interface NewOrder {
   orderAddress: string;
   clientOrderId: string;
+  /** Wallet that placed the order on-chain. */
+  user: string;
   kind: "buy" | "sell";
   side: Outcome;
   symbol: string;
@@ -55,6 +57,8 @@ export interface Journal {
   markChain(orderAddress: string, outcome: ChainOutcome, info?: { signature?: string; detail?: string }): void;
   get(orderAddress: string): JournalOrder | undefined;
   byState(...states: OrderState[]): JournalOrder[];
+  /** At most `limit` rows of one user, newest first. */
+  byUser(user: string, limit: number): JournalOrder[];
   /** Rows that still need work, oldest first. */
   unresolved(): JournalOrder[];
   fills(orderAddress: string): VenueFill[];
@@ -82,6 +86,7 @@ const SCHEMA = `
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     order_address TEXT NOT NULL UNIQUE,
     client_order_id TEXT NOT NULL UNIQUE,
+    user TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('buy', 'sell')),
     side TEXT NOT NULL CHECK (side IN ('YES', 'NO')),
     symbol TEXT NOT NULL,
@@ -109,6 +114,7 @@ const SCHEMA = `
     fee_source TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS fills_by_order ON fills (order_address, position);
+  CREATE INDEX IF NOT EXISTS orders_by_user ON orders (user, seq);
 `;
 
 type Row = Record<string, unknown>;
@@ -117,6 +123,7 @@ function toOrder(row: Row): JournalOrder {
   return {
     orderAddress: String(row.order_address),
     clientOrderId: String(row.client_order_id),
+    user: String(row.user),
     kind: row.kind as "buy" | "sell",
     side: row.side as Outcome,
     symbol: String(row.symbol),
@@ -156,10 +163,11 @@ export function openJournal(path: string): Journal {
 
   const selectOrder = db.prepare("SELECT * FROM orders WHERE order_address = ?");
   const insertOrder = db.prepare(
-    `INSERT INTO orders (order_address, client_order_id, kind, side, symbol, units, limit_px, max_fee_micros,
+    `INSERT INTO orders (order_address, client_order_id, user, kind, side, symbol, units, limit_px, max_fee_micros,
        expires_at, state, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'seen', ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'seen', ?, ?)`,
   );
+  const selectByUser = db.prepare("SELECT * FROM orders WHERE user = ? ORDER BY seq DESC LIMIT ?");
   const updateState = db.prepare("UPDATE orders SET state = ?, updated_at = ? WHERE order_address = ?");
   const updateVenue = db.prepare(
     `UPDATE orders SET state = ?, venue_order_id = COALESCE(?, venue_order_id), filled_units = ?, amount_micros = ?,
@@ -227,6 +235,7 @@ export function openJournal(path: string): Journal {
         insertOrder.run(
           order.orderAddress,
           order.clientOrderId,
+          order.user,
           order.kind,
           order.side,
           order.symbol,
@@ -313,6 +322,11 @@ export function openJournal(path: string): Journal {
 
     get,
     byState,
+
+    byUser(user, limit) {
+      if (!Number.isInteger(limit) || limit <= 0) return [];
+      return (selectByUser.all(user, limit) as Row[]).map(toOrder);
+    },
 
     unresolved() {
       return byState(...UNRESOLVED);

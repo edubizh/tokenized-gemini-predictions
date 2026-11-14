@@ -266,6 +266,28 @@ describe("MockVenue.findOrder", () => {
     expect(await venue.findOrder(order.clientOrderId, SYMBOL, 0)).toMatchObject({ filledUnits: 3n, avgPx: null });
   });
 
+  it("reports an order held open as found but not closed until it is released", async () => {
+    const venue = venueWith();
+    venue.setBook(SYMBOL, { bids: [], asks: [[1_700n, 300n]] });
+    const order = request();
+    venue.holdOpen(order.clientOrderId);
+    // Holding an id the venue has not accepted does not make it findable.
+    expect(await venue.findOrder(order.clientOrderId, SYMBOL, 0)).toEqual({ found: false });
+    expect((await venue.placeOrder(order)).kind).toBe("filled");
+    expect(await venue.findOrder(order.clientOrderId, SYMBOL, 0)).toMatchObject({
+      found: true,
+      closed: false,
+      filledUnits: 300n,
+    });
+    venue.holdOpen(order.clientOrderId, false);
+    expect(await venue.findOrder(order.clientOrderId, SYMBOL, 0)).toMatchObject({
+      found: true,
+      closed: true,
+      filledUnits: 300n,
+      avgPx: 1_700n,
+    });
+  });
+
   it("does not find a rejected order", async () => {
     const venue = venueWith();
     const order = request({ symbol: "GEMI-NOPE" });
