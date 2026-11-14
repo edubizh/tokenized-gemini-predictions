@@ -964,6 +964,98 @@ pub fn try_cancel_order(
     )
 }
 
+// --- Sell orders -----------------------------------------------------------------------
+
+// The order `place_sell_args` describes.
+pub const SELL_QTY: u64 = 600;
+pub const SELL_MIN_PX: u16 = 5_000;
+pub const SELL_MAX_FEE: u64 = 20_000;
+
+/// The accounts of a `place_sell` for the user's next order, selling tokens of `side` out
+/// of `user_outcome`. Tests replace single fields to probe one check at a time.
+pub fn place_sell_accounts(
+    env: &Env,
+    user: &Pubkey,
+    payer: &Pubkey,
+    market: &MarketKeys,
+    side: Side,
+    user_outcome: &Pubkey,
+) -> outcome_tokens::accounts::PlaceSell {
+    let order = order_address(user, next_nonce(&env.svm, user));
+    outcome_tokens::accounts::PlaceSell {
+        user: *user,
+        payer: *payer,
+        config: env.config,
+        trader: trader_address(user),
+        market: market.market,
+        order,
+        escrow: escrow_address(&order),
+        user_outcome: *user_outcome,
+        outcome_mint: market.mint(side),
+        token_program: spl_token_2022::ID,
+        system_program: system_program::ID,
+    }
+}
+
+/// A YES sell of `SELL_QTY` units at `SELL_MIN_PX` or better with a fee cap of
+/// `SELL_MAX_FEE`.
+pub fn place_sell_args() -> outcome_tokens::instruction::PlaceSell {
+    outcome_tokens::instruction::PlaceSell {
+        side: Side::Yes,
+        qty_units: SELL_QTY,
+        min_px: SELL_MIN_PX,
+        max_fee: SELL_MAX_FEE,
+    }
+}
+
+/// Places the trader's next sell order out of `user_outcome`, signed and paid for by the
+/// trader, and returns the order address.
+pub fn place_sell(
+    env: &mut Env,
+    trader: &TraderKeys,
+    market: &MarketKeys,
+    user_outcome: &Pubkey,
+    args: outcome_tokens::instruction::PlaceSell,
+) -> Pubkey {
+    let user = trader.wallet.pubkey();
+    let accounts = place_sell_accounts(env, &user, &user, market, args.side, user_outcome);
+    let order = accounts.order;
+    send_ok(
+        &mut env.svm,
+        &[instruction(accounts, args)],
+        &[&trader.wallet],
+    );
+    order
+}
+
+/// The accounts of a `fill_sell` of `order`, read from the order account: its market, the
+/// outcome mint of its side and its rent payer. `payout_source` is the relayer's stable
+/// account that pays the user. Tests replace single fields to probe one check at a time.
+pub fn fill_sell_accounts(
+    env: &Env,
+    order: &Pubkey,
+    payout_source: &Pubkey,
+    user_stable: &Pubkey,
+    user_outcome: &Pubkey,
+) -> outcome_tokens::accounts::FillSell {
+    let stored: Order = load(&env.svm, order);
+    outcome_tokens::accounts::FillSell {
+        relayer: env.relayer.pubkey(),
+        config: env.config,
+        market: stored.market,
+        order: *order,
+        outcome_mint: mint_address(&stored.market, stored.side()),
+        escrow: escrow_address(order),
+        payout_source: *payout_source,
+        user_stable: *user_stable,
+        user_outcome: *user_outcome,
+        rent_payer: stored.rent_payer,
+        stable_mint: env.stable_mint,
+        stable_token_program: spl_token::ID,
+        outcome_token_program: spl_token_2022::ID,
+    }
+}
+
 // --- Pause and halt --------------------------------------------------------------------
 
 /// Sets the pause flags to exactly `flags`, signed by the admin.

@@ -553,6 +553,182 @@
       ]
     },
     {
+      "name": "fill_sell",
+      "discriminator": [
+        136,
+        56,
+        218,
+        165,
+        46,
+        108,
+        202,
+        175
+      ],
+      "accounts": [
+        {
+          "name": "relayer",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.symbol_hash",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order.user",
+                "account": "Order"
+              },
+              {
+                "kind": "account",
+                "path": "order.nonce",
+                "account": "Order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "outcome_mint",
+          "writable": true
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payout_source",
+          "docs": [
+            "A stable token account of the relayer, which received the venue's payment for the",
+            "sale. Pays the user."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_stable",
+          "docs": [
+            "Any stable token account of the order's user. Receives the proceeds less the fee."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_outcome",
+          "docs": [
+            "Any token account of the order's user for the outcome mint; it need not be the",
+            "associated one. Receives what the fill did not sell."
+          ],
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "docs": [
+            "its escrow."
+          ],
+          "writable": true,
+          "relations": [
+            "order"
+          ]
+        },
+        {
+          "name": "stable_mint"
+        },
+        {
+          "name": "stable_token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "outcome_token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        }
+      ],
+      "args": [
+        {
+          "name": "fill_qty",
+          "type": "u64"
+        },
+        {
+          "name": "proceeds",
+          "type": "u64"
+        },
+        {
+          "name": "fee",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "initialize",
       "discriminator": [
         175,
@@ -805,6 +981,191 @@
         },
         {
           "name": "limit_px",
+          "type": "u16"
+        },
+        {
+          "name": "max_fee",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "place_sell",
+      "discriminator": [
+        17,
+        86,
+        4,
+        221,
+        48,
+        125,
+        40,
+        14
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "signer": true
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Funds the order and its escrow, and gets that rent back when they close."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "trader",
+          "docs": [
+            "Exists only for a wallet the registrar has registered."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  97,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.symbol_hash",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "account",
+                "path": "trader.next_nonce",
+                "account": "Trader"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_outcome",
+          "docs": [
+            "Any token account of the user for the outcome mint; it need not be the associated",
+            "one."
+          ],
+          "writable": true
+        },
+        {
+          "name": "outcome_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "side",
+          "type": {
+            "defined": {
+              "name": "Side"
+            }
+          }
+        },
+        {
+          "name": "qty_units",
+          "type": "u64"
+        },
+        {
+          "name": "min_px",
           "type": "u16"
         },
         {

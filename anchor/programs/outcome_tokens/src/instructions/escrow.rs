@@ -1,8 +1,8 @@
 //! Moving tokens out of an order's escrow. The order account is the escrow's authority,
-//! so every transfer here is signed with the order's seeds. Works for both token programs.
+//! so everything here is signed with the order's seeds. Works for both token programs.
 
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{self, CloseAccount, Mint, TokenAccount, TransferChecked};
+use anchor_spl::token_interface::{self, Burn, CloseAccount, Mint, TokenAccount, TransferChecked};
 
 use crate::{constants::ORDER_SEED, state::Order};
 
@@ -30,6 +30,30 @@ pub fn transfer_from_escrow<'info>(
         ),
         amount,
         mint.decimals,
+    )
+}
+
+/// Burns `amount` of the escrowed tokens.
+pub fn burn_from_escrow<'info>(
+    order: &Account<'info, Order>,
+    escrow: &InterfaceAccount<'info, TokenAccount>,
+    mint: &InterfaceAccount<'info, Mint>,
+    token_program: Pubkey,
+    amount: u64,
+) -> Result<()> {
+    let nonce = order.nonce.to_le_bytes();
+    let signer_seeds: &[&[&[u8]]] = &[&[ORDER_SEED, order.user.as_ref(), &nonce, &[order.bump]]];
+    token_interface::burn(
+        CpiContext::new_with_signer(
+            token_program,
+            Burn {
+                mint: mint.to_account_info(),
+                from: escrow.to_account_info(),
+                authority: order.to_account_info(),
+            },
+            signer_seeds,
+        ),
+        amount,
     )
 }
 

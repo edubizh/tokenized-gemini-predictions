@@ -404,6 +404,28 @@ fn place_buy_only_spends_from_a_token_account_the_user_owns() {
     assert_eq!(token_balance(&scene.env.svm, &victim_stable), TRADER_STABLE);
 }
 
+#[test]
+fn place_buy_rejects_the_token_2022_program() {
+    let mut scene = trading_scene();
+    let user = scene.trader.wallet.pubkey();
+
+    let mut accounts = place_buy_accounts(
+        &scene.env,
+        &user,
+        &user,
+        &scene.market.market,
+        &scene.trader.stable,
+    );
+    accounts.token_program = spl_token_2022::ID;
+    let result = send(
+        &mut scene.env.svm,
+        &[instruction(accounts, place_buy_args())],
+        &[&scene.trader.wallet],
+    );
+
+    assert_anchor_err(result, anchor_lang::error::ErrorCode::InvalidProgramId);
+}
+
 // --- fill_buy --------------------------------------------------------------------------
 
 /// Cost of the fixture's order when all of it fills at its limit price.
@@ -788,7 +810,7 @@ fn fill_buy_only_pays_token_accounts_the_orders_user_owns() {
 }
 
 #[test]
-fn fill_buy_rejects_substituted_escrow_treasury_and_rent_payer() {
+fn fill_buy_rejects_substituted_accounts() {
     let mut placed = placed_order();
     let attacker = funded_keypair(&mut placed.env.svm, 12);
     let attacker_stable = create_stable_account(&mut placed.env, &attacker.pubkey(), 0);
@@ -818,6 +840,22 @@ fn fill_buy_rejects_substituted_escrow_treasury_and_rent_payer() {
     assert_anchor_err(
         try_fill(&mut placed.env, accounts, full_fill()),
         anchor_lang::error::ErrorCode::ConstraintHasOne,
+    );
+
+    // Each token program is fixed: the stablecoin's is the classic one, the outcome
+    // tokens' is Token-2022.
+    let mut accounts = placed.fill_accounts();
+    accounts.stable_token_program = spl_token_2022::ID;
+    assert_anchor_err(
+        try_fill(&mut placed.env, accounts, full_fill()),
+        anchor_lang::error::ErrorCode::InvalidProgramId,
+    );
+
+    let mut accounts = placed.fill_accounts();
+    accounts.outcome_token_program = spl_token::ID;
+    assert_anchor_err(
+        try_fill(&mut placed.env, accounts, full_fill()),
+        anchor_lang::error::ErrorCode::InvalidProgramId,
     );
 }
 
@@ -893,4 +931,39 @@ fn fill_buy_refunds_tokens_donated_to_the_escrow() {
         TRADER_STABLE - FULL_COST - FEE + donation
     );
     assert!(is_closed(&placed.env.svm, &escrow_address(&placed.order)));
+}
+
+#[test]
+fn fill_buy_survives_the_user_closing_their_token_account_after_placing() {
+    let mut placed = placed_order();
+    let user = placed.trader.wallet.pubkey();
+    let closed = placed.fill_accounts();
+    // The account the relayer expected to mint into is empty, so its owner can close it.
+    let close = spl_token_2022::instruction::close_account(
+        &spl_token_2022::ID,
+        &placed.user_outcome,
+        &user,
+        &user,
+        &[],
+    )
+    .unwrap();
+    send_ok(&mut placed.env.svm, &[close], &[&placed.trader.wallet]);
+    assert!(is_closed(&placed.env.svm, &placed.user_outcome));
+    assert_anchor_err(
+        try_fill(&mut placed.env, closed, full_fill()),
+        anchor_lang::error::ErrorCode::AccountNotInitialized,
+    );
+
+    // Any token account of the user will do, so the relayer creates a fresh one.
+    let fresh = create_outcome_account(&mut placed.env, &placed.market.yes_mint, &user);
+    let mut accounts = placed.fill_accounts();
+    accounts.user_outcome = fresh;
+    try_fill(&mut placed.env, accounts, full_fill()).unwrap();
+
+    assert_eq!(token_balance(&placed.env.svm, &fresh), ORDER_QTY);
+    assert_eq!(
+        token_balance(&placed.env.svm, &placed.env.treasury),
+        FULL_COST + FEE
+    );
+    assert!(is_closed(&placed.env.svm, &placed.order));
 }

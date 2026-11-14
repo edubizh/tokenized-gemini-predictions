@@ -84,6 +84,20 @@ pub mod outcome_tokens {
         handle_fill_buy(ctx, fill_qty, cost, fee)
     }
 
+    pub fn place_sell(
+        ctx: Context<PlaceSell>,
+        side: Side,
+        qty_units: u64,
+        min_px: u16,
+        max_fee: u64,
+    ) -> Result<()> {
+        handle_place_sell(ctx, side, qty_units, min_px, max_fee)
+    }
+
+    pub fn fill_sell(ctx: Context<FillSell>, fill_qty: u64, proceeds: u64, fee: u64) -> Result<()> {
+        handle_fill_sell(ctx, fill_qty, proceeds, fee)
+    }
+
     pub fn cancel_order(ctx: Context<CancelOrder>) -> Result<()> {
         handle_cancel_order(ctx)
     }

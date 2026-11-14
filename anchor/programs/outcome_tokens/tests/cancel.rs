@@ -1,4 +1,4 @@
-//! `cancel_order`, exercised with buy orders.
+//! `cancel_order`, exercised with buy orders. `sell.rs` covers sell orders.
 
 mod common;
 
@@ -322,6 +322,15 @@ fn cancel_order_rejects_substituted_accounts() {
     );
 
     let mut accounts = base(&placed);
+    accounts.user_token = other_mint_account;
+    assert_anchor_err(
+        try_cancel_order(&mut placed.env, &relayer, accounts),
+        anchor_lang::error::ErrorCode::ConstraintTokenMint,
+    );
+
+    // Naming another mint does not help, even with a matching account of the user.
+    let mut accounts = base(&placed);
+    accounts.escrow_mint = other_mint;
     accounts.user_token = other_mint_account;
     assert_anchor_err(
         try_cancel_order(&mut placed.env, &relayer, accounts),
