@@ -1,7 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="6" fill="#fbf9f4"/>
-  <rect x="7" y="4" width="18" height="24" rx="2" fill="#fffdfa" stroke="#1b1f29" stroke-width="2"/>
-  <rect x="11" y="9" width="10" height="3" rx="1" fill="#2063b0"/>
-  <rect x="11" y="14" width="6" height="3" rx="1" fill="#aa4d0a"/>
-  <path d="M8 21h16" stroke="#1b1f29" stroke-width="1.5" stroke-dasharray="2 2"/>
+  <!-- One token, two outcomes: a forest square, and a disc that is half jade and half peach. -->
+  <rect width="32" height="32" rx="8" fill="#173B2A"/>
+  <path d="M16 7a9 9 0 0 0 0 18z" fill="#0A7F56"/>
+  <path d="M16 7a9 9 0 0 1 0 18z" fill="#FEF3EB"/>
 </svg>

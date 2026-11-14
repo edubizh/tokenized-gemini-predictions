@@ -22,11 +22,16 @@ export interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
   stepper?: { onDecrement(): void; onIncrement(): void; canDecrement?: boolean; canIncrement?: boolean };
 }
 
+/** How a unit shown as a sign is said. */
+const UNIT_WORDS: Record<string, string> = { $: "dollars", "¢": "cents", "%": "percent" };
+
 export function Field({ label, value, onChange, numeric, prefix, suffix, helper, error, warning, stepper, disabled, id, ...rest }: FieldProps) {
   const generated = useId();
   const inputId = id ?? generated;
   const noteId = `${inputId}-note`;
+  const unitId = `${inputId}-unit`;
   const note = error ?? warning ?? helper;
+  const unit = suffix ?? prefix;
   const name = label.toLowerCase();
 
   return (
@@ -56,7 +61,7 @@ export function Field({ label, value, onChange, numeric, prefix, suffix, helper,
             inputMode={numeric ? "decimal" : rest.inputMode}
             autoComplete={rest.autoComplete ?? "off"}
             aria-invalid={error ? true : undefined}
-            aria-describedby={note ? noteId : undefined}
+            aria-describedby={[unit ? unitId : "", note ? noteId : ""].filter(Boolean).join(" ") || undefined}
           />
           {suffix && (
             <span className={styles.unit} aria-hidden="true">
@@ -70,9 +75,14 @@ export function Field({ label, value, onChange, numeric, prefix, suffix, helper,
           </button>
         )}
       </div>
+      {/* The unit inside the control is for the eye; this says it, whether or not there is a note. */}
+      {unit && (
+        <span id={unitId} className="sr-only">
+          {`In ${UNIT_WORDS[unit] ?? unit}.`}
+        </span>
+      )}
       {note && (
         <p id={noteId} className={error ? styles.error : warning ? styles.warning : styles.helper}>
-          {(prefix || suffix) && <span className="sr-only">{`In ${suffix ?? (prefix === "$" ? "dollars" : prefix)}. `}</span>}
           {note}
         </p>
       )}

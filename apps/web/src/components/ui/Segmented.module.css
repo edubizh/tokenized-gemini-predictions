@@ -46,7 +46,12 @@
   white-space: nowrap;
   transition:
     background-color var(--duration) var(--ease),
-    border-color var(--duration) var(--ease);
+    border-color var(--duration) var(--ease),
+    transform var(--duration) var(--ease);
+}
+
+.input:active:not(:disabled) + .face {
+  transform: translateY(1px);
 }
 
 .row .face {

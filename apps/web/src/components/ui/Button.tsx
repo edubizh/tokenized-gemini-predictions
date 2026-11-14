@@ -24,7 +24,11 @@ function classes(variant: Variant, size: Size, block: boolean | undefined, extra
   return [styles.button, styles[variant], size === "row" ? styles.row : "", block ? styles.block : "", extra ?? ""].filter(Boolean).join(" ");
 }
 
-/** A busy button keeps the width of its label, shows the status in its place and ignores presses. */
+/**
+ * A busy button keeps the width of its label, shows the status in its place and ignores presses.
+ * The status becomes the button's name; it is not announced by itself. The Notice beside the
+ * button says what is being waited for.
+ */
 export function Button({ variant = "secondary", size = "default", block, busy = false, disabled, children, className, type = "button", onClick, ...rest }: ButtonProps) {
   const isBusy = typeof busy === "string";
   return (
@@ -42,7 +46,7 @@ export function Button({ variant = "secondary", size = "default", block, busy = 
         {children}
       </span>
       {isBusy && (
-        <span className={styles.status} role="status">
+        <span className={styles.status}>
           <span className={styles.spinner} aria-hidden="true" />
           {busy}
         </span>

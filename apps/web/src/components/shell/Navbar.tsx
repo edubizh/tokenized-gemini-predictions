@@ -38,7 +38,7 @@ export interface NavbarProps {
    * leaves the balance out (logged out, or nothing deployed yet).
    */
   balanceMicros?: bigint | null;
-  /** The wallet control: the account menu, or a log in button. */
+  /** The wallet control (AccountMenu), or a log in button. */
   account?: ReactNode;
   /** Drawn in place instead of stuck to the top of the window, for the reference page. */
   inline?: boolean;
@@ -66,7 +66,14 @@ export function Navbar({ pathname, cluster, balanceMicros, account, inline }: Na
         {balanceMicros !== undefined && (
           <p className={styles.balance}>
             <span className="sr-only">Test dollar balance: </span>
-            {balanceMicros === null ? <Skeleton width="4.5rem" height="1em" /> : formatDollars(balanceMicros)}
+            {balanceMicros === null ? (
+              <>
+                <Skeleton width="4.5rem" height="1em" />
+                <span className="sr-only">loading</span>
+              </>
+            ) : (
+              formatDollars(balanceMicros)
+            )}
           </p>
         )}
 

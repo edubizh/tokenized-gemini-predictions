@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 import { shortAddress } from "@/lib/format";
 import styles from "./AccountMenu.module.css";
 
@@ -19,24 +19,22 @@ export interface AccountMenuProps {
   onGetTestFunds(): void;
   faucet: FaucetStatus;
   onLogout(): void;
-  /** For the reference page: render the menu open. */
+  /** For the reference page: render the panel open. */
   defaultOpen?: boolean;
 }
 
-/** A menu button: short address, copy, get test funds, how it works, log out. */
+/**
+ * The wallet control: a button with the short address that shows a panel under it with the full
+ * address, copy, test funds, how it works and log out. A disclosure, not a menu: the panel is
+ * ordinary content, reached with Tab and read in order. Escape closes it and returns to the button;
+ * so does a press, or focus, anywhere else.
+ */
 export function AccountMenu({ address, embedded, onGetTestFunds, faucet, onLogout, defaultOpen = false }: AccountMenuProps) {
   const [open, setOpen] = useState(defaultOpen);
   const [copied, setCopied] = useState(false);
-  const menuId = useId();
+  const panelId = useId();
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
-
-  const items = () => Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])') ?? []);
-  const close = (returnFocus: boolean) => {
-    setOpen(false);
-    if (returnFocus) button.current?.focus();
-  };
 
   useEffect(() => {
     if (!open) return;
@@ -53,41 +51,16 @@ export function AccountMenu({ address, embedded, onGetTestFunds, faucet, onLogou
     return () => clearTimeout(timer);
   }, [copied]);
 
-  function onButtonKeyDown(event: KeyboardEvent) {
-    if (event.key === "Escape" && open) {
-      event.preventDefault();
-      close(true);
-    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      setOpen(true);
-      requestAnimationFrame(() => {
-        const all = items();
-        (event.key === "ArrowDown" ? all[0] : all[all.length - 1])?.focus();
-      });
-    }
+  function onKeyDown(event: KeyboardEvent) {
+    if (event.key !== "Escape" || !open) return;
+    event.preventDefault();
+    setOpen(false);
+    button.current?.focus();
   }
 
-  function onMenuKeyDown(event: KeyboardEvent) {
-    const all = items();
-    const index = all.indexOf(document.activeElement as HTMLElement);
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close(true);
-    } else if (event.key === "ArrowDown") {
-      event.preventDefault();
-      all[(index + 1) % all.length]?.focus();
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      all[(index - 1 + all.length) % all.length]?.focus();
-    } else if (event.key === "Home") {
-      event.preventDefault();
-      all[0]?.focus();
-    } else if (event.key === "End") {
-      event.preventDefault();
-      all[all.length - 1]?.focus();
-    } else if (event.key === "Tab") {
-      setOpen(false);
-    }
+  /** Focus that moves on to something outside closes the panel. */
+  function onBlur(event: FocusEvent) {
+    if (event.relatedTarget && !root.current?.contains(event.relatedTarget)) setOpen(false);
   }
 
   async function copy() {
@@ -102,22 +75,16 @@ export function AccountMenu({ address, embedded, onGetTestFunds, faucet, onLogou
   const working = faucet.kind === "working";
 
   return (
-    <div className={styles.root} ref={root}>
+    <div className={styles.root} ref={root} onKeyDown={onKeyDown} onBlur={onBlur}>
       <button
         ref={button}
         type="button"
         className={styles.trigger}
-        aria-haspopup="menu"
         aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
+        aria-controls={open ? panelId : undefined}
         aria-label={`Account ${shortAddress(address)}`}
-        onClick={(event) => {
-          // Opened from the keyboard (Enter or Space), focus moves into the menu, as with the arrow keys.
-          const fromKeyboard = event.detail === 0;
-          if (!open && fromKeyboard) requestAnimationFrame(() => items()[0]?.focus());
-          setOpen((value) => !value);
-        }}
-        onKeyDown={onButtonKeyDown}
+        data-testid="account"
+        onClick={() => setOpen((value) => !value)}
       >
         <span className={styles.address}>{shortAddress(address)}</span>
         <svg viewBox="0 0 10 6" width="10" height="6" aria-hidden="true">
@@ -126,24 +93,21 @@ export function AccountMenu({ address, embedded, onGetTestFunds, faucet, onLogou
       </button>
 
       {open && (
-        <div ref={menu} id={menuId} className={styles.menu} role="menu" aria-label="Account" onKeyDown={onMenuKeyDown}>
+        <div id={panelId} className={styles.panel} data-testid="account-panel">
           <div className={styles.identity}>
             <p className={styles.caption}>{embedded ? "Wallet created at login" : "Connected wallet"}</p>
             <p className={styles.full}>{address}</p>
           </div>
-          <button type="button" role="menuitem" className={styles.item} onClick={copy}>
+          <button type="button" className={styles.item} onClick={copy}>
             <span>Copy address</span>
-            <span className={styles.aside} role="status">
+            <span className={styles.aside} aria-hidden="true">
               {copied ? "Copied" : ""}
             </span>
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            className={styles.item}
-            aria-disabled={working || undefined}
-            onClick={working ? undefined : onGetTestFunds}
-          >
+          <p className="sr-only" role="status">
+            {copied ? "Address copied" : ""}
+          </p>
+          <button type="button" className={styles.item} aria-disabled={working || undefined} onClick={working ? undefined : onGetTestFunds}>
             <span>Get test funds</span>
             <span className={styles.aside}>{working ? "Sending" : ""}</span>
           </button>
@@ -152,12 +116,11 @@ export function AccountMenu({ address, embedded, onGetTestFunds, faucet, onLogou
               {faucet.text}
             </p>
           )}
-          <Link href="/system" role="menuitem" className={styles.item} onClick={() => setOpen(false)}>
+          <Link href="/system" className={styles.item} onClick={() => setOpen(false)}>
             How it works
           </Link>
           <button
             type="button"
-            role="menuitem"
             className={styles.item}
             onClick={() => {
               setOpen(false);

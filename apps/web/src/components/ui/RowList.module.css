@@ -1,8 +1,12 @@
-/* A list is its own surface. */
+/*
+ * A list is its own surface, and a container: its rows stack by the list's own width, not the
+ * window's. Rows too wide for it scroll sideways instead of being cut off.
+ */
 .list {
+  container-type: inline-size;
   background: var(--white);
   border-radius: var(--rounded-lg);
-  overflow: hidden;
+  overflow-x: auto;
 }
 
 .header,
@@ -11,6 +15,7 @@
   grid-template-columns: var(--columns);
   column-gap: var(--space-5);
   align-items: center;
+  min-width: min-content;
   padding-inline: var(--space-5);
 }
 
@@ -29,15 +34,30 @@
   min-height: 64px;
   padding-block: var(--space-3);
   border-top: 1px solid var(--line);
+}
+
+/* What hangs under a row belongs to it: no line between them, and they light up together. */
+.detailRow {
+  padding: 0 var(--space-5) var(--space-3);
+}
+
+.row,
+.detailRow {
   transition: background-color var(--duration) var(--ease);
 }
 
-.row:focus-within {
+.row:focus-within,
+.row:focus-within + .detailRow,
+.detailRow:focus-within,
+.row:has(+ .detailRow:focus-within) {
   background: var(--peach);
 }
 
 @media (hover: hover) {
-  .row:hover {
+  .row:hover,
+  .row:hover + .detailRow,
+  .detailRow:hover,
+  .row:has(+ .detailRow:hover) {
     background: var(--peach);
   }
 }
@@ -72,13 +92,8 @@
   display: none;
 }
 
-.detail {
-  grid-column: 1 / -1;
-  padding-block: var(--space-3) var(--space-2);
-}
-
-/* Narrow: a row stacks. The header goes, so each value carries its own label. */
-@media (max-width: 40rem) {
+/* A narrow list: each row stacks. The header goes, so each value carries its own label. */
+@container (max-width: 40rem) {
   .header {
     display: none;
   }
@@ -88,11 +103,16 @@
     flex-wrap: wrap;
     align-items: flex-start;
     gap: var(--space-2) var(--space-5);
+    min-width: 0;
     padding: var(--space-4) 20px;
   }
 
   .row:first-child {
     border-top: 0;
+  }
+
+  .detailRow {
+    padding-inline: 20px;
   }
 
   .primary {
@@ -120,59 +140,6 @@
 
   /* Actions take a line of their own, at the right: the same place in every row. */
   .actions {
-    flex: 1 1 100%;
-  }
-
-  .detail {
-    flex: 1 1 100%;
-  }
-}
-
-/* A list with many columns has no room for them on a tablet either: the same stacking, sooner. */
-@media (max-width: 56rem) {
-  .dense .header {
-    display: none;
-  }
-
-  .dense .row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: var(--space-2) var(--space-5);
-    padding-block: var(--space-4);
-  }
-
-  .dense .row:first-child {
-    border-top: 0;
-  }
-
-  .dense .primary {
-    flex: 1 1 100%;
-  }
-
-  .dense .primary > a {
-    display: block;
-    margin-block: -10px;
-    padding-block: 10px;
-  }
-
-  .dense .cell.right {
-    text-align: left;
-  }
-
-  .dense .cellLabel {
-    display: block;
-    font-size: var(--text-xs);
-    line-height: var(--leading-xs);
-    font-weight: var(--weight-medium);
-    color: var(--forest-soft);
-  }
-
-  .dense .actions {
-    flex: 1 1 100%;
-  }
-
-  .dense .detail {
     flex: 1 1 100%;
   }
 }

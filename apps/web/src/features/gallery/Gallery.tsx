@@ -142,6 +142,17 @@ const POSITION_COLUMNS: Column[] = [
   { id: "action", header: "Action", actions: true, width: "7rem" },
 ];
 
+/** Up to eight short options: the cadences a markets index filters by. */
+const CADENCES = [
+  { value: "all", label: "All" },
+  { value: "5m", label: "5 min" },
+  { value: "15m", label: "15 min" },
+  { value: "hourly", label: "Hourly" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+] as const;
+
 const CONTRAST_COLUMNS: Column[] = [
   { id: "pair", header: "Pairing", primary: true },
   { id: "ratio", header: "Ratio", align: "right", width: "4.5rem" },
@@ -201,6 +212,7 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
   const [side, setSide] = useState<"yes" | "no">("yes");
   const [action, setAction] = useState<"buy" | "sell">("buy");
   const [category, setCategory] = useState("all");
+  const [cadence, setCadence] = useState("all");
   const [quantity, setQuantity] = useState("5.00");
   const [limit, setLimit] = useState("57");
   const [email, setEmail] = useState("");
@@ -218,6 +230,73 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
         { value: "no", label: "No", detail: "44¢", tone: "no" },
       ]}
     />
+  );
+
+  /** The filters of a markets index: how often a market closes, and what it is about. */
+  const filters = (
+    <div className={styles.filters}>
+      <Segmented label="Cadence" size="row" value={cadence} onChange={setCadence} options={CADENCES} />
+      <Segmented
+        label="Category"
+        size="row"
+        value={category}
+        onChange={setCategory}
+        options={[
+          { value: "all", label: "All" },
+          { value: "crypto", label: "Crypto" },
+          { value: "commodities", label: "Commodities" },
+        ]}
+      />
+    </div>
+  );
+
+  const positions = (
+    <RowList label="Positions" columns={POSITION_COLUMNS}>
+      <Row
+        cells={[
+          <span key="position">
+            Bitcoin above $66,000 <span className={styles.soft}>· Yes</span>
+          </span>,
+          formatContracts(500n),
+          formatDollars(2_850_000n),
+          <Badge key="status" tone="positive" dot>
+            Live
+          </Badge>,
+          <ButtonLink key="action" size="row" href="#row-list">
+            Sell
+          </ButtonLink>,
+        ]}
+      />
+      <Row
+        cells={[
+          <span key="position">
+            Ethereum above $1,700 <span className={styles.soft}>· Yes</span>
+          </span>,
+          formatContracts(200n),
+          formatDollars(2_000_000n),
+          <Badge key="status" tone="positive">
+            Redeemable
+          </Badge>,
+          <Button key="action" size="row" variant="primary">
+            Redeem
+          </Button>,
+        ]}
+        detail={
+          <p className={styles.rowDetail}>
+            Settled Yes on Nov 14, 21:00 UTC. <ExternalLink href={txUrl(SIGNATURE)}>{shortAddress(SIGNATURE)}</ExternalLink>
+          </p>
+        }
+      />
+      <Row
+        cells={[
+          <Skeleton key="position" width="14rem" height="1.25rem" />,
+          <Skeleton key="quantity" width="3rem" height="1rem" />,
+          <Skeleton key="value" width="3.5rem" height="1rem" />,
+          <Skeleton key="status" width="4.5rem" height="1.5rem" />,
+          <Skeleton key="action" width="4rem" height="2.25rem" />,
+        ]}
+      />
+    </RowList>
   );
 
   return (
@@ -420,7 +499,7 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
         </div>
       </Section>
 
-      <Section id="segmented" title="Segmented" note="One choice among a few. The chosen option is filled, the others stay outlined. Arrow keys move within the group.">
+      <Section id="segmented" title="Segmented" note="One choice among a few, up to eight. The chosen option is filled, the others stay outlined. Arrow keys move within the group. Two or three options can share the width; more keep their own and wrap.">
         <div className={styles.grid}>
           <Specimen label="Buy or Sell" surface>
             <Segmented
@@ -433,20 +512,11 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
               ]}
             />
           </Specimen>
-          <Specimen label="Compact, as category tabs on the page" wide>
-            <Segmented
-              label="Category"
-              size="row"
-              value={category}
-              onChange={setCategory}
-              options={[
-                { value: "all", label: "All" },
-                { value: "crypto", label: "Crypto" },
-                { value: "commodities", label: "Commodities" },
-                { value: "15m", label: "15 minutes" },
-                { value: "daily", label: "Daily" },
-              ]}
-            />
+          <Specimen label="Compact, as the filters above a list: seven cadences, then categories" wide>
+            {filters}
+          </Specimen>
+          <Specimen label="The same in a column as narrow as a phone: the options wrap, none is hidden">
+            <div className={styles.phone}>{filters}</div>
           </Specimen>
           <Specimen label="Disabled" surface>
             <Segmented
@@ -517,7 +587,7 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
         </div>
       </Section>
 
-      <Section id="notice" title="Notice" note="A message where it applies: a title, one sentence, at most two actions. Every wait says what it waits for.">
+      <Section id="notice" title="Notice" note="A message where it applies: a title, one sentence, at most two actions. Every wait says what it waits for. On the two tints the boundary of an action is forest.">
         <div className={styles.stack}>
           <Notice busy title="Waiting for your wallet" action={[<Button key="retry" size="row">Retry</Button>, <Button key="cancel" size="row" variant="quiet">Cancel</Button>]}>
             Approve the request in Phantom. If no window opened, press Retry.
@@ -528,31 +598,37 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
           <Notice title="No positions yet" action={<ButtonLink href="#notice" size="row">See markets</ButtonLink>}>
             Buy Yes or No in any market and your tokens are listed here.
           </Notice>
-          <Notice tone="positive" title="Redeemed">
+          <Notice tone="positive" title="Redeemed" action={<ButtonLink href="#notice" size="row">See portfolio</ButtonLink>}>
             5.00 Yes tokens were burned and $5.00 in test dollars arrived in your wallet.
           </Notice>
-          <Notice tone="negative" title="The order was not placed" action={<Button size="row">Try again</Button>}>
+          <Notice tone="negative" title="The order was not placed" action={[<Button key="retry" size="row">Try again</Button>, <Button key="cancel" size="row" variant="quiet">Cancel</Button>]}>
             This market closes in under a minute, so the program refused the order. Nothing was held.
           </Notice>
-          <Panel>
-            <div className={styles.stack}>
-              <Notice title="Trading is paused">New orders are not accepted for the moment. Redeeming and reclaiming still work.</Notice>
-              <Notice tone="positive" title="Filled">
-                2.00 Yes at 56¢. Your tokens are in your wallet.
-              </Notice>
-              <Notice tone="negative" title="Test funds were not sent">
-                The faucet did not answer. You can try again.
-              </Notice>
-            </div>
-          </Panel>
+          <Specimen label="Inside the trade panel: the actions go under the text, by the width of the notice itself">
+            <Panel className={styles.aside}>
+              <div className={styles.stack}>
+                <Notice busy title="Waiting for your wallet" action={[<Button key="retry" size="row">Retry</Button>, <Button key="cancel" size="row" variant="quiet">Cancel</Button>]}>
+                  Approve the request in Phantom.
+                </Notice>
+                <Notice title="Trading is paused">New orders are not accepted for the moment.</Notice>
+                <Notice tone="positive" title="Filled" action={<ButtonLink href="#notice" size="row">See activity</ButtonLink>}>
+                  2.00 Yes at 56¢. Your tokens are in your wallet.
+                </Notice>
+                <Notice tone="negative" title="Test funds were not sent" action={<Button size="row">Try again</Button>}>
+                  The faucet did not answer.
+                </Notice>
+              </div>
+            </Panel>
+          </Specimen>
         </div>
       </Section>
 
-      <Section id="panel" title="Panel and Facts" note="A white surface for anything that is not a list, and label and value lines inside it.">
+      <Section id="panel" title="Panel and Facts" note="A white surface for anything that is not a list, and label and value lines inside it. A heading before the lines names them.">
         <div className={styles.grid}>
           <Specimen label="Facts, ending in a total" wide>
             <Panel className={styles.full}>
-              <Facts label="Order summary">
+              <h3 className="sr-only">Order summary</h3>
+              <Facts>
                 <Fact label="Cost at limit">$2.85</Fact>
                 <Fact label="Fee, at most">$0.07</Fact>
                 <Fact label="Pays if Yes wins">$5.00</Fact>
@@ -564,7 +640,8 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
           </Specimen>
           <Specimen label="Facts about one thing" wide>
             <Panel className={styles.full}>
-              <Facts label="Market details">
+              <h3 className="sr-only">Market details</h3>
+              <Facts>
                 <Fact label="Closes">Nov 15, 21:00 UTC</Fact>
                 <Fact label="Resolves from">The exchange index price</Fact>
                 <Fact label="Volume">$90,173</Fact>
@@ -577,7 +654,7 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
         </div>
       </Section>
 
-      <Section id="row-list" title="RowList" note="Every list. Its own surface, numbers right aligned, one line of main text per row. Rows stack on a narrow screen.">
+      <Section id="row-list" title="RowList" note="Every list. Its own surface, numbers right aligned, one line of main text per row. Where the list itself is narrow its rows stack, and what hangs under a row stays with it.">
         <div className={styles.stack}>
           <RowList label="Markets" columns={MARKET_COLUMNS}>
             {MARKETS.map((market) => (
@@ -598,47 +675,11 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
             ))}
           </RowList>
 
-          <RowList label="Positions" columns={POSITION_COLUMNS} dense>
-            <Row
-              cells={[
-                <span key="position">
-                  Bitcoin above $66,000 <span className={styles.soft}>· Yes</span>
-                </span>,
-                formatContracts(500n),
-                formatDollars(2_850_000n),
-                <Badge key="status" tone="positive" dot>
-                  Live
-                </Badge>,
-                <ButtonLink key="action" size="row" href="#row-list">
-                  Sell
-                </ButtonLink>,
-              ]}
-            />
-            <Row
-              cells={[
-                <span key="position">
-                  Ethereum above $1,700 <span className={styles.soft}>· Yes</span>
-                </span>,
-                formatContracts(200n),
-                formatDollars(2_000_000n),
-                <Badge key="status" tone="positive">
-                  Redeemable
-                </Badge>,
-                <Button key="action" size="row" variant="primary">
-                  Redeem
-                </Button>,
-              ]}
-            />
-            <Row
-              cells={[
-                <Skeleton key="position" width="14rem" height="1.25rem" />,
-                <Skeleton key="quantity" width="3rem" height="1rem" />,
-                <Skeleton key="value" width="3.5rem" height="1rem" />,
-                <Skeleton key="status" width="4.5rem" height="1.5rem" />,
-                <Skeleton key="action" width="4rem" height="2.25rem" />,
-              ]}
-            />
-          </RowList>
+          {positions}
+
+          <Specimen label="The same list in a narrow column, such as the main column beside the trade panel: it stacks by its own width">
+            <div className={styles.column}>{positions}</div>
+          </Specimen>
         </div>
       </Section>
 
@@ -673,10 +714,16 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
         </div>
       </Section>
 
-      <Section id="countdown" title="Countdown" note="Next to anything with a deadline. In the last two minutes it gets heavier and says so; there is no warning colour.">
+      <Section id="countdown" title="Countdown" note="Next to anything with a deadline. The longer the wait, the calmer the figure: seconds under an hour, minutes from an hour up, hours from a day up. In the last two minutes it gets heavier and says so; there is no warning colour.">
         <div className={styles.grid}>
-          <Specimen label="Running, live" surface>
+          <Specimen label="Under an hour, live: minutes and seconds" surface>
             <Countdown to={anchorMs + 12 * MINUTE + 41_000} label="closes in" />
+          </Specimen>
+          <Specimen label="From an hour up: hours and minutes" surface>
+            <CountdownView remainingMs={19 * 60 * MINUTE + 6 * MINUTE + 26_000} label="closes in" />
+          </Specimen>
+          <Specimen label="From a day up: days and hours" surface>
+            <CountdownView remainingMs={3 * 24 * 60 * MINUTE + 4 * 60 * MINUTE + 20 * MINUTE} label="closes in" />
           </Specimen>
           <Specimen label="Last two minutes" surface>
             <CountdownView remainingMs={68_000} label="closes in" />
@@ -684,8 +731,11 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
           <Specimen label="Over" surface>
             <CountdownView remainingMs={0} label="closes in" closedText="awaiting result" />
           </Specimen>
-          <Specimen label="As the number that matters">
-            <CountdownView remainingMs={9 * MINUTE + 41_000} label="closes in" size="display" />
+          <Specimen label="As the number that matters, live, and the one on the page that announces its end">
+            <Countdown to={anchorMs + 9 * MINUTE + 41_000} label="closes in" size="display" announce />
+          </Specimen>
+          <Specimen label="The same for a market that closes next week">
+            <CountdownView remainingMs={6 * 24 * 60 * MINUTE + 23 * 60 * MINUTE} label="closes in" size="display" />
           </Specimen>
         </div>
       </Section>
@@ -747,7 +797,8 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
               {sideChoice}
               <Field label="Quantity" numeric suffix="contracts" value={quantity} onChange={setQuantity} error={held ? undefined : "Enter a quantity of 0.01 or more"} />
               <Field label="Limit price" numeric suffix="¢" value={limit} onChange={setLimit} helper={held ? "Best offer is 57¢" : undefined} error={held ? undefined : "Enter a price from 1¢ to 99¢"} />
-              <Facts label="Order summary">
+              <h4 className="sr-only">Order summary</h4>
+              <Facts>
                 <Fact label="Cost at limit">{held ? formatDollars(held.cost) : "–"}</Fact>
                 <Fact label="Fee, at most">{held ? formatDollars(held.fee) : "–"}</Fact>
                 <Fact label={`Pays if ${word} wins`}>{held ? formatDollars(held.payout) : "–"}</Fact>
@@ -764,13 +815,15 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
           </Panel>
 
           <div className={styles.marketDetails}>
+            <h4 className={styles.blockTitle}>About this market</h4>
             <Panel>
-              <Facts label="About this market">
+              <Facts>
                 <Fact label="Closes">Nov 15, 21:00 UTC</Fact>
                 <Fact label="Resolves from">The exchange index price at the close</Fact>
                 <Fact label="Pays">$1.00 per contract to the side that is right</Fact>
               </Facts>
             </Panel>
+            <h4 className={styles.blockTitle}>Contracts of this event</h4>
             <RowList label="Contracts of this event" columns={STRIKE_COLUMNS}>
               {STRIKES.map((strike) => (
                 <Row
@@ -792,7 +845,7 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
         </div>
       </Section>
 
-      <Section id="shell" title="Shell" note="The navbar is see-through and stays at the top; the real one is above this page. Here it is in its other states.">
+      <Section id="shell" title="Shell" note="The navbar is see-through and stays at the top; the real one is above this page. Here it is in its other states. The wallet control shows and hides a panel: Tab goes through it, Escape closes it.">
         <div className={styles.stack}>
           <Specimen label="Logged out" wide>
             <div className={styles.frame}>
@@ -804,7 +857,7 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
               <Navbar inline pathname="/portfolio" cluster="devnet" balanceMicros={null} account={<AccountMenu address={ADDRESS} embedded faucet={{ kind: "idle" }} onGetTestFunds={() => {}} onLogout={() => {}} />} />
             </div>
           </Specimen>
-          <Specimen label="Logged in, with the account menu open" wide>
+          <Specimen label="Logged in, with the panel of the wallet control open" wide>
             <div className={`${styles.frame} ${styles.frameTall}`}>
               <Navbar
                 inline

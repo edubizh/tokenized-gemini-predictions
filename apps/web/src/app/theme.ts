@@ -48,30 +48,43 @@ export interface Pairing {
   use: string;
 }
 
-/** Every pairing the design system uses. The same list, with its figures, is in docs/DESIGN.md. */
+/**
+ * Every pairing the components use: text, a boundary, a mark or a focus ring on the ground it can
+ * sit on. The same list, with its figures, is in docs/DESIGN.md. A pairing that is not here is not
+ * allowed.
+ */
 export const PAIRINGS: readonly Pairing[] = [
   { text: "forest", on: "white", min: 4.5, use: "Text on surfaces" },
-  { text: "forest", on: "peach", min: 4.5, use: "Text on the page" },
+  { text: "forest", on: "peach", min: 4.5, use: "Text on the page and in a hovered row" },
   { text: "forest-soft", on: "white", min: 4.5, use: "Secondary text on surfaces" },
-  { text: "forest-soft", on: "peach", min: 4.5, use: "Secondary text on the page" },
+  { text: "forest-soft", on: "peach", min: 4.5, use: "Secondary text on the page and in a hovered row" },
   { text: "white", on: "forest", min: 4.5, use: "Primary button, selected choice" },
   { text: "white", on: "forest-hover", min: 4.5, use: "The same under the pointer" },
-  { text: "white", on: "jade", min: 4.5, use: "Selected Yes" },
+  { text: "white", on: "jade", min: 4.5, use: "Selected Yes, the done mark of a step" },
   { text: "white", on: "jade-hover", min: 4.5, use: "Selected Yes under the pointer" },
-  { text: "jade", on: "white", min: 4.5, use: "Prices, the Yes boundary, the focus ring" },
-  { text: "jade", on: "peach", min: 4.5, use: "Prices and the focus ring on the page, the live dot" },
-  { text: "jade", on: "jade-tint", min: 3, use: "The Yes boundary against its own fill, marks in a positive notice" },
-  { text: "forest", on: "jade-tint", min: 4.5, use: "Yes at rest, positive notice and badge" },
-  { text: "forest", on: "jade-tint-hover", min: 4.5, use: "Yes under the pointer" },
+  { text: "jade", on: "white", min: 4.5, use: "Prices, the Yes boundary, the focus ring, the mark of a step" },
+  { text: "jade", on: "peach", min: 4.5, use: "Prices, the Yes boundary and the focus ring on the page, the live dot" },
+  { text: "jade", on: "jade-tint", min: 3, use: "The Yes boundary against its own fill, marks and the focus ring in a positive notice" },
+  { text: "jade", on: "jade-tint-hover", min: 3, use: "The Yes boundary under the pointer" },
+  { text: "jade", on: "clay-tint", min: 3, use: "The focus ring in an error notice" },
+  { text: "forest", on: "jade-tint", min: 4.5, use: "Yes at rest, positive notice and badge, the boundary of a control in a positive notice" },
+  { text: "forest", on: "jade-tint-hover", min: 4.5, use: "Yes under the pointer, selected text" },
   { text: "forest", on: "line", min: 4.5, use: "Neutral badge" },
-  { text: "clay", on: "white", min: 4.5, use: "Error text on surfaces" },
-  { text: "clay", on: "peach", min: 4.5, use: "Error text on the page" },
-  { text: "clay", on: "clay-tint", min: 4.5, use: "Title of an error notice" },
-  { text: "forest", on: "clay-tint", min: 4.5, use: "Body of an error notice" },
+  { text: "clay", on: "white", min: 4.5, use: "Error text and the boundary of an invalid field on surfaces" },
+  { text: "clay", on: "peach", min: 4.5, use: "The same on the page" },
+  { text: "clay", on: "clay-tint", min: 4.5, use: "Title and mark of an error notice, the negative badge" },
+  { text: "forest", on: "clay-tint", min: 4.5, use: "Body of an error notice, the boundary of a control in it" },
   { text: "edge", on: "white", min: 3, use: "Control boundaries on surfaces" },
-  { text: "edge", on: "peach", min: 3, use: "Control boundaries on the page" },
-  { text: "forest", on: "nav-worst", min: 4.5, use: "Navbar text over the darkest content" },
-  { text: "jade", on: "nav-worst", min: 3, use: "Navbar marks over the darkest content" },
+  { text: "edge", on: "peach", min: 3, use: "Control boundaries on the page and in a hovered row" },
+  { text: "forest", on: "nav-worst", min: 4.5, use: "Navbar text, and the boundary of the wallet control, over the darkest content" },
+  { text: "jade", on: "nav-worst", min: 3, use: "Navbar marks and the focus ring over the darkest content" },
+];
+
+/** Pairings that look available and are not: each falls short, or too close to call, so the components avoid it. */
+export const UNUSED: ReadonlyArray<{ text: ColorName; on: ColorName; instead: string }> = [
+  { text: "forest", on: "jade", instead: "White is the only text on jade" },
+  { text: "edge", on: "jade-tint", instead: "Inside a positive notice a boundary is forest" },
+  { text: "edge", on: "clay-tint", instead: "Inside an error notice a boundary is forest" },
 ];
 
 function channels(hex: string): [number, number, number] {

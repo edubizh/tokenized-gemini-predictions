@@ -65,8 +65,8 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --duration: 160ms;
 
-  /* The one shadow, for things that float over surfaces */
-  --shadow: 0 0 0 1px color-mix(in srgb, var(--forest) 6%, transparent), 0 12px 32px -8px color-mix(in srgb, var(--forest) 16%, transparent);
+  /* The one shadow, for things that float over surfaces: forest at 6% and at 16%, written out so that it holds in every browser */
+  --shadow: 0 0 0 1px rgb(23 59 42 / 0.06), 0 12px 32px -8px rgb(23 59 42 / 0.16);
 
   color-scheme: light;
 }

@@ -16,12 +16,14 @@ export interface PriceButtonProps {
 const WORD = { YES: "Yes", NO: "No" } as const;
 
 function spoken(px: bigint): string {
-  return `${formatCents(px).replace("¢", "")} cents`;
+  const cents = formatCents(px).replace("¢", "");
+  return `${cents} ${cents === "1" ? "cent" : "cents"}`;
 }
 
 /**
  * Yes or No at rest with its ask price in cents, for lists. A preset of Button, not a look of its
  * own: Yes is tinted jade with a jade boundary, No is outlined, and each always carries its word.
+ * Its name starts with the words that are seen ("Yes 57 cents"), then says what is bought.
  */
 export function PriceButton({ side, px, href, onClick, subject }: PriceButtonProps) {
   const className = [styles.button, styles.row, styles.price, side === "YES" ? styles.yes : styles.no].join(" ");
@@ -31,16 +33,15 @@ export function PriceButton({ side, px, href, onClick, subject }: PriceButtonPro
       <span>{px === null ? "–" : formatCents(px)}</span>
     </span>
   );
-  const about = subject ? `, ${subject}` : "";
 
   if (px === null) {
     return (
-      <button type="button" className={className} disabled aria-label={`${WORD[side]}${about}: no offer`}>
+      <button type="button" className={className} disabled aria-label={`${WORD[side]}, no offer${subject ? `, ${subject}` : ""}`}>
         {content}
       </button>
     );
   }
-  const label = `Buy ${WORD[side]} at ${spoken(px)}${about}`;
+  const label = `${WORD[side]} ${spoken(px)}, buy${subject ? ` ${subject}` : ""}`;
   if (href) {
     return (
       <Link href={href} className={className} aria-label={label}>

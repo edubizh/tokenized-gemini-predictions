@@ -1,14 +1,18 @@
-/* Solid first: this is what a browser without backdrop-filter, or without color-mix, shows. */
+/* Solid first: this is what a browser without backdrop-filter, or without color-mix, shows. The line under it is forest at 8%. */
 .bar {
   position: sticky;
   top: 0;
   z-index: 20;
   background: var(--peach);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--forest) 8%, transparent);
+  box-shadow: 0 1px 0 rgb(23 59 42 / 0.08);
 }
 
-/* See-through: content scrolls beneath, blurred. */
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+/*
+ * See-through: content scrolls beneath, blurred. Both features are asked for, because the fill is
+ * only found to be invalid when it is computed: with the blur and without color-mix the bar would
+ * have no fill at all.
+ */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and (background: color-mix(in srgb, red 50%, blue)) {
   .bar {
     background: color-mix(in srgb, var(--peach) var(--nav-alpha), transparent);
     -webkit-backdrop-filter: saturate(1.6) blur(16px);
@@ -52,7 +56,6 @@
   border-radius: var(--rounded-sm);
   font-size: var(--text-base);
   font-weight: var(--weight-semibold);
-  letter-spacing: -0.01em;
   text-decoration: none;
   white-space: nowrap;
 }
@@ -65,7 +68,11 @@
   margin-left: 22px;
 }
 
-/* The hidden copy at weight 600 keeps a link's width the same when it becomes the current page. */
+/*
+ * The hidden copy at weight 600 keeps a link's width the same when it becomes the current page. Its
+ * empty alternative text keeps it out of the link's name; the plain declaration is for browsers
+ * that do not know that form.
+ */
 .link {
   position: relative;
   display: inline-flex;
@@ -83,6 +90,7 @@
 
 .link::before {
   content: attr(data-label);
+  content: attr(data-label) / "";
   height: 0;
   overflow: hidden;
   font-weight: var(--weight-semibold);
@@ -99,9 +107,10 @@
   transition: background-color var(--duration) var(--ease);
 }
 
+/* Forest, like everything else in the bar that is not jade: edge would not hold over dark content. */
 @media (hover: hover) {
   .link:hover::after {
-    background: var(--edge);
+    background: var(--forest);
   }
 }
 

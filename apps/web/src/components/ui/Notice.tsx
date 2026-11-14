@@ -11,7 +11,7 @@ export interface NoticeProps {
   children?: ReactNode;
   /** Up to two buttons or links: the way forward, and for a wait, Retry and Cancel. */
   action?: ReactNode;
-  /** Something is being waited for: the mark becomes a spinner. */
+  /** Something is being waited for: the mark becomes a spinner. The title says what, and is what gets announced. */
   busy?: boolean;
 }
 
@@ -22,7 +22,7 @@ export interface NoticeProps {
 export function Notice({ tone = "neutral", title, children, action, busy }: NoticeProps) {
   const look = tone === "positive" ? styles.positive : tone === "negative" ? styles.negative : "";
   return (
-    <div className={`${styles.notice} ${look}`} role={tone === "negative" ? "alert" : "status"} aria-busy={busy || undefined}>
+    <div className={`${styles.notice} ${look}`} role={tone === "negative" ? "alert" : "status"}>
       <span className={busy ? styles.spinner : styles.mark} aria-hidden="true" />
       <div className={styles.text}>
         <p className={styles.title}>{title}</p>

@@ -69,6 +69,8 @@ Tokens are CSS custom properties on `:root` in `apps/web/src/app/globals.css`, n
 - **Section titles sit on the page**, above the surface they name, not inside it.
 - **At 1280** the content column is 1104px. A list page is one column. A market page is a main column plus an aside of `--aside` 22.5rem (360px) for the trade panel, 32px apart; the aside stays in view while the main column scrolls (`position: sticky`, 24px under the navbar).
 - **At 390** the content column is 358px and everything is one column. On a market page the trade panel comes straight after the title and price, before the chart and the details. Rows of a list stack: the main text on the first line, the values under it with their labels.
+- **Three breakpoints, by the window.** At 40rem and narrower: 16px gutters, 20px inside a surface, compact controls at full touch size. Under 60rem: the aside leaves the side and stacks into the column. Under 64rem: the navbar takes two rows. There are no others.
+- **Two components answer to their own width instead**, so that they behave the same in the page column, beside the aside and on a phone: a RowList stacks its rows when the list is 40rem wide or less, and a Notice puts its actions under its text when the notice is 30rem wide or less.
 - **Rhythm.** 48px between sections, 24px between a section title and its surface, 24px padding inside a surface (20px at 40rem and narrower), 12 or 16px between related items, 4 or 8px inside a control. The page starts 32px under the navbar and the footer starts 64px after the last section. Do not use one padding everywhere.
 - **Spacing** follows the 4px steps `--space-1` to `--space-8`: 4, 8, 12, 16, 24, 32, 48, 64.
 - **Radius.** `--rounded-md` 12px for every control, `--rounded-lg` 20px for surfaces, `--rounded-sm` 8px for small marks and skeletons, `--rounded-full` for dots and badges.
@@ -117,36 +119,47 @@ WCAG 2.1 AA: 4.5:1 for text, 3:1 for large text, for the boundary of a control a
 | Text or mark | On | Ratio | Needs | Used for |
 | --- | --- | --- | --- | --- |
 | `forest` | `white` | 12.39 | 4.5 | Text on surfaces |
-| `forest` | `peach` | 11.34 | 4.5 | Text on the page |
+| `forest` | `peach` | 11.34 | 4.5 | Text on the page and in a hovered row |
 | `forest-soft` | `white` | 5.57 | 4.5 | Secondary text on surfaces |
-| `forest-soft` | `peach` | 5.10 | 4.5 | Secondary text on the page |
+| `forest-soft` | `peach` | 5.10 | 4.5 | Secondary text on the page and in a hovered row |
 | `white` | `forest` | 12.39 | 4.5 | Primary button, selected choice |
 | `white` | `forest-hover` | 8.53 | 4.5 | The same under the pointer |
-| `white` | `jade` | 5.02 | 4.5 | Selected Yes |
+| `white` | `jade` | 5.02 | 4.5 | Selected Yes, the done mark of a step |
 | `white` | `jade-hover` | 5.72 | 4.5 | Selected Yes under the pointer |
-| `jade` | `white` | 5.02 | 4.5 | Prices, the Yes boundary, the focus ring |
-| `jade` | `peach` | 4.60 | 4.5 | Prices and the focus ring on the page, the live dot |
-| `jade` | `jade-tint` | 4.28 | 3 | The Yes boundary against its own fill, marks in a positive notice |
-| `forest` | `jade-tint` | 10.56 | 4.5 | Yes at rest, positive notice and badge |
-| `forest` | `jade-tint-hover` | 9.36 | 4.5 | Yes under the pointer |
+| `jade` | `white` | 5.02 | 4.5 | Prices, the Yes boundary, the focus ring, the mark of a step |
+| `jade` | `peach` | 4.60 | 4.5 | Prices, the Yes boundary and the focus ring on the page, the live dot |
+| `jade` | `jade-tint` | 4.28 | 3 | The Yes boundary against its own fill, marks and the focus ring in a positive notice |
+| `jade` | `jade-tint-hover` | 3.80 | 3 | The Yes boundary under the pointer |
+| `jade` | `clay-tint` | 4.22 | 3 | The focus ring in an error notice |
+| `forest` | `jade-tint` | 10.56 | 4.5 | Yes at rest, positive notice and badge, the boundary of a control in a positive notice |
+| `forest` | `jade-tint-hover` | 9.36 | 4.5 | Yes under the pointer, selected text |
 | `forest` | `line` | 9.93 | 4.5 | Neutral badge |
-| `clay` | `white` | 6.07 | 4.5 | Error text on surfaces |
-| `clay` | `peach` | 5.56 | 4.5 | Error text on the page |
-| `clay` | `clay-tint` | 5.10 | 4.5 | Title of an error notice |
-| `forest` | `clay-tint` | 10.40 | 4.5 | Body of an error notice |
+| `clay` | `white` | 6.07 | 4.5 | Error text and the boundary of an invalid field on surfaces |
+| `clay` | `peach` | 5.56 | 4.5 | The same on the page |
+| `clay` | `clay-tint` | 5.10 | 4.5 | Title and mark of an error notice, the negative badge |
+| `forest` | `clay-tint` | 10.40 | 4.5 | Body of an error notice, the boundary of a control in it |
 | `edge` | `white` | 3.54 | 3 | Control boundaries on surfaces |
-| `edge` | `peach` | 3.24 | 3 | Control boundaries on the page |
-| `forest` | `nav-worst` | 7.85 | 4.5 | Navbar text over the darkest content |
-| `jade` | `nav-worst` | 3.18 | 3 | Navbar marks over the darkest content |
+| `edge` | `peach` | 3.24 | 3 | Control boundaries on the page and in a hovered row |
+| `forest` | `nav-worst` | 7.85 | 4.5 | Navbar text, and the boundary of the wallet control, over the darkest content |
+| `jade` | `nav-worst` | 3.18 | 3 | Navbar marks and the focus ring over the darkest content |
 
 `nav-worst` is not a token. It is the navbar's fill (peach at `--nav-alpha`, 80%) composited over a forest area, the darkest thing that can scroll beneath it.
+
+These pairings look available and are not. The components avoid them:
+
+| Text or mark | On | Ratio | Instead |
+| --- | --- | --- | --- |
+| `forest` | `jade` | 2.47 | White is the only text on jade |
+| `edge` | `jade-tint` | 3.01 | Inside a positive notice a boundary is forest |
+| `edge` | `clay-tint` | 2.97 | Inside an error notice a boundary is forest |
 
 ### Rules
 
 - **Text is forest.** Secondary text is `forest-soft`, on `white` and `peach` only. The other text colours are the ones in the table and nothing more: white on a forest or jade fill, jade for a price standing on its own, clay for an error. On a tint, text is `forest`.
 - **Jade is never body text.** It is for a price or a probability standing on its own (`57¢`), for fills, boundaries and marks. Jade text never sits on `jade-tint`.
-- **Nothing sits on jade but white.** Forest on jade is 2.47:1 and is not used.
-- **`edge` is for boundaries, `line` is for hairlines.** A boundary says "this is a control" and keeps 3:1. A hairline only separates: rows on a surface, and the edge of a neutral notice. Nothing should depend on seeing it.
+- **Nothing sits on jade but white.**
+- **`edge` is for boundaries, `line` is for hairlines.** A boundary says "this is a control" and keeps 3:1 on `white` and on `peach`. It does not on a tint, so inside a tinted notice the boundary of a control and the underline of a link are `forest`; the Notice sets that by itself. A hairline only separates: rows on a surface, and the edge of a neutral notice. Nothing should depend on seeing it.
+- **In the navbar everything is forest or jade**, text and boundaries alike, because anything may scroll beneath it.
 - **Colour is never the only signal.** Yes and No carry their words, a status carries its word, an error carries a sentence.
 
 ## Typography
@@ -160,26 +173,27 @@ One typeface: Reddit Sans, loaded and self-hosted through `next/font`, with a sy
 | `lg` | 20px / 1.3 | 600 | Section titles |
 | `base` | 16px / 1.5 | 400 | Body text, fields, default buttons, the main line of a row |
 | `sm` | 14px / 1.45 | 400 | Secondary lines, helper text, compact buttons, navigation |
-| `xs` | 12px / 1.35 | 500 | Column headers, captions, badges, the footer |
+| `xs` | 12px / 1.35 | 500 | Column headers, captions, badges, the network mark; at 400 for small print (the footer, the time of a step) |
 
-- Weights: 400 for text, 500 for labels and for numbers in running rows, 600 for titles, buttons and the number that matters. No light weights, no italics, no uppercase, no letter-spaced labels.
-- Titles at `xl` and `2xl` are tracked in by 0.01em and 0.02em. Nothing else is tracked.
+- Weights: 400 for text, 500 for labels (a badge is a label) and for numbers in running rows, 600 for titles, buttons, the wordmark and the number that matters. No light weights, no italics, no uppercase, no letter-spaced labels.
+- Text at `xl` and `2xl` is tracked in by 0.01em and 0.02em. Nothing else is tracked, the wordmark included.
 - **Figures are tabular everywhere** (`font-variant-numeric: tabular-nums` on `body`), so prices, balances and countdowns never shift as they change.
-- **Prices are written in cents**: `57¢`, `3.5¢`. **Money is written in dollars** with two decimals: `$2.85`. Quantities are in contracts with two decimals. Time left is `12:41`, or `1:04:09` from an hour up.
-- Addresses and signatures are shortened to four characters, an ellipsis and four more (`8rj8…DK8p`) and set in the same typeface at weight 500.
+- **Prices are written in cents**: `57¢`, `3.5¢`. **Money is written in dollars** with two decimals: `$2.85`. Quantities are in contracts with two decimals.
+- **Time left has three forms**, and the longer the wait the less often it changes: `12:41` under an hour (minutes and seconds, every second), `19h 6m` from an hour up (every minute), `3d 4h` from a day up (every hour). A market that closes in three days does not need its seconds.
+- Addresses and signatures are shortened to four characters, an ellipsis and four more (`8rj8…DK8p`) and set in the same typeface at weight 500 (at 600 in the wallet control, which is a button).
 - Sizes are fixed `rem` values. Nothing scales with the viewport.
 
 ## Elevation
 
 Flat. There are two levels, page and surface, and they differ by colour alone: white on peach, no border, no shadow.
 
-- **The one shadow** (`--shadow`: a 1px forest ring at 6% and `0 12px 32px -8px` of forest at 16%) belongs to things that float over surfaces: the account menu, and any later popover. Nothing else has a shadow.
+- **The one shadow** (`--shadow`: a 1px forest ring at 6% and `0 12px 32px -8px` of forest at 16%) belongs to things that float over surfaces: the panel of the wallet control, and any later popover. Nothing else has a shadow.
 - **The navbar is the only translucent thing.** See Components. Blur is not used anywhere else.
 - **No gradients**, no glows, no inner shadows, no overlapping layers.
 
 ### Motion
 
-Motion is for state changes only: a fill or boundary changing under the pointer, a notice appearing, the menu opening. 160ms, `cubic-bezier(0.22, 1, 0.36, 1)`, opacity, transform and colour only. Two things loop: the spinner of a busy control and the mark of the step in progress. Under `prefers-reduced-motion` both stand still and every transition is instant. Nothing moves on page load and nothing moves to decorate.
+Motion is for state changes only: a fill or boundary changing under the pointer, a notice appearing, the wallet panel opening. 160ms, `cubic-bezier(0.22, 1, 0.36, 1)`, opacity, transform and colour only. Two things loop: the spinner of a busy control and the mark of the step in progress. Under `prefers-reduced-motion` both stand still and every transition is instant. Nothing moves on page load and nothing moves to decorate.
 
 ## Components
 
@@ -189,14 +203,14 @@ Twelve components in `apps/web/src/components/ui/`, plus the shell. Add one only
 | --- | --- | --- |
 | **Button** (and `ButtonLink`, `PriceButton`) | Every action and every link that looks like one | One `primary` per view. `secondary` for the rest, `quiet` for the least important action in a row or a notice. |
 | **Field** | Every typed value | Always a visible label above. The unit sits inside the field. Errors say what is allowed. |
-| **Segmented** | A choice among a few: Yes or No, Buy or Sell, a category | Two to six short options, which wrap onto a second line when they run out of room. More than that needs a different control. |
+| **Segmented** | A choice among a few: Yes or No, Buy or Sell, a category, a cadence | Up to eight short options. `stretch` is for two or three; more than that stay at their own width and wrap onto a second line. |
 | **Panel** | A white surface for anything that is not a list | Never inside another Panel or a RowList. |
-| **RowList** | Every list: markets, contracts of an event, positions, orders, activity | It is its own surface. Numbers right aligned. One line of main text per row. |
-| **Facts** | Label and value lines: a cost summary, the details of a market or an order | Labels left in `forest-soft`, values right. The total is the last line. |
+| **RowList** | Every list: markets, contracts of an event, positions, orders, activity | It is its own surface. Numbers right aligned. One line of main text per row. It stacks by its own width. |
+| **Facts** | Label and value lines: a cost summary, the details of a market or an order | Labels left in `forest-soft`, values right. The total is the last line. A heading before it names it. |
 | **Badge** | The status of one thing in a word | The word carries the meaning. Three tones: neutral, positive, negative. |
 | **Notice** | A message placed where it applies: waiting, done, went wrong, nothing here yet | A title, one sentence, at most two actions. Never a floating toast, never a modal. |
 | **Timeline** | The steps of an order, each with its time and transaction | Every on-chain step carries its transaction link. A step that did not happen is said in words. |
-| **Countdown** | Time left until a deadline | Sits next to anything that has a deadline. Announced when its state changes, not every second. |
+| **Countdown** | Time left until a deadline | Sits next to anything that has a deadline. Read by a screen reader, never announced, except the one per page that is given `announce`. |
 | **ExternalLink** | A transaction or an address on the explorer | Opens in a new tab and says so. |
 | **Skeleton** | The shape of what is loading | Still blocks with the final dimensions. No shimmer, no spinner in the middle of a page. |
 
@@ -205,7 +219,7 @@ Twelve components in `apps/web/src/components/ui/`, plus the shell. Add one only
 Every control has all of these, and they look the same on every control.
 
 - **Hover**: a fill moves one step (`forest` to `forest-hover`, `jade` to `jade-hover`, `jade-tint` to `jade-tint-hover`); an outlined control's boundary goes from `edge` to `forest`; a row on a surface turns `peach`. Hover styles apply only where there is a pointer that hovers.
-- **Focus-visible**: a 2px `jade` ring, 2px away from the control, on every focusable element. Never removed.
+- **Focus-visible**: a 2px `jade` ring, 2px away from the control, on every focusable element. Never removed. Where there is no room around the control (the navbar's two rows on a phone, the items of the wallet panel) the ring is drawn just inside it.
 - **Pressed**: the control moves down 1px.
 - **Selected**: filled. A neutral choice fills with `forest`, Yes fills with `jade`; the text turns `white`.
 - **Disabled**: 45% opacity, the label stays, the cursor says not allowed. A disabled primary button is accompanied by the reason, in a field error or a notice.
@@ -221,7 +235,7 @@ Yes and No use no hue of their own. They differ by fill and always carry their w
 | **Yes** | `jade-tint` fill, 1px `jade` boundary, forest text | `jade` fill, white text |
 | **No** | no fill, 1px `edge` boundary, forest text | `forest` fill, white text |
 
-- In lists, `PriceButton` shows both at rest: the word, then the price in cents (`Yes 57¢`, `No 44¢`). A side without an offer is disabled and shows a dash.
+- In lists, `PriceButton` shows both at rest: the word, then the price in cents (`Yes 57¢`, `No 44¢`). A side without an offer is disabled and shows a dash. Its name for a screen reader begins with the same words ("Yes 57 cents, buy Bitcoin above $66,000").
 - In the trade panel, a `Segmented` with the two options shows which side is chosen. The chosen side is filled; the other stays at rest.
 - The words are "Yes" and "No", in sentence case, never colour alone and never an icon alone.
 - Buy and Sell, and every other choice, use the neutral treatment: outlined at rest, `forest` when selected.
@@ -230,27 +244,38 @@ Yes and No use no hue of their own. They differ by fill and always carry their w
 
 44px tall (`default`) or 36px (`row`), 12px radius, the label at weight 600. `primary` is forest with white text. `secondary` is outlined with `edge`. `quiet` is text with the hairline underline of a link. `block` stretches to the width of its container. A button's label is a verb and its object ("Buy Yes · hold $2.92", "Get test funds"), never "OK" or "Submit".
 
+### Segmented
+
+Options side by side, 8px apart, each with its own boundary; the chosen one is filled. A radio group: Tab reaches it, the arrow keys move within it. `stretch` shares the full width equally and is for two or three options (Yes and No, Buy and Sell). With more, as in a filter of up to eight (All, 5 min, 15 min, Hourly, Daily, Weekly, Monthly), the options keep their own width and wrap onto a second line where the row runs out; nothing scrolls sideways and nothing is hidden. The compact size (`row`) is for filters above a list.
+
 ### Field
 
-Label above at `sm` and weight 500. The control is white, 44px tall, with a 1px `edge` boundary and a 12px radius, on a surface and on the page alike. Numeric fields are right aligned with the unit inside (`¢`, `contracts`), and may have minus and plus buttons beside them. Helper text below in `forest-soft`; an error replaces it in `clay`.
+Label above at `sm` and weight 500. The control is white, 44px tall, with a 1px `edge` boundary and a 12px radius, on a surface and on the page alike. Numeric fields are right aligned with the unit inside (`¢`, `contracts`), and may have minus and plus buttons beside them. Helper text below in `forest-soft`; an error replaces it in `clay`. The unit is described to a screen reader ("In contracts.") whether or not there is helper text.
 
 ### Panel, RowList and Facts
 
-A Panel is white, 20px radius, 24px padding. A RowList is the same surface with rows: a header line of `xs` labels in `forest-soft`, then rows at least 64px tall, separated by `line` hairlines, the main text left and the numbers right in fixed columns. A row turns `peach` under the pointer. At 40rem and narrower a row stacks: the main text, then each value under its label, then the actions on a line of their own at the right. Facts is a plain list inside a Panel: label left, value right at weight 500, the total separated by a hairline and set at weight 600.
+A Panel is white, 20px radius, 24px padding. A RowList is the same surface with rows: a header line of `xs` labels in `forest-soft`, then rows at least 64px tall, separated by `line` hairlines, the main text left and the numbers right in fixed columns. A row turns `peach` under the pointer. Where the list is 40rem wide or less (on a phone, and in the main column beside the aside on a smaller laptop) a row stacks: the main text, then each value under its label, then the actions on a line of their own at the right. A list whose columns cannot fit scrolls sideways; it is never cut off. What hangs under a row (the details of an order) is a row of its own across every column. Facts is a plain list inside a Panel: label left, value right at weight 500, the total separated by a hairline and set at weight 600. It takes its name from a heading placed before it, hidden with `sr-only` where the lines explain themselves.
 
 ### Notice
 
-A rounded block with a small round mark, a title at weight 600, one sentence, and up to two actions on the right (under the text when narrow). Neutral: white with a `line` boundary and a forest mark, so it reads as a small surface on the page and as an outlined note on a surface. Positive: `jade-tint` fill, jade mark. Negative: `clay-tint` fill, clay mark and title. With `busy` the mark is a spinner: this is the pattern for every wait on a wallet ("Waiting for your wallet", with Retry and Cancel), so that no step can hang without saying what it waits for. An empty list is a neutral notice that says what will appear and offers the one action that leads there.
+A rounded block with a small round mark, a title at weight 600, one sentence, and up to two actions on the right (under the text where the notice is 30rem wide or less: on a phone, and in the trade panel). Neutral: white with a `line` boundary and a forest mark, so it reads as a small surface on the page and as an outlined note on a surface. Positive: `jade-tint` fill, jade mark. Negative: `clay-tint` fill, clay mark and title. An action in a notice is `secondary` or `quiet`; on the two tints its boundary is forest. With `busy` the mark is a spinner and the title is what a screen reader announces: this is the pattern for every wait on a wallet ("Waiting for your wallet", with Retry and Cancel), so that no step can hang without saying what it waits for. An empty list is a neutral notice that says what will appear and offers the one action that leads there.
+
+### Countdown
+
+The words before it in `forest-soft` ("closes in"), then the figure at weight 500, in one of the three forms of time left. In the last two minutes the figure goes to weight 600 and the word "closing" follows it; at zero the words for the end take its place ("closed", "awaiting result"). There is no warning colour. As the one number that matters (`display`) the figure is `2xl`.
+
+A screen reader finds a sentence that is kept current ("closes in about 13 minutes", "closes in 19 hours 6 minutes") but nothing is announced: a list of twenty markets must stay silent. The one countdown a page is about takes `announce`, and then says when the last two minutes begin and when time is up, and nothing as the page loads.
 
 ### Navbar
 
 One bar, on every page, for everyone.
 
 - **Position.** `position: sticky; top: 0`, full width, above the page (`z-index: 20`). Content scrolls beneath it.
-- **See-through.** Its fill is `peach` at 80% (`--nav-alpha`) with `backdrop-filter: saturate(1.6) blur(16px)`, and a 1px line of forest at 8% under it. Where `backdrop-filter` is not supported, and under `prefers-reduced-transparency: reduce`, the fill is solid `peach` and there is no blur.
+- **See-through.** Its fill is `peach` at 80% (`--nav-alpha`) with `backdrop-filter: saturate(1.6) blur(16px)`, and a 1px line of forest at 8% under it. Where `backdrop-filter` or `color-mix` is not supported, and under `prefers-reduced-transparency: reduce`, the fill is solid `peach` and there is no blur.
 - **Left.** The wordmark "Outcome Tokens" (`base`, 600), which leads to the start. Then the four links: Markets, Portfolio, Activity, Vaults (`sm`, 500, forest). They are shown logged out as well. The current page is at weight 600 with a 2px jade line under it, on the bar's lower edge, and `aria-current="page"`.
-- **Right.** The network mark: a 6px jade dot and "Solana devnet · test funds" (`xs`, 500). The test-dollar balance (`sm`, 600), present once logged in. Then the wallet control: the short address with a caret, which opens the account menu, or a compact primary "Log in" button, the one way in.
-- **Text in the bar is forest only**, never `forest-soft`, so it stays readable whatever scrolls beneath.
+- **Right.** The network mark: a 6px jade dot and "Solana devnet · test funds" (`xs`, 500). The test-dollar balance (`sm`, 600), present once logged in. Then the wallet control, or a compact primary "Log in" button, the one way in.
+- **The wallet control** is the short address with a caret, outlined in forest; under the pointer, and while its panel is open, it fills with white. It shows and hides a panel under it: the full address, Copy address, Get test funds, How it works, Log out. It is a disclosure, not a menu: the panel is ordinary content reached with Tab, Escape closes it and returns to the button, and so does a press or focus anywhere else. The panel is the one floating surface: white, 20px radius, the one shadow.
+- **Everything in the bar is forest or jade**, never `forest-soft` or `edge`, so it stays readable whatever scrolls beneath. A link under the pointer gets the line of the current page in forest.
 - **Height.** `--nav-height` holds it (64px, and 100px under 64rem), for anything that sticks below the bar or scrolls to an anchor.
 - **At 1280** it is one row, 64px tall, inside the page column.
 - **At 390** (and anywhere under 64rem) it is two rows. First, 56px: the wordmark with the network mark under it ("Devnet · test funds"), and on the right the balance and the wallet control. Second, 44px: the four links, spread across the width, each a 44px target. Four short words fit on one line, so nothing is hidden behind a menu button, no icons have to be invented, and there is no second bar fixed to the bottom that would cover the page or the trade panel's action.
@@ -279,7 +304,7 @@ Don't:
 - No tickets, receipts, stamps, perforations, dotted leaders or any other motif.
 - No monospace type, no uppercase labels, no letter-spaced captions.
 - No borders around surfaces and no surface inside a surface. (A neutral notice keeps its hairline: it is a note, not a surface.) No coloured side stripes.
-- No shadows except under a floating menu.
+- No shadows except under a floating panel.
 - No modals for confirmation or for results: the wallet prompt is the confirmation, and results appear in place.
 - No celebratory effects, badges of honour, streaks, leaderboards or "hot" markets.
 - No exchange logos, no exchange name in the wordmark, nothing styled after the venue.
