@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@outcome/program-client": "workspace:*",
+    "@outcome/relayer": "workspace:*",
     "@privy-io/node": "0.39.0",
     "@privy-io/react-auth": "3.51.4",
     "@solana-program/memo": "0.16.0",

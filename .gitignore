@@ -24,10 +24,16 @@ test-ledger/
 **/*.rs.bk
 
 # Local data
+.data/
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+deployments/localnet.json
+apps/web/e2e/out/
 
 # Tooling
 .turbo/

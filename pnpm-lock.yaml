@@ -220,6 +220,24 @@ importers:
       '@gemini-markets/sdk':
         specifier: 0.1.1
         version: 0.1.1(ws@8.23.0(bufferutil@4.2.0)(utf-8-validate@5.0.10))
+      '@outcome/program-client':
+        specifier: workspace:*
+        version: link:../../clients/js
+      '@solana-program/system':
+        specifier: 0.16.0
+        version: 0.16.0(@solana/kit@8.6.0(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@5.0.10))
+      '@solana-program/token':
+        specifier: 0.18.0
+        version: 0.18.0(@solana/kit@8.6.0(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@5.0.10))
+      '@solana-program/token-2022':
+        specifier: 0.20.1
+        version: 0.20.1(@solana/kit@8.6.0(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@5.0.10))(@solana/sysvars@8.6.0(typescript@5.9.3))
+      '@solana/kit':
+        specifier: 'catalog:'
+        version: 8.6.0(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      '@solana/sysvars':
+        specifier: 8.6.0
+        version: 8.6.0(typescript@5.9.3)
       ws:
         specifier: 8.23.0
         version: 8.23.0(bufferutil@4.2.0)(utf-8-validate@5.0.10)
@@ -242,6 +260,12 @@ importers:
 
   apps/web:
     dependencies:
+      '@outcome/program-client':
+        specifier: workspace:*
+        version: link:../../clients/js
+      '@outcome/relayer':
+        specifier: workspace:*
+        version: link:../relayer
       '@privy-io/node':
         specifier: 0.39.0
         version: 0.39.0(@solana/kit@8.6.0(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@5.0.10))(viem@2.57.8(bufferutil@4.2.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.6.7))

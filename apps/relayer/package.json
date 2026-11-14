@@ -5,10 +5,18 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "start": "node --env-file=../../.env src/main.ts start",
+    "bootstrap": "node --env-file=../../.env scripts/bootstrap.ts"
   },
   "dependencies": {
     "@gemini-markets/sdk": "0.1.1",
+    "@outcome/program-client": "workspace:*",
+    "@solana-program/system": "0.16.0",
+    "@solana-program/token": "0.18.0",
+    "@solana-program/token-2022": "0.20.1",
+    "@solana/kit": "catalog:",
+    "@solana/sysvars": "8.6.0",
     "ws": "8.23.0"
   },
   "devDependencies": {
@@ -17,5 +25,9 @@
     "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "exports": {
+    "./money": "./src/money.ts",
+    "./api-types": "./src/api/types.ts"
   }
 }
