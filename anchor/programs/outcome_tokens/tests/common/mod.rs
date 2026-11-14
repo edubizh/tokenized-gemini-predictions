@@ -763,6 +763,38 @@ pub fn mint_stable(env: &mut Env, destination: &Pubkey, amount: u64) {
     );
 }
 
+/// A second classic mint with six decimals from the same issuer: all that tells it from
+/// the stable mint is its address.
+pub fn create_other_stable_mint(env: &mut Env) -> Pubkey {
+    create_mint(
+        &mut env.svm,
+        &spl_token::ID,
+        &env.issuer,
+        &Keypair::new_from_array([7; 32]),
+        STABLE_DECIMALS,
+    )
+}
+
+/// Creates a token account of `mint`, a mint of `create_other_stable_mint`, owned by
+/// `owner` and mints `amount` into it.
+pub fn create_other_stable_account(
+    env: &mut Env,
+    mint: &Pubkey,
+    owner: &Pubkey,
+    amount: u64,
+) -> Pubkey {
+    let account = create_token_account(&mut env.svm, &spl_token::ID, &env.issuer, mint, owner);
+    mint_tokens(
+        &mut env.svm,
+        &spl_token::ID,
+        &env.issuer,
+        mint,
+        &account,
+        amount,
+    );
+    account
+}
+
 // --- Associated token accounts ---------------------------------------------------------
 
 pub fn ata_address(owner: &Pubkey, mint: &Pubkey, token_program: &Pubkey) -> Pubkey {

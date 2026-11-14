@@ -12,7 +12,8 @@ use {
         error::ErrorCode,
         events::{OrderCancelled, OrderFilled, OrderPlaced},
         instruction::{CancelOrder, FillBuy, FillSell, PlaceSell},
-        state::{Order, OrderKind, Side},
+        instructions::SetConfigArgs,
+        state::{Market, Order, OrderKind, Side},
     },
     solana_keypair::Keypair,
     solana_signer::Signer,
@@ -628,6 +629,8 @@ fn fill_sell_is_refused_once_the_market_is_settled() {
     let funder = create_stable_account(&mut placed.env, &settler, HELD * 10_000);
     let accounts = settle_market_accounts(&placed.env, &placed.market, &funder);
     try_settle_market(&mut placed.env, accounts, 10_000, 0).unwrap();
+    let vault = vault_address(&placed.market.market);
+    assert_eq!(token_balance(&placed.env.svm, &vault), HELD * 10_000);
 
     assert_err(placed.try_fill(full_fill()), ErrorCode::AlreadySettled);
     placed.assert_still_open();
@@ -636,6 +639,26 @@ fn fill_sell_is_refused_once_the_market_is_settled() {
     let user = placed.trader.wallet.insecure_clone();
     placed.try_cancel(&user).unwrap();
     placed.assert_returned_and_closed();
+
+    // The tokens that sat in the escrow are paid like the rest.
+    let redeem_after = load::<Market>(&placed.env.svm, &placed.market.market).redeem_after;
+    set_time(&mut placed.env.svm, redeem_after);
+    let accounts = redeem_accounts(
+        &placed.env,
+        &user.pubkey(),
+        &placed.market.market,
+        &placed.market.yes_mint,
+        &placed.user_outcome,
+        &placed.trader.stable,
+    );
+    try_redeem(&mut placed.env, &user, accounts, HELD).unwrap();
+    let svm = &placed.env.svm;
+    assert_eq!(
+        token_balance(svm, &placed.trader.stable),
+        STABLE_AFTER_BUY + HELD * 10_000
+    );
+    assert_eq!(token_balance(svm, &vault), 0);
+    assert_eq!(mint_supply(svm, &placed.market.yes_mint), 0);
 }
 
 #[test]
@@ -834,6 +857,51 @@ fn fill_sell_only_draws_from_a_token_account_the_relayer_owns() {
 }
 
 #[test]
+fn fill_sell_never_draws_from_the_treasury_even_when_the_relayer_owns_it() {
+    let mut placed = placed_order();
+    let relayer = placed.env.relayer.pubkey();
+    let treasury = create_stable_account(&mut placed.env, &relayer, PAYOUT_STABLE);
+    let args = SetConfigArgs {
+        relayer: None,
+        settler: None,
+        registrar: None,
+        order_ttl_secs: None,
+        min_order_units: None,
+        max_order_units: None,
+        settle_delay_secs: None,
+    };
+    let change = set_config_ix(
+        &placed.env,
+        &placed.env.admin.pubkey(),
+        args,
+        Some(treasury),
+    );
+    send_ok(&mut placed.env.svm, &[change], &[&placed.env.admin]);
+
+    let mut accounts = placed.fill_accounts();
+    accounts.payout_source = treasury;
+    assert_err(
+        try_fill(&mut placed.env, accounts, full_fill()),
+        ErrorCode::WrongOwner,
+    );
+    assert_eq!(token_balance(&placed.env.svm, &treasury), PAYOUT_STABLE);
+    placed.assert_still_open();
+
+    // The relayer's float account, kept apart from the treasury, pays as before.
+    placed.try_fill(full_fill()).unwrap();
+    let svm = &placed.env.svm;
+    assert_eq!(token_balance(svm, &treasury), PAYOUT_STABLE);
+    assert_eq!(
+        token_balance(svm, &placed.payout_source),
+        PAYOUT_STABLE - (PROCEEDS - FEE)
+    );
+    assert_eq!(
+        token_balance(svm, &placed.trader.stable),
+        STABLE_AFTER_BUY + PROCEEDS - FEE
+    );
+}
+
+#[test]
 fn fill_sell_only_pays_token_accounts_the_orders_user_owns() {
     let mut placed = placed_order();
     let attacker = funded_keypair(&mut placed.env.svm, 12);
@@ -958,7 +1026,83 @@ fn fill_sell_rejects_substituted_accounts() {
         try_fill(&mut placed.env, accounts, full_fill()),
         anchor_lang::error::ErrorCode::InvalidProgramId,
     );
+
+    // A payout in another mint: first only the source, then a consistent set of accounts
+    // around a mint that is not the configured one.
+    let relayer = placed.env.relayer.pubkey();
+    let other_mint = create_other_stable_mint(&mut placed.env);
+    let other_source =
+        create_other_stable_account(&mut placed.env, &other_mint, &relayer, PAYOUT_STABLE);
+    let user_other_stable = create_other_stable_account(&mut placed.env, &other_mint, &user, 0);
+
+    let mut accounts = placed.fill_accounts();
+    accounts.payout_source = other_source;
+    assert_anchor_err(
+        try_fill(&mut placed.env, accounts, full_fill()),
+        anchor_lang::error::ErrorCode::ConstraintTokenMint,
+    );
+
+    let mut accounts = placed.fill_accounts();
+    accounts.stable_mint = other_mint;
+    accounts.payout_source = other_source;
+    accounts.user_stable = user_other_stable;
+    assert_anchor_err(
+        try_fill(&mut placed.env, accounts, full_fill()),
+        anchor_lang::error::ErrorCode::ConstraintAddress,
+    );
+    assert_eq!(token_balance(&placed.env.svm, &other_source), PAYOUT_STABLE);
+    assert_eq!(token_balance(&placed.env.svm, &user_other_stable), 0);
     placed.assert_still_open();
+}
+
+#[test]
+fn fill_sell_of_a_no_order_burns_no_tokens_only() {
+    let Holding {
+        mut env,
+        market,
+        trader,
+        payout_source,
+        ..
+    } = holding();
+    // The trader holds both sides, bought at the same price.
+    let user_no = buy_outcome(&mut env, &trader, &market, Side::No, HELD);
+    let stable_before = STABLE_AFTER_BUY - BUY_COST;
+    assert_eq!(token_balance(&env.svm, &trader.stable), stable_before);
+    let args = PlaceSell {
+        side: Side::No,
+        ..place_sell_args()
+    };
+    let order = place_sell(&mut env, &trader, &market, &user_no, args);
+    assert_eq!(
+        token_account(&env.svm, &escrow_address(&order)).mint,
+        market.no_mint
+    );
+
+    let accounts = fill_sell_accounts(&env, &order, &payout_source, &trader.stable, &user_no);
+    assert_eq!(accounts.outcome_mint, market.no_mint);
+    let meta = send_ok(
+        &mut env.svm,
+        &[instruction(accounts, full_fill())],
+        &[&env.relayer],
+    );
+
+    assert_eq!(mint_supply(&env.svm, &market.no_mint), HELD - SELL_QTY);
+    assert_eq!(mint_supply(&env.svm, &market.yes_mint), HELD);
+    assert_eq!(token_balance(&env.svm, &user_no), HELD - SELL_QTY);
+    assert_eq!(
+        token_balance(&env.svm, &trader.stable),
+        stable_before + PROCEEDS - FEE
+    );
+    assert_eq!(
+        token_balance(&env.svm, &payout_source),
+        PAYOUT_STABLE - (PROCEEDS - FEE)
+    );
+    assert!(is_closed(&env.svm, &order));
+    assert!(is_closed(&env.svm, &escrow_address(&order)));
+    let filled = events::<OrderFilled>(&meta);
+    assert_eq!(filled.len(), 1);
+    assert_eq!(filled[0].side, Side::No as u8);
+    assert_eq!(filled[0].fill_qty, SELL_QTY);
 }
 
 #[test]

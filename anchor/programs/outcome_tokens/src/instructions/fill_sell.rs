@@ -60,12 +60,14 @@ pub struct FillSell<'info> {
     )]
     pub escrow: Box<InterfaceAccount<'info, TokenAccount>>,
     /// A stable token account of the relayer, which received the venue's payment for the
-    /// sale. Pays the user.
+    /// sale. Pays the user. Never the treasury: should the treasury ever be an account
+    /// the relayer owns, its balance still stays out of the relayer's reach.
     #[account(
         mut,
         token::mint = stable_mint,
         token::token_program = stable_token_program,
-        constraint = payout_source.owner == relayer.key() @ ErrorCode::WrongOwner
+        constraint = payout_source.owner == relayer.key() @ ErrorCode::WrongOwner,
+        constraint = payout_source.key() != config.treasury @ ErrorCode::WrongOwner
     )]
     pub payout_source: Box<InterfaceAccount<'info, TokenAccount>>,
     /// Any stable token account of the order's user. Receives the proceeds less the fee.

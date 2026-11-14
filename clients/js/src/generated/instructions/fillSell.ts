@@ -189,7 +189,8 @@ export type FillSellAsyncInput<
   escrow?: TAccountEscrow;
   /**
    * A stable token account of the relayer, which received the venue's payment for the
-   * sale. Pays the user.
+   * sale. Pays the user. Never the treasury: should the treasury ever be an account
+   * the relayer owns, its balance still stays out of the relayer's reach.
    */
   payoutSource: TAccountPayoutSource;
   /** Any stable token account of the order's user. Receives the proceeds less the fee. */
@@ -498,7 +499,8 @@ export type FillSellInput<
   escrow: TAccountEscrow;
   /**
    * A stable token account of the relayer, which received the venue's payment for the
-   * sale. Pays the user.
+   * sale. Pays the user. Never the treasury: should the treasury ever be an account
+   * the relayer owns, its balance still stays out of the relayer's reach.
    */
   payoutSource: TAccountPayoutSource;
   /** Any stable token account of the order's user. Receives the proceeds less the fee. */
@@ -779,7 +781,8 @@ export type ParsedFillSellInstruction<
     escrow: TAccountMetas[5];
     /**
      * A stable token account of the relayer, which received the venue's payment for the
-     * sale. Pays the user.
+     * sale. Pays the user. Never the treasury: should the treasury ever be an account
+     * the relayer owns, its balance still stays out of the relayer's reach.
      */
     payoutSource: TAccountMetas[6];
     /** Any stable token account of the order's user. Receives the proceeds less the fee. */

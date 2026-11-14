@@ -368,6 +368,23 @@ fn settle_market_only_draws_from_a_token_account_the_settler_owns() {
 }
 
 #[test]
+fn settle_market_only_draws_from_a_token_account_of_the_stable_mint() {
+    let mut funded = funded_market();
+    let settler = funded.env.settler.pubkey();
+    let other_mint = create_other_stable_mint(&mut funded.env);
+    let other_funder =
+        create_other_stable_account(&mut funded.env, &other_mint, &settler, FUNDER_STABLE);
+    let mut accounts = funded.settle_accounts();
+    accounts.funder_stable = other_funder;
+
+    let result = try_settle_market(&mut funded.env, accounts, 10_000, 0);
+
+    assert_anchor_err(result, anchor_lang::error::ErrorCode::ConstraintTokenMint);
+    funded.assert_not_settled();
+    assert_eq!(token_balance(&funded.env.svm, &other_funder), FUNDER_STABLE);
+}
+
+#[test]
 fn settle_market_is_not_blocked_by_lamports_sent_to_the_vault_address() {
     let mut funded = funded_market();
     // The smallest balance an account may be left with.
@@ -693,6 +710,79 @@ fn redeem_rejects_substituted_mints_token_accounts_and_vaults() {
     assert_eq!(token_balance(&funded.env.svm, &funded.alice_yes), YES_UNITS);
 }
 
+#[test]
+fn redeem_cannot_pay_out_in_another_mint() {
+    let mut funded = funded_market();
+    let alice = funded.alice.wallet.insecure_clone();
+    let other_mint = create_other_stable_mint(&mut funded.env);
+    let alice_other = create_other_stable_account(&mut funded.env, &other_mint, &alice.pubkey(), 0);
+    funded.try_settle(10_000, 0).unwrap();
+    funded.open_redemption();
+
+    // The accounts agree with each other, so every constraint passes: the mint and the
+    // holder's account are of the same mint and the holder owns the account.
+    let mut accounts = funded.yes_redeem_accounts();
+    accounts.stable_mint = other_mint;
+    accounts.holder_stable = alice_other;
+    let result = try_redeem(&mut funded.env, &alice, accounts, 1_000);
+
+    // The token program refuses to move the vault's tokens into an account of another
+    // mint, and the burn that came before is undone with the rest of the transaction.
+    assert_custom_err(result, spl_token::error::TokenError::MintMismatch as u32);
+    let svm = &funded.env.svm;
+    assert_eq!(token_balance(svm, &funded.vault), YES_UNITS * 10_000);
+    assert_eq!(token_balance(svm, &funded.alice_yes), YES_UNITS);
+    assert_eq!(mint_supply(svm, &funded.market.yes_mint), YES_UNITS);
+    assert_eq!(token_balance(svm, &alice_other), 0);
+}
+
+#[test]
+fn settlement_instructions_reject_the_wrong_token_program() {
+    let mut funded = funded_market();
+    let alice = funded.alice.wallet.insecure_clone();
+    let admin = funded.env.admin.insecure_clone();
+    let market = funded.market.market;
+
+    // Token-2022 where the stable token's program belongs.
+    let mut accounts = funded.settle_accounts();
+    accounts.token_program = spl_token_2022::ID;
+    assert_anchor_err(
+        try_settle_market(&mut funded.env, accounts, 10_000, 0),
+        anchor_lang::error::ErrorCode::InvalidProgramId,
+    );
+    funded.assert_not_settled();
+
+    funded.try_settle(10_000, 0).unwrap();
+    let mut accounts = revoke_settlement_accounts(&funded.env, &admin.pubkey(), &market);
+    accounts.token_program = spl_token_2022::ID;
+    assert_anchor_err(
+        try_revoke_settlement(&mut funded.env, &admin, accounts),
+        anchor_lang::error::ErrorCode::InvalidProgramId,
+    );
+    assert_eq!(funded.stored_market().status, MarketStatus::Settled as u8);
+
+    funded.open_redemption();
+    let mut accounts = funded.yes_redeem_accounts();
+    accounts.stable_token_program = spl_token_2022::ID;
+    assert_anchor_err(
+        try_redeem(&mut funded.env, &alice, accounts, 1_000),
+        anchor_lang::error::ErrorCode::InvalidProgramId,
+    );
+    // The classic program where the outcome token's program belongs.
+    let mut accounts = funded.yes_redeem_accounts();
+    accounts.outcome_token_program = spl_token::ID;
+    assert_anchor_err(
+        try_redeem(&mut funded.env, &alice, accounts, 1_000),
+        anchor_lang::error::ErrorCode::InvalidProgramId,
+    );
+
+    assert_eq!(
+        token_balance(&funded.env.svm, &funded.vault),
+        YES_UNITS * 10_000
+    );
+    assert_eq!(token_balance(&funded.env.svm, &funded.alice_yes), YES_UNITS);
+}
+
 // --- revoke_settlement -----------------------------------------------------------------
 
 /// What a revoked settlement leaves behind: the funding in the treasury on top of the buy
@@ -763,6 +853,35 @@ fn revoke_settlement_by_the_settler_works() {
     try_revoke_settlement(&mut funded.env, &settler, accounts).unwrap();
 
     assert_revoked(&funded, YES_UNITS * 1_000 + NO_UNITS * 9_000);
+}
+
+#[test]
+fn revoke_settlement_sweeps_tokens_donated_to_the_vault() {
+    let mut funded = funded_market();
+    funded.try_settle(10_000, 0).unwrap();
+    let funding = YES_UNITS * 10_000;
+    let donation = 1_234_567;
+    let donate = spl_token::instruction::transfer_checked(
+        &spl_token::ID,
+        &funded.bob.stable,
+        &funded.env.stable_mint,
+        &funded.vault,
+        &funded.bob.wallet.pubkey(),
+        &[],
+        donation,
+        6,
+    )
+    .unwrap();
+    send_ok(&mut funded.env.svm, &[donate], &[&funded.bob.wallet]);
+    assert_eq!(
+        token_balance(&funded.env.svm, &funded.vault),
+        funding + donation
+    );
+
+    funded.try_revoke().unwrap();
+
+    // The whole balance leaves with the funding, so the vault can be closed.
+    assert_revoked(&funded, funding + donation);
 }
 
 #[test]

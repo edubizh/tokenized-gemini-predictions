@@ -222,15 +222,28 @@ fn a_market_runs_from_the_first_order_to_the_last_redemption() {
         }
     }
     // The treasury holds the cost and fee of the two buy fills and nothing else.
-    assert_eq!(treasury, yes_cost + yes_fee + no_cost + no_fee);
-    assert_eq!(balance(&env, &env.treasury), treasury);
-    // Every stable token is accounted for: what the traders paid sits in the treasury,
-    // and what Alice gained came from the relayer's payout and the settler's funding.
     assert_eq!(
-        alice_stable,
-        TRADER_STABLE - yes_cost - yes_fee + (proceeds - sell_fee) + funding
+        balance(&env, &env.treasury),
+        yes_cost + yes_fee + no_cost + no_fee
     );
-    assert_eq!(bob_stable, TRADER_STABLE - no_cost - no_fee);
+    // Every stable token minted at the start is still in one of the accounts that took
+    // part: the program neither created nor lost any.
+    let held: u64 = [
+        alice.stable,
+        bob.stable,
+        env.treasury,
+        payout_source,
+        funder,
+        vault,
+    ]
+    .iter()
+    .map(|account| balance(&env, account))
+    .sum();
+    assert_eq!(held, 2 * TRADER_STABLE + 2 * ROLE_STABLE);
+    assert_eq!(
+        mint_supply(&env.svm, &env.stable_mint),
+        2 * TRADER_STABLE + 2 * ROLE_STABLE
+    );
 }
 
 // --- Role separation -------------------------------------------------------------------

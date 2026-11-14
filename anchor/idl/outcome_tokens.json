@@ -672,7 +672,8 @@
           "name": "payout_source",
           "docs": [
             "A stable token account of the relayer, which received the venue's payment for the",
-            "sale. Pays the user."
+            "sale. Pays the user. Never the treasury: should the treasury ever be an account",
+            "the relayer owns, its balance still stays out of the relayer's reach."
           ],
           "writable": true
         },
