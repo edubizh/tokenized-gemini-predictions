@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
 
+use crate::state::Side;
+
 /// Direction of an order. Accounts and events store it as its number.
 // Borsh writes the variant index, which the explicit numbers must keep matching; Anchor's
 // IDL builder accepts no other encoding.
@@ -33,4 +35,15 @@ pub struct Order {
     pub nonce: u64,
     pub bump: u8,
     pub reserved: [u8; 16],
+}
+
+impl Order {
+    /// The stored side. Orders are only written from a validated `Side`.
+    pub fn side(&self) -> Side {
+        if self.side == Side::Yes as u8 {
+            Side::Yes
+        } else {
+            Side::No
+        }
+    }
 }

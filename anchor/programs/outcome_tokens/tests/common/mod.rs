@@ -30,7 +30,7 @@ use {
         },
         error::ErrorCode,
         instructions::{InitializeArgs, SetConfigArgs},
-        state::{MarketStatus, Side},
+        state::{MarketStatus, Order, Side, Trader},
     },
     solana_keypair::Keypair,
     solana_message::{v0, VersionedMessage},
@@ -583,8 +583,16 @@ impl MarketKeys {
 /// Creates the market for `symbol` with the fixture's parameters and both outcome mints,
 /// signed and paid for by the relayer.
 pub fn create_market_with_mints(env: &mut Env, symbol: &str) -> MarketKeys {
-    let relayer = env.relayer.pubkey();
     let args = create_market_args(env, symbol);
+    create_market_with_mints_from(env, args)
+}
+
+/// `create_market_with_mints` for a market with other parameters.
+pub fn create_market_with_mints_from(
+    env: &mut Env,
+    args: outcome_tokens::instruction::CreateMarket,
+) -> MarketKeys {
+    let relayer = env.relayer.pubkey();
     let market = market_address(&args.symbol_hash);
     let close_ts = args.close_ts;
     let instructions = [
@@ -715,6 +723,15 @@ pub fn token_balance(svm: &LiteSVM, address: &Pubkey) -> u64 {
     token_account(svm, address).amount
 }
 
+/// Supply of a mint of either token program.
+pub fn mint_supply(svm: &LiteSVM, mint: &Pubkey) -> u64 {
+    let account = svm.get_account(mint).expect("mint exists");
+    StateWithExtensions::<spl_token_2022::state::Mint>::unpack(&account.data)
+        .unwrap()
+        .base
+        .supply
+}
+
 /// Creates a stable token account owned by `owner` and mints `amount` into it.
 pub fn create_stable_account(env: &mut Env, owner: &Pubkey, amount: u64) -> Pubkey {
     let stable_mint = env.stable_mint;
@@ -759,4 +776,205 @@ pub fn create_ata_idempotent_ix(
         mint,
         token_program,
     )
+}
+
+// --- Orders ----------------------------------------------------------------------------
+
+// The order `place_buy_args` describes.
+pub const ORDER_QTY: u64 = 1_000;
+pub const ORDER_LIMIT_PX: u16 = 6_000;
+pub const ORDER_MAX_FEE: u64 = 20_000;
+/// What that order escrows: `qty * limit_px + max_fee`.
+pub const ORDER_ESCROW: u64 = 6_020_000;
+
+/// Stable balance `trading_scene` gives its trader: enough for the largest order.
+pub const TRADER_STABLE: u64 = 10_000_000_000;
+
+/// A registered trader with a stable token account.
+pub struct TraderKeys {
+    pub wallet: Keypair,
+    pub stable: Pubkey,
+}
+
+/// Funds the wallet derived from `seed`, registers it as a trader and gives it a stable
+/// token account holding `stable_amount`.
+pub fn create_trader(env: &mut Env, seed: u8, stable_amount: u64) -> TraderKeys {
+    let wallet = funded_keypair(&mut env.svm, seed);
+    register_trader(env, &wallet.pubkey());
+    let stable = create_stable_account(env, &wallet.pubkey(), stable_amount);
+    TraderKeys { wallet, stable }
+}
+
+/// An initialized program with the fixture's market and one trader (wallet seed 10).
+pub struct Scene {
+    pub env: Env,
+    pub market: MarketKeys,
+    pub trader: TraderKeys,
+}
+
+pub fn trading_scene() -> Scene {
+    let mut env = initialize_default();
+    let market = create_market_with_mints(&mut env, MARKET_SYMBOL);
+    let trader = create_trader(&mut env, 10, TRADER_STABLE);
+    Scene {
+        env,
+        market,
+        trader,
+    }
+}
+
+/// Nonce of the user's next order: 0 for a wallet that is not registered.
+pub fn next_nonce(svm: &LiteSVM, user: &Pubkey) -> u64 {
+    let trader = trader_address(user);
+    if is_closed(svm, &trader) {
+        return 0;
+    }
+    load::<Trader>(svm, &trader).next_nonce
+}
+
+/// Creates a Token-2022 account for an outcome mint at a fresh keypair address, paid for
+/// by the relayer.
+pub fn create_outcome_account(env: &mut Env, mint: &Pubkey, owner: &Pubkey) -> Pubkey {
+    create_token_account(&mut env.svm, &spl_token_2022::ID, &env.relayer, mint, owner)
+}
+
+/// The accounts of a `place_buy` for the user's next order. Tests replace single fields
+/// to probe one check at a time.
+pub fn place_buy_accounts(
+    env: &Env,
+    user: &Pubkey,
+    payer: &Pubkey,
+    market: &Pubkey,
+    user_stable: &Pubkey,
+) -> outcome_tokens::accounts::PlaceBuy {
+    let order = order_address(user, next_nonce(&env.svm, user));
+    outcome_tokens::accounts::PlaceBuy {
+        user: *user,
+        payer: *payer,
+        config: env.config,
+        trader: trader_address(user),
+        market: *market,
+        order,
+        escrow: escrow_address(&order),
+        user_stable: *user_stable,
+        stable_mint: env.stable_mint,
+        token_program: spl_token::ID,
+        system_program: system_program::ID,
+    }
+}
+
+/// A YES buy of `ORDER_QTY` units at `ORDER_LIMIT_PX` with a fee cap of `ORDER_MAX_FEE`.
+pub fn place_buy_args() -> outcome_tokens::instruction::PlaceBuy {
+    outcome_tokens::instruction::PlaceBuy {
+        side: Side::Yes,
+        qty_units: ORDER_QTY,
+        limit_px: ORDER_LIMIT_PX,
+        max_fee: ORDER_MAX_FEE,
+    }
+}
+
+/// Places the trader's next buy order, signed and paid for by the trader, and returns the
+/// order address.
+pub fn place_buy(
+    env: &mut Env,
+    trader: &TraderKeys,
+    market: &Pubkey,
+    args: outcome_tokens::instruction::PlaceBuy,
+) -> Pubkey {
+    let user = trader.wallet.pubkey();
+    let accounts = place_buy_accounts(env, &user, &user, market, &trader.stable);
+    let order = accounts.order;
+    send_ok(
+        &mut env.svm,
+        &[instruction(accounts, args)],
+        &[&trader.wallet],
+    );
+    order
+}
+
+/// The accounts of a `fill_buy` of `order`, read from the order account: its market, the
+/// outcome mint of its side and its rent payer. Tests replace single fields to probe one
+/// check at a time.
+pub fn fill_buy_accounts(
+    env: &Env,
+    order: &Pubkey,
+    user_outcome: &Pubkey,
+    user_stable: &Pubkey,
+) -> outcome_tokens::accounts::FillBuy {
+    let stored: Order = load(&env.svm, order);
+    outcome_tokens::accounts::FillBuy {
+        relayer: env.relayer.pubkey(),
+        config: env.config,
+        market: stored.market,
+        order: *order,
+        escrow: escrow_address(order),
+        outcome_mint: mint_address(&stored.market, stored.side()),
+        user_outcome: *user_outcome,
+        user_stable: *user_stable,
+        treasury: env.treasury,
+        rent_payer: stored.rent_payer,
+        stable_mint: env.stable_mint,
+        stable_token_program: spl_token::ID,
+        outcome_token_program: spl_token_2022::ID,
+    }
+}
+
+/// The accounts of a `cancel_order` of `order` by `caller`, read from the order and its
+/// escrow: the market, the rent payer, the escrowed mint and its token program. Tests
+/// replace single fields to probe one check at a time.
+pub fn cancel_order_accounts(
+    env: &Env,
+    caller: &Pubkey,
+    order: &Pubkey,
+    user_token: &Pubkey,
+) -> outcome_tokens::accounts::CancelOrder {
+    let stored: Order = load(&env.svm, order);
+    let escrow = escrow_address(order);
+    outcome_tokens::accounts::CancelOrder {
+        caller: *caller,
+        config: env.config,
+        market: stored.market,
+        order: *order,
+        escrow,
+        escrow_mint: token_account(&env.svm, &escrow).mint,
+        user_token: *user_token,
+        rent_payer: stored.rent_payer,
+        token_program: env.svm.get_account(&escrow).expect("escrow exists").owner,
+    }
+}
+
+/// Sends `cancel_order` signed by `caller`.
+pub fn try_cancel_order(
+    env: &mut Env,
+    caller: &Keypair,
+    accounts: outcome_tokens::accounts::CancelOrder,
+) -> SendResult {
+    send(
+        &mut env.svm,
+        &[instruction(
+            accounts,
+            outcome_tokens::instruction::CancelOrder {},
+        )],
+        &[caller],
+    )
+}
+
+// --- Pause and halt --------------------------------------------------------------------
+
+/// Sets the pause flags to exactly `flags`, signed by the admin.
+pub fn set_pause_flags(env: &mut Env, flags: u8) {
+    let instruction = set_pause_ix(env, &env.admin.pubkey(), flags);
+    send_ok(&mut env.svm, &[instruction], &[&env.admin]);
+}
+
+/// Halts an open market, signed by the relayer.
+pub fn halt_market(env: &mut Env, market: &Pubkey) {
+    let instruction = set_market_ix(
+        env,
+        &env.relayer.pubkey(),
+        market,
+        Some(MarketStatus::Halted),
+        None,
+    );
+    send_ok(&mut env.svm, &[instruction], &[&env.relayer]);
 }

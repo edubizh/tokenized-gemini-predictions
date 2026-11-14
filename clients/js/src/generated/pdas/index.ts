@@ -7,6 +7,7 @@
  */
 
 export * from "./config.js";
+export * from "./escrow.js";
 export * from "./market.js";
 export * from "./mint.js";
 export * from "./trader.js";

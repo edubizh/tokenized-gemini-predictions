@@ -8,4 +8,5 @@
 
 export * from "./config.js";
 export * from "./market.js";
+export * from "./order.js";
 export * from "./trader.js";

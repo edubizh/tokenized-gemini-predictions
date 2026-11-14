@@ -8,6 +8,148 @@
   },
   "instructions": [
     {
+      "name": "cancel_order",
+      "discriminator": [
+        95,
+        129,
+        237,
+        240,
+        8,
+        49,
+        223,
+        132
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "docs": [
+            "Anyone. What the caller may cancel depends on who it is and on the time."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.symbol_hash",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order.user",
+                "account": "Order"
+              },
+              {
+                "kind": "account",
+                "path": "order.nonce",
+                "account": "Order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_mint"
+        },
+        {
+          "name": "user_token",
+          "docs": [
+            "Any token account of the order's user for the escrowed mint; it need not be the",
+            "associated one."
+          ],
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "docs": [
+            "its escrow."
+          ],
+          "writable": true,
+          "relations": [
+            "order"
+          ]
+        },
+        {
+          "name": "token_program",
+          "docs": [
+            "The program that owns the escrow."
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "create_market",
       "discriminator": [
         103,
@@ -239,6 +381,178 @@
       ]
     },
     {
+      "name": "fill_buy",
+      "discriminator": [
+        225,
+        39,
+        170,
+        172,
+        98,
+        122,
+        102,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "relayer",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.symbol_hash",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order.user",
+                "account": "Order"
+              },
+              {
+                "kind": "account",
+                "path": "order.nonce",
+                "account": "Order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "outcome_mint",
+          "writable": true
+        },
+        {
+          "name": "user_outcome",
+          "docs": [
+            "Any token account of the order's user for the outcome mint; it need not be the",
+            "associated one."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_stable",
+          "docs": [
+            "Any stable token account of the order's user. Receives what the fill did not use."
+          ],
+          "writable": true
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "docs": [
+            "its escrow."
+          ],
+          "writable": true,
+          "relations": [
+            "order"
+          ]
+        },
+        {
+          "name": "stable_mint"
+        },
+        {
+          "name": "stable_token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "outcome_token_program",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        }
+      ],
+      "args": [
+        {
+          "name": "fill_qty",
+          "type": "u64"
+        },
+        {
+          "name": "cost",
+          "type": "u64"
+        },
+        {
+          "name": "fee",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "initialize",
       "discriminator": [
         175,
@@ -312,6 +626,190 @@
               "name": "InitializeArgs"
             }
           }
+        }
+      ]
+    },
+    {
+      "name": "place_buy",
+      "discriminator": [
+        2,
+        60,
+        74,
+        90,
+        120,
+        38,
+        62,
+        183
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "signer": true
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Funds the order and its escrow, and gets that rent back when they close."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "trader",
+          "docs": [
+            "Exists only for a wallet the registrar has registered."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  97,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.symbol_hash",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "account",
+                "path": "trader.next_nonce",
+                "account": "Trader"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_stable",
+          "docs": [
+            "Any stable token account of the user; it need not be the associated one."
+          ],
+          "writable": true
+        },
+        {
+          "name": "stable_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "side",
+          "type": {
+            "defined": {
+              "name": "Side"
+            }
+          }
+        },
+        {
+          "name": "qty_units",
+          "type": "u64"
+        },
+        {
+          "name": "limit_px",
+          "type": "u16"
+        },
+        {
+          "name": "max_fee",
+          "type": "u64"
         }
       ]
     },
@@ -608,6 +1106,19 @@
         227,
         198,
         154
+      ]
+    },
+    {
+      "name": "Order",
+      "discriminator": [
+        134,
+        173,
+        223,
+        185,
+        77,
+        86,
+        28,
+        51
       ]
     },
     {
@@ -1285,6 +1796,89 @@
           {
             "name": "close_ts",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Order",
+      "docs": [
+        "One escrowed order. PDA `[\"order\", user, nonce]`, and the authority of its escrow token",
+        "account. Closed by the instruction that fills or cancels it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "docs": [
+              "A `Side`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "kind",
+            "docs": [
+              "An `OrderKind`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "qty_units",
+            "type": "u64"
+          },
+          {
+            "name": "limit_px",
+            "docs": [
+              "Highest price of a buy, lowest price of a sell."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_fee",
+            "docs": [
+              "Micro-dollars."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "rent_payer",
+            "docs": [
+              "Receives the rent of the order and its escrow when they close."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "docs": [
+              "The trader's `next_nonce` at placement."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
           }
         ]
       }

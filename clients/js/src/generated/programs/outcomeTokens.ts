@@ -38,39 +38,54 @@ import {
 import {
   getConfigCodec,
   getMarketCodec,
+  getOrderCodec,
   getTraderCodec,
   type Config,
   type ConfigArgs,
   type Market,
   type MarketArgs,
+  type Order,
+  type OrderArgs,
   type Trader,
   type TraderArgs,
 } from "../accounts/index.js";
 import {
+  getCancelOrderInstructionAsync,
   getCreateMarketInstructionAsync,
   getCreateOutcomeMintInstructionAsync,
+  getFillBuyInstructionAsync,
   getInitializeInstructionAsync,
+  getPlaceBuyInstructionAsync,
   getRegisterTraderInstructionAsync,
   getSetConfigInstructionAsync,
   getSetMarketInstructionAsync,
   getSetPauseInstructionAsync,
+  parseCancelOrderInstruction,
   parseCreateMarketInstruction,
   parseCreateOutcomeMintInstruction,
+  parseFillBuyInstruction,
   parseInitializeInstruction,
+  parsePlaceBuyInstruction,
   parseRegisterTraderInstruction,
   parseSetConfigInstruction,
   parseSetMarketInstruction,
   parseSetPauseInstruction,
+  type CancelOrderAsyncInput,
   type CreateMarketAsyncInput,
   type CreateOutcomeMintAsyncInput,
+  type FillBuyAsyncInput,
   type InitializeAsyncInput,
+  type ParsedCancelOrderInstruction,
   type ParsedCreateMarketInstruction,
   type ParsedCreateOutcomeMintInstruction,
+  type ParsedFillBuyInstruction,
   type ParsedInitializeInstruction,
+  type ParsedPlaceBuyInstruction,
   type ParsedRegisterTraderInstruction,
   type ParsedSetConfigInstruction,
   type ParsedSetMarketInstruction,
   type ParsedSetPauseInstruction,
+  type PlaceBuyAsyncInput,
   type RegisterTraderAsyncInput,
   type SetConfigAsyncInput,
   type SetMarketAsyncInput,
@@ -78,6 +93,7 @@ import {
 } from "../instructions/index.js";
 import {
   findConfigPda,
+  findEscrowPda,
   findMarketPda,
   findMintPda,
   findTraderPda,
@@ -89,10 +105,12 @@ export const OUTCOME_TOKENS_PROGRAM_ADDRESS =
 export const OutcomeTokensAccount = {
   0: "Config",
   1: "Market",
-  2: "Trader",
+  2: "Order",
+  3: "Trader",
   Config: 0,
   Market: 1,
-  Trader: 2,
+  Order: 2,
+  Trader: 3,
 } as const;
 
 export type OutcomeTokensAccount = (typeof OutcomeTokensAccount)[Exclude<
@@ -125,6 +143,17 @@ export function identifyOutcomeTokensAccount(
     )
   ) {
     return OutcomeTokensAccount.Market;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([134, 173, 223, 185, 77, 86, 28, 51]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensAccount.Order;
   }
   if (
     containsBytes(
@@ -317,20 +346,26 @@ export function identifyOutcomeTokensEvent(
 }
 
 export const OutcomeTokensInstruction = {
-  0: "CreateMarket",
-  1: "CreateOutcomeMint",
-  2: "Initialize",
-  3: "RegisterTrader",
-  4: "SetConfig",
-  5: "SetMarket",
-  6: "SetPause",
-  CreateMarket: 0,
-  CreateOutcomeMint: 1,
-  Initialize: 2,
-  RegisterTrader: 3,
-  SetConfig: 4,
-  SetMarket: 5,
-  SetPause: 6,
+  0: "CancelOrder",
+  1: "CreateMarket",
+  2: "CreateOutcomeMint",
+  3: "FillBuy",
+  4: "Initialize",
+  5: "PlaceBuy",
+  6: "RegisterTrader",
+  7: "SetConfig",
+  8: "SetMarket",
+  9: "SetPause",
+  CancelOrder: 0,
+  CreateMarket: 1,
+  CreateOutcomeMint: 2,
+  FillBuy: 3,
+  Initialize: 4,
+  PlaceBuy: 5,
+  RegisterTrader: 6,
+  SetConfig: 7,
+  SetMarket: 8,
+  SetPause: 9,
 } as const;
 
 export type OutcomeTokensInstruction =
@@ -343,6 +378,17 @@ export function identifyOutcomeTokensInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
 ): OutcomeTokensInstruction {
   const data = "data" in instruction ? instruction.data : instruction;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([95, 129, 237, 240, 8, 49, 223, 132]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensInstruction.CancelOrder;
+  }
   if (
     containsBytes(
       data,
@@ -369,12 +415,34 @@ export function identifyOutcomeTokensInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([225, 39, 170, 172, 98, 122, 102, 8]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensInstruction.FillBuy;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([175, 175, 109, 31, 13, 152, 155, 237]),
       ),
       0,
     )
   ) {
     return OutcomeTokensInstruction.Initialize;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([2, 60, 74, 90, 120, 38, 62, 183]),
+      ),
+      0,
+    )
+  ) {
+    return OutcomeTokensInstruction.PlaceBuy;
   }
   if (
     containsBytes(
@@ -430,14 +498,23 @@ export type ParsedOutcomeTokensInstruction<
   TProgram extends string = "8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn",
 > =
   | ({
+      instructionType: typeof OutcomeTokensInstruction.CancelOrder;
+    } & ParsedCancelOrderInstruction<TProgram>)
+  | ({
       instructionType: typeof OutcomeTokensInstruction.CreateMarket;
     } & ParsedCreateMarketInstruction<TProgram>)
   | ({
       instructionType: typeof OutcomeTokensInstruction.CreateOutcomeMint;
     } & ParsedCreateOutcomeMintInstruction<TProgram>)
   | ({
+      instructionType: typeof OutcomeTokensInstruction.FillBuy;
+    } & ParsedFillBuyInstruction<TProgram>)
+  | ({
       instructionType: typeof OutcomeTokensInstruction.Initialize;
     } & ParsedInitializeInstruction<TProgram>)
+  | ({
+      instructionType: typeof OutcomeTokensInstruction.PlaceBuy;
+    } & ParsedPlaceBuyInstruction<TProgram>)
   | ({
       instructionType: typeof OutcomeTokensInstruction.RegisterTrader;
     } & ParsedRegisterTraderInstruction<TProgram>)
@@ -456,6 +533,13 @@ export function parseOutcomeTokensInstruction<TProgram extends string>(
 ): ParsedOutcomeTokensInstruction<TProgram> {
   const instructionType = identifyOutcomeTokensInstruction(instruction);
   switch (instructionType) {
+    case OutcomeTokensInstruction.CancelOrder: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OutcomeTokensInstruction.CancelOrder,
+        ...parseCancelOrderInstruction(instruction),
+      };
+    }
     case OutcomeTokensInstruction.CreateMarket: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -470,11 +554,25 @@ export function parseOutcomeTokensInstruction<TProgram extends string>(
         ...parseCreateOutcomeMintInstruction(instruction),
       };
     }
+    case OutcomeTokensInstruction.FillBuy: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OutcomeTokensInstruction.FillBuy,
+        ...parseFillBuyInstruction(instruction),
+      };
+    }
     case OutcomeTokensInstruction.Initialize: {
       assertIsInstructionWithAccounts(instruction);
       return {
         instructionType: OutcomeTokensInstruction.Initialize,
         ...parseInitializeInstruction(instruction),
+      };
+    }
+    case OutcomeTokensInstruction.PlaceBuy: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: OutcomeTokensInstruction.PlaceBuy,
+        ...parsePlaceBuyInstruction(instruction),
       };
     }
     case OutcomeTokensInstruction.RegisterTrader: {
@@ -530,11 +628,18 @@ export type OutcomeTokensPluginAccounts = {
     SelfFetchFunctions<ConfigArgs, Config>;
   market: ReturnType<typeof getMarketCodec> &
     SelfFetchFunctions<MarketArgs, Market>;
+  order: ReturnType<typeof getOrderCodec> &
+    SelfFetchFunctions<OrderArgs, Order>;
   trader: ReturnType<typeof getTraderCodec> &
     SelfFetchFunctions<TraderArgs, Trader>;
 };
 
 export type OutcomeTokensPluginInstructions = {
+  cancelOrder: (
+    input: CancelOrderAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getCancelOrderInstructionAsync> &
+    SelfPlanAndSendFunctions;
   createMarket: (
     input: MakeOptional<CreateMarketAsyncInput, "payer">,
     config?: { programAddress?: Address | HasAddress },
@@ -545,10 +650,19 @@ export type OutcomeTokensPluginInstructions = {
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getCreateOutcomeMintInstructionAsync> &
     SelfPlanAndSendFunctions;
+  fillBuy: (
+    input: FillBuyAsyncInput,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getFillBuyInstructionAsync> & SelfPlanAndSendFunctions;
   initialize: (
     input: MakeOptional<InitializeAsyncInput, "payer">,
     config?: { programAddress?: Address | HasAddress },
   ) => ReturnType<typeof getInitializeInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  placeBuy: (
+    input: MakeOptional<PlaceBuyAsyncInput, "payer">,
+    config?: { programAddress?: Address | HasAddress },
+  ) => ReturnType<typeof getPlaceBuyInstructionAsync> &
     SelfPlanAndSendFunctions;
   registerTrader: (
     input: MakeOptional<RegisterTraderAsyncInput, "payer">,
@@ -574,6 +688,7 @@ export type OutcomeTokensPluginInstructions = {
 
 export type OutcomeTokensPluginPdas = {
   config: typeof findConfigPda;
+  escrow: typeof findEscrowPda;
   market: typeof findMarketPda;
   mint: typeof findMintPda;
   trader: typeof findTraderPda;
@@ -597,9 +712,18 @@ export function outcomeTokensProgram(
         accounts: {
           config: addSelfFetchFunctions(client, getConfigCodec()),
           market: addSelfFetchFunctions(client, getMarketCodec()),
+          order: addSelfFetchFunctions(client, getOrderCodec()),
           trader: addSelfFetchFunctions(client, getTraderCodec()),
         },
         instructions: {
+          cancelOrder: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getCancelOrderInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
           createMarket: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -622,10 +746,29 @@ export function outcomeTokensProgram(
                 },
               ),
             ),
+          fillBuy: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getFillBuyInstructionAsync(input, {
+                programAddress:
+                  instructionConfig?.programAddress ?? config.programAddress,
+              }),
+            ),
           initialize: (input, instructionConfig) =>
             addSelfPlanAndSendFunctions(
               client,
               getInitializeInstructionAsync(
+                { ...input, payer: input.payer ?? client.payer },
+                {
+                  programAddress:
+                    instructionConfig?.programAddress ?? config.programAddress,
+                },
+              ),
+            ),
+          placeBuy: (input, instructionConfig) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getPlaceBuyInstructionAsync(
                 { ...input, payer: input.payer ?? client.payer },
                 {
                   programAddress:
@@ -672,6 +815,11 @@ export function outcomeTokensProgram(
         pdas: {
           config: (pdaConfig) =>
             findConfigPda({
+              programAddress:
+                pdaConfig?.programAddress ?? config.programAddress,
+            }),
+          escrow: (seeds, pdaConfig) =>
+            findEscrowPda(seeds, {
               programAddress:
                 pdaConfig?.programAddress ?? config.programAddress,
             }),
