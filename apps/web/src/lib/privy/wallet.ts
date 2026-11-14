@@ -5,7 +5,7 @@ import { useSignTransaction, useWallets, type ConnectedStandardSolanaWallet } fr
 import type { Instruction } from "@solana/kit";
 import { useCallback, useMemo } from "react";
 import { getRpc } from "@/lib/chain/rpc";
-import { sendInstructions, type SendStage } from "@/lib/chain/send";
+import { sendFixtureInstructions, sendInstructions, type SendStage } from "@/lib/chain/send";
 import { useConfig } from "@/lib/config";
 import { SIGNING_CHAIN } from "./providers";
 
@@ -55,6 +55,7 @@ export function useSendTransaction(): (request: SendRequest) => Promise<string> 
 
   return useCallback(
     async (request) => {
+      if (config.fixtures) return sendFixtureInstructions(request);
       const signer = wallet?.signer;
       if (!wallet || !signer) throw new Error("Your wallet is not connected in this tab. Log in again to reconnect it.");
       return sendInstructions({
@@ -67,6 +68,6 @@ export function useSendTransaction(): (request: SendRequest) => Promise<string> 
         sign: async (unsigned) => (await signTransaction({ transaction: unsigned, wallet: signer, chain: SIGNING_CHAIN })).signedTransaction,
       });
     },
-    [config.programId, config.rpcUrl, signTransaction, wallet],
+    [config.fixtures, config.programId, config.rpcUrl, signTransaction, wallet],
   );
 }

@@ -28,8 +28,14 @@ describe("resolveConfig", () => {
       privyAppId: "app-id",
       explorerBase: "https://explorer.solana.com",
       bootstrapped: true,
+      fixtures: false,
     });
     expect(resolved.deployment?.faucet).toBe(deployment.faucet);
+  });
+
+  it("turns fixtures mode on only for RELAYER_URL=fixtures", () => {
+    expect(resolveConfig({ ...env, RELAYER_URL: "fixtures" }, () => deployment).public.fixtures).toBe(true);
+    expect(resolveConfig({ ...env, RELAYER_URL: "http://127.0.0.1:8787" }, () => deployment).public.fixtures).toBe(false);
   });
 
   it("defaults to devnet and its public RPC", () => {

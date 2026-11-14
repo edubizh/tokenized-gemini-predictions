@@ -72,12 +72,12 @@ interface MarketSpec {
 }
 
 const MARKETS: readonly MarketSpec[] = [
-  { underlying: "BTC", name: "Bitcoin", expiresIn: 9 * MINUTE + 41 * SECOND, strike: "104,212.50", bidPx: 5_500n, askPx: 5_700n, supply: [1_250n, 400n], phase: "live" },
-  { underlying: "ETH", name: "Ether", expiresIn: 95 * SECOND, strike: "3,412.08", bidPx: 6_100n, askPx: 6_400n, supply: [300n, 0n], phase: "live" },
+  { underlying: "BTC", name: "Bitcoin", expiresIn: 9 * MINUTE + 41 * SECOND, strike: "104212.5", bidPx: 5_500n, askPx: 5_700n, supply: [1_250n, 400n], phase: "live" },
+  { underlying: "ETH", name: "Ether", expiresIn: 95 * SECOND, strike: "3412.0791666666", bidPx: 6_100n, askPx: 6_400n, supply: [300n, 0n], phase: "live" },
   { underlying: "SOL", name: "Solana", expiresIn: 9 * MINUTE + 41 * SECOND + WINDOW, strike: "", bidPx: null, askPx: null, supply: null, phase: "not_started" },
-  { underlying: "BTC", name: "Bitcoin", expiresIn: 9 * MINUTE + 41 * SECOND - WINDOW, strike: "104,180.00", bidPx: null, askPx: null, supply: [500n, 500n], phase: "awaiting_result" },
-  { underlying: "ETH", name: "Ether", expiresIn: 95 * SECOND - 2 * WINDOW, strike: "3,398.40", bidPx: null, askPx: null, supply: [800n, 200n], phase: "settled_yes", settlementValue: "3,404.11" },
-  { underlying: "SOL", name: "Solana", expiresIn: 9 * MINUTE + 41 * SECOND - 3 * WINDOW, strike: "187.32", bidPx: null, askPx: null, supply: [100n, 600n], phase: "settled_no", settlementValue: "186.95" },
+  { underlying: "BTC", name: "Bitcoin", expiresIn: 9 * MINUTE + 41 * SECOND - WINDOW, strike: "104180", bidPx: null, askPx: null, supply: [500n, 500n], phase: "awaiting_result" },
+  { underlying: "ETH", name: "Ether", expiresIn: 95 * SECOND - 2 * WINDOW, strike: "3398.4", bidPx: null, askPx: null, supply: [800n, 200n], phase: "settled_yes", settlementValue: "3404.11" },
+  { underlying: "SOL", name: "Solana", expiresIn: 9 * MINUTE + 41 * SECOND - 3 * WINDOW, strike: "187.3249583333", bidPx: null, askPx: null, supply: [100n, 600n], phase: "settled_no", settlementValue: "186.95" },
 ];
 
 function buildMarket(spec: MarketSpec, anchor: number): ApiMarket {
@@ -193,9 +193,22 @@ export interface Fixtures {
   status: ApiStatus;
 }
 
+/**
+ * A market as it stands at `nowMs`: orders close at `lastOrderAt`, and after expiry a market that
+ * was open awaits its result. Fixture markets are built at their anchor and aged with this.
+ */
+export function ageMarket(market: ApiMarket, nowMs: number): ApiMarket {
+  if (market.settleState !== "open" || market.startsAt > nowMs) return market;
+  if (nowMs >= market.expiresAt) {
+    return { ...market, venueStatus: "closed", marketState: "closed", tradable: false, notTradableReason: "market_not_open", book: null, settleState: "awaiting_result" };
+  }
+  if (market.tradable && nowMs >= market.lastOrderAt) return { ...market, tradable: false, notTradableReason: "too_close_to_expiry" };
+  return market;
+}
+
 export function buildFixtures(anchorMs: number, nowMs: number = anchorMs): Fixtures {
   const anchor = Math.floor(anchorMs / 1000) * 1000;
-  const markets = MARKETS.map((spec) => buildMarket(spec, anchor));
+  const markets = MARKETS.map((spec) => ageMarket(buildMarket(spec, anchor), nowMs));
   const orders = ORDERS.map((spec, index) => buildOrder(spec, index, markets, anchor));
 
   const health: ApiHealth = {

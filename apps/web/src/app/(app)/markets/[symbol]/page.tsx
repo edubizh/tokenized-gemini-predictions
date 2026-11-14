@@ -1,11 +1,11 @@
-import { PageHeader } from "@/components/shell/Shell";
-import { EmptyState } from "@/components/ui/EmptyState";
+import { MarketPage } from "@/features/markets/MarketPage";
 
-export default function Page() {
-  return (
-    <>
-      <PageHeader title="Market">One market: the question, the price to beat, the countdown and the order ticket.</PageHeader>
-      <EmptyState>The order ticket for this market will appear here.</EmptyState>
-    </>
-  );
+export const metadata = { title: "Market" };
+
+type Props = { params: Promise<{ symbol: string }>; searchParams: Promise<{ side?: string | string[] }> };
+
+export default async function Page({ params, searchParams }: Props) {
+  const { symbol } = await params;
+  const { side } = await searchParams;
+  return <MarketPage key={symbol} symbol={symbol} initialSide={side === "no" ? "NO" : "YES"} />;
 }

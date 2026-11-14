@@ -12,13 +12,18 @@ import { TopBar } from "./TopBar";
 import styles from "./Shell.module.css";
 
 /** Asks the faucet for a top-up and turns the answer into one plain sentence. */
-function useFaucet(): { status: FaucetStatus; request(): void } {
+export function useFaucet(): { status: FaucetStatus; request(): void } {
+  const config = useConfig();
   const account = useAccount();
   const [status, setStatus] = useState<FaucetStatus>({ kind: "idle" });
   const { getAccessToken, refresh, wallet } = account;
 
   const request = useCallback(async () => {
     if (!wallet) return;
+    if (config.fixtures) {
+      setStatus({ kind: "done", text: "Fixtures mode: balances are simulated, so nothing was sent." });
+      return;
+    }
     setStatus({ kind: "working" });
     try {
       const token = await getAccessToken();
@@ -52,7 +57,7 @@ function useFaucet(): { status: FaucetStatus; request(): void } {
     } catch {
       setStatus({ kind: "error", text: "The app server did not answer. Check your connection and retry." });
     }
-  }, [getAccessToken, refresh, wallet]);
+  }, [config.fixtures, getAccessToken, refresh, wallet]);
 
   return { status, request: () => void request() };
 }

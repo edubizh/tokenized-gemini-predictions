@@ -16,15 +16,17 @@ export interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
   helper?: string;
   /** What is wrong and what is allowed. Replaces the helper. */
   error?: string;
+  /** Something to know before going on that does not make the value invalid. Replaces the helper. */
+  warning?: string;
   /** Plain minus and plus buttons beside the control. */
   stepper?: { onDecrement(): void; onIncrement(): void; canDecrement?: boolean; canIncrement?: boolean };
 }
 
-export function Field({ label, value, onChange, numeric, prefix, suffix, helper, error, stepper, disabled, id, ...rest }: FieldProps) {
+export function Field({ label, value, onChange, numeric, prefix, suffix, helper, error, warning, stepper, disabled, id, ...rest }: FieldProps) {
   const generated = useId();
   const inputId = id ?? generated;
   const noteId = `${inputId}-note`;
-  const note = error ?? helper;
+  const note = error ?? warning ?? helper;
   const name = label.toLowerCase();
 
   return (
@@ -69,7 +71,7 @@ export function Field({ label, value, onChange, numeric, prefix, suffix, helper,
         )}
       </div>
       {note && (
-        <p id={noteId} className={error ? styles.error : styles.helper}>
+        <p id={noteId} className={error ? styles.error : warning ? styles.warning : styles.helper}>
           {(prefix || suffix) && <span className="sr-only">{`In ${suffix ?? (prefix === "$" ? "dollars" : prefix)}. `}</span>}
           {note}
         </p>

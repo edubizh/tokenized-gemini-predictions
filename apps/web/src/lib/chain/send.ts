@@ -107,3 +107,37 @@ export async function sendInstructions(options: SendOptions): Promise<string> {
   }
   return signature;
 }
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Fixtures mode: nothing is signed and nothing reaches Solana. The instructions go to the app
+ * server's simulated chain, which answers with a made-up signature after about a second.
+ */
+export async function sendFixtureInstructions(options: Pick<SendOptions, "instructions" | "onStage">): Promise<string> {
+  const { onStage } = options;
+  onStage?.("preparing");
+  await pause(150);
+  onStage?.("signing");
+  await pause(450);
+  onStage?.("sending");
+  const instructions = options.instructions.map((instruction) => ({
+    programAddress: instruction.programAddress,
+    accounts: (instruction.accounts ?? []).map((account) => ({ address: account.address, role: account.role })),
+    data: getBase64Decoder().decode(instruction.data ?? new Uint8Array()),
+  }));
+  let response: Response;
+  try {
+    response = await fetch("/api/fixtures/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ instructions }) });
+  } catch {
+    throw new TransactionError("send", "The app server did not answer. Nothing was sent.");
+  }
+  const body = (await response.json().catch(() => ({}))) as { signature?: string; programError?: string };
+  if (!response.ok || !body.signature) {
+    const name = body.programError ?? null;
+    throw new TransactionError("simulate", name ? `The program refused the transaction: ${name}.` : "The simulated chain refused the transaction.", { programError: name });
+  }
+  onStage?.("confirming");
+  await pause(400);
+  return body.signature;
+}

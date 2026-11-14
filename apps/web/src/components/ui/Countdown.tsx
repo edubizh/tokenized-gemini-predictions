@@ -21,11 +21,14 @@ export interface CountdownViewProps {
   size?: "inline" | "display";
   /** Words used when time is up. */
   closedText?: string;
+  /** Keeps the last two minutes in the ordinary colour, for deadlines that are always short. */
+  calm?: boolean;
 }
 
 /** The figure for a given time left. `Countdown` drives it from a clock. */
-export function CountdownView({ remainingMs, label, size = "inline", closedText = "closed" }: CountdownViewProps) {
-  const state = remainingMs === null ? "running" : countdownState(remainingMs);
+export function CountdownView({ remainingMs, label, size = "inline", closedText = "closed", calm }: CountdownViewProps) {
+  const timed = remainingMs === null ? "running" : countdownState(remainingMs);
+  const state = calm && timed === "closing" ? "running" : timed;
   return (
     <span className={`${styles.countdown} ${size === "display" ? styles.display : ""}`} data-state={state}>
       {/* The ticking figure is hidden from screen readers; the line below speaks on state changes. */}
@@ -34,7 +37,7 @@ export function CountdownView({ remainingMs, label, size = "inline", closedText 
           <span className={styles.note}>{closedText}</span>
         ) : (
           <>
-            <span className={styles.label}>{label}</span>
+            {label && <span className={styles.label}>{label}</span>}
             <span className={styles.time}>{remainingMs === null ? "–:––" : countdownParts(remainingMs).text}</span>
             {state === "closing" && <span className={styles.note}>closing</span>}
           </>

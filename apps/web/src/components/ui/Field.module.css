@@ -112,6 +112,7 @@
 }
 
 .helper,
+.warning,
 .error {
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
@@ -120,4 +121,8 @@
 
 .error {
   color: var(--negative);
+}
+
+.warning {
+  color: var(--caution);
 }

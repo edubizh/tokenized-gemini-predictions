@@ -13,6 +13,8 @@ export interface PublicConfig {
   explorerBase: string;
   /** False while `deployments/<cluster>.json` is missing. */
   bootstrapped: boolean;
+  /** True when `RELAYER_URL=fixtures`: the relayer and the chain are both simulated by the app server. */
+  fixtures: boolean;
 }
 
 type ExplorerTarget = Pick<PublicConfig, "cluster" | "rpcUrl" | "explorerBase">;

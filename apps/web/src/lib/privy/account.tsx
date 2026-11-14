@@ -2,8 +2,7 @@
 
 import { usePrivy } from "@privy-io/react-auth";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { fetchBalances, fetchTrader, type Balances } from "@/lib/chain/accounts";
-import { getRpc } from "@/lib/chain/rpc";
+import { getReads, type Balances } from "@/lib/chain/reads";
 import { useConfig } from "@/lib/config";
 import { usePolling } from "@/lib/polling";
 import { setSessionHint } from "./session-hint";
@@ -46,15 +45,15 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   const active = config.bootstrapped && address !== null;
   const read = useCallback(async () => {
     if (!address) throw new Error("no wallet");
-    const rpc = getRpc(config.rpcUrl);
+    const reads = getReads(config);
     // A Trader account is never closed, so it is read only until it has been seen once.
     const [registered, balances] = await Promise.all([
-      registeredFor.current === address ? true : fetchTrader(rpc, config.programId, address).then((trader) => trader !== null),
-      fetchBalances(rpc, address, config.stableMint),
+      registeredFor.current === address ? true : reads.fetchTrader(address).then((trader) => trader !== null),
+      reads.fetchBalances(address),
     ]);
     if (registered) registeredFor.current = address;
     return { address, registered, balances };
-  }, [address, config.programId, config.rpcUrl, config.stableMint]);
+  }, [address, config]);
   const polled = usePolling(read, active ? BALANCE_INTERVAL_MS : null);
   const { refresh } = polled;
 

@@ -1,0 +1,334 @@
+/* The markets list */
+.market {
+  display: grid;
+  gap: 2px;
+  padding-block: var(--space-1);
+  min-width: 0;
+}
+
+.title {
+  justify-self: start;
+  font-weight: var(--weight-semibold);
+  text-decoration-color: transparent;
+}
+
+.title:hover {
+  text-decoration-color: currentColor;
+}
+
+.statement {
+  max-width: 62ch;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+}
+
+.closes {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.clock {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.reason {
+  align-self: center;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+  text-align: right;
+}
+
+@media (max-width: 40rem) {
+  .closes {
+    justify-items: start;
+  }
+}
+
+/* The market page */
+.back {
+  display: inline-block;
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  text-decoration-color: transparent;
+}
+
+.back:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.lead {
+  max-width: 62ch;
+  margin-top: var(--space-2);
+  color: var(--ink-2);
+}
+
+/* Three facts on one ruled line: the time left, the price to beat, the price of each side. */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, auto));
+  justify-content: start;
+  margin-top: var(--space-5);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+.fact {
+  display: grid;
+  align-content: start;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-6) var(--space-4) 0;
+}
+
+.fact + .fact {
+  padding-left: var(--space-6);
+  border-left: 1px solid var(--rule);
+}
+
+.factLabel {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.factValue {
+  display: flex;
+  align-items: flex-end;
+  min-height: calc(var(--text-2xl) * var(--leading-2xl));
+  line-height: var(--leading-base);
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+.factNote {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--ink-3);
+}
+
+.pending {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
+  color: var(--ink-2);
+}
+
+.sides {
+  gap: var(--space-4);
+}
+
+.result {
+  font-family: var(--font-sans);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+}
+
+.sideWord {
+  margin-right: var(--space-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+}
+
+.yes {
+  color: var(--yes);
+}
+
+.no {
+  color: var(--no);
+}
+
+.columns {
+  display: grid;
+  gap: var(--space-7);
+  margin-top: var(--space-6);
+  align-items: start;
+}
+
+.main {
+  display: grid;
+  gap: var(--space-7);
+  min-width: 0;
+}
+
+.aside {
+  min-width: 0;
+}
+
+@media (min-width: 60rem) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr) var(--ticket-column);
+    column-gap: var(--space-8);
+  }
+
+  .aside {
+    grid-column: 2;
+    grid-row: 1;
+    position: sticky;
+    top: calc(var(--strip-height) + var(--space-5));
+  }
+}
+
+/* On a narrow screen the ticket comes first: it is the one decision on the page. */
+@media (max-width: 59.99rem) {
+  .aside {
+    order: -1;
+  }
+
+  .facts {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .fact {
+    padding-right: var(--space-4);
+  }
+
+  .fact + .fact {
+    padding-left: var(--space-4);
+  }
+
+  .fact:nth-child(3) {
+    grid-column: 1 / -1;
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid var(--rule);
+  }
+}
+
+.section h2 {
+  margin-bottom: var(--space-3);
+}
+
+.sectionNote {
+  max-width: 62ch;
+  margin-top: calc(var(--space-2) * -1);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+}
+
+/* How an order travels: three numbered lines under one rule each. */
+.how {
+  border-top: 1px solid var(--rule);
+}
+
+.how li {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr);
+  column-gap: var(--space-3);
+  padding: var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.howNumber {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
+  color: var(--ink-3);
+}
+
+.howText {
+  max-width: 62ch;
+  color: var(--ink-2);
+}
+
+.howText strong {
+  font-weight: var(--weight-medium);
+  color: var(--ink);
+}
+
+.orders {
+  border-top: 1px solid var(--rule);
+}
+
+.more {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.quantity {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
+}
+
+.positionSide {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+}
+
+.muted {
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+
+/* Shown in the ticket's place while it cannot be used. */
+.panel {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  border-bottom-style: dashed;
+  border-radius: var(--rounded-sm) var(--rounded-sm) 0 0;
+}
+
+.panelTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.panelText {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+}
+
+.working {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--rounded-full);
+  background: var(--ink);
+  animation: wait 1.4s ease-in-out infinite;
+}
+
+@keyframes wait {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .working {
+    animation: none;
+    background: transparent;
+    border: 2px solid var(--ink);
+  }
+}

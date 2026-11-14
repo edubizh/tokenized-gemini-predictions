@@ -4,8 +4,10 @@
 //   node --env-file=../../.env e2e/screens.mjs
 //
 // Writes PNG files to e2e/out/ at 1280x800 and 390x844: the landing page, the component gallery
-// (full page) and, after logging in with the test account, the welcome screen. The test login is
-// read from PRIVY_TEST_EMAIL and PRIVY_TEST_OTP and is never printed.
+// (full page) and, after logging in with the test account, the welcome screen, the markets list,
+// a market with its ticket, and an order followed from the ticket to its receipt (filled, not
+// filled, reclaimed). The order screens run only in fixtures mode, where nothing reaches a chain.
+// The test login is read from PRIVY_TEST_EMAIL and PRIVY_TEST_OTP and is never printed.
 import { chromium } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -37,6 +39,8 @@ async function settle() {
 }
 
 async function shoot(name, options = {}) {
+  // The network strip is fixed; a full-page capture of a scrolled page would draw it mid-page.
+  if (options.fullPage) await page.evaluate(() => window.scrollTo(0, 0));
   await settle();
   const file = path.join(OUT, `${name}.png`);
   await page.screenshot({ path: file, fullPage: options.fullPage ?? false });
@@ -53,6 +57,10 @@ for (const viewport of VIEWPORTS) {
   await page.goto(`${BASE}/dev/gallery`, { waitUntil: "networkidle" });
   await page.waitForSelector("#welcome");
   await shoot(`gallery-${viewport.name}`, { fullPage: true });
+  // The trading sections one by one, as the whole page is too long to read at a glance.
+  for (const id of ["relayer-notice", "markets-list", "market-header", "ticket", "ticket-panels", "order-paths", "position"]) {
+    await page.locator(`#${id}`).screenshot({ path: path.join(OUT, `gallery-${id}-${viewport.name}.png`) });
+  }
 }
 
 // 2. Keyboard focus, to check the ring.
@@ -73,22 +81,109 @@ await emailInput.press("Enter");
 await page.locator('input[name="code-0"]').waitFor({ timeout: 30_000 });
 for (let i = 0; i < 6; i++) await page.locator(`input[name="code-${i}"]`).fill(otp[i]);
 await page.waitForURL(/\/(welcome|markets)/, { timeout: 90_000 });
-await page.waitForSelector('[data-testid="welcome"]:not([data-state="loading"])', { timeout: 90_000 });
-console.log("welcome state:", await page.getAttribute('[data-testid="welcome"]', "data-state"));
+// The login dialog stays on screen for a moment after the redirect; nothing is captured under it.
+await page.waitForFunction(() => document.querySelector('[role="dialog"], #privy-dialog, #privy-modal-content') === null, null, { timeout: 60_000 });
 
-for (const viewport of VIEWPORTS) {
-  await page.setViewportSize(viewport);
-  await page.waitForTimeout(300);
-  await shoot(`welcome-${viewport.name}`, { fullPage: true });
+/** Captures the current page at both widths, returning to the wide one. */
+async function shootBoth(name, options = {}) {
+  for (const viewport of VIEWPORTS) {
+    await page.setViewportSize(viewport);
+    await page.waitForTimeout(300);
+    await shoot(`${name}-${viewport.name}`, { fullPage: true, ...options });
+  }
+  await page.setViewportSize(VIEWPORTS[0]);
 }
 
-// 4. The account menu, opened from the keyboard.
-await page.setViewportSize(VIEWPORTS[0]);
+// 4. The welcome screen. In fixtures mode the account is already a registered trader.
+await page.goto(`${BASE}/welcome`, { waitUntil: "networkidle" });
+await page.waitForSelector('[data-testid="welcome"]:not([data-state="loading"])', { timeout: 90_000 });
+console.log("welcome state:", await page.getAttribute('[data-testid="welcome"]', "data-state"));
+await shootBoth("welcome");
+
+// 5. The account menu, opened from the keyboard.
 await page.locator('header button[aria-haspopup="menu"]').focus();
 await page.keyboard.press("ArrowDown");
 await shoot("welcome-menu-1280");
+await page.keyboard.press("Escape");
 
-// 5. A returning, logged-in browser must not paint the logged-out landing page.
+// 6. Markets, and one market with its ticket. These need fixtures mode: nothing here reaches a chain.
+const fixtures = (await page.request.get(`${BASE}/api/fixtures/chain?wallet=11111111111111111111111111111111`)).status() === 200;
+if (!fixtures) {
+  console.log("not in fixtures mode: skipping the market and order screens");
+} else {
+  const openMarket = async (underlying, side) => {
+    await page.goto(`${BASE}/markets`, { waitUntil: "networkidle" });
+    const row = page.getByRole("row").filter({ hasText: `${underlying} Up` }).filter({ hasText: "YES" }).first();
+    await row.waitFor({ timeout: 30_000 });
+    if (side) await row.getByRole("link", { name: new RegExp(`^Buy ${side}`) }).click();
+    else await row.getByRole("link", { name: `${underlying} Up`, exact: true }).click();
+    await page.waitForURL(/\/markets\/.+/);
+  };
+  const ticket = page.locator('[data-testid="ticket"]');
+  const slip = page.locator('[data-testid="order-slip"]');
+  const place = async (quantity, price) => {
+    await ticket.waitFor({ timeout: 30_000 });
+    await ticket.getByLabel("Quantity", { exact: true }).fill(quantity);
+    if (price) await ticket.getByLabel("Limit price", { exact: true }).fill(price);
+    await ticket.getByRole("button", { name: /Place order/ }).click();
+  };
+
+  try {
+    await page.goto(`${BASE}/markets`, { waitUntil: "networkidle" });
+    await page.getByRole("table", { name: "Markets", exact: true }).waitFor({ timeout: 30_000 });
+    await shootBoth("markets");
+
+    await openMarket("BTC");
+    await ticket.waitFor({ timeout: 30_000 });
+    await shootBoth("market-ticket");
+
+    await openMarket("BTC", "NO");
+    await ticket.waitFor({ timeout: 30_000 });
+    await ticket.getByLabel("Quantity", { exact: true }).fill("300");
+    await shoot("market-ticket-no-warning-1280");
+
+    // An order that fills: the ticket turns into the timeline and is stamped step by step.
+    await openMarket("BTC", "YES");
+    await place("2.00");
+    await ticket.locator("button[data-busy]").waitFor({ timeout: 10_000 });
+    await shoot("order-sending-1280");
+    await slip.waitFor({ timeout: 30_000 });
+    await shoot("order-placed-1280", { fullPage: true });
+    await page.locator('[data-testid="order-slip"][data-stamp="FILLED"]').waitFor({ timeout: 30_000 });
+    await shootBoth("order-filled");
+
+    // An order below the lowest offer: not filled, refunded in full.
+    await slip.getByRole("button", { name: "Place another order" }).click();
+    await place("3.00", "0.50");
+    await page.locator('[data-testid="order-slip"][data-stamp="REFUNDED"]').waitFor({ timeout: 30_000 });
+    await shootBoth("order-refunded");
+
+    // The fixture order the relayer never sends: once expired it is reclaimed by the user.
+    const reclaim = page.getByRole("button", { name: "Reclaim hold" }).first();
+    if (await reclaim.isVisible().catch(() => false)) {
+      await shoot("order-expired-1280", { fullPage: true });
+      await reclaim.click();
+      await page.locator('[data-testid="order-entry"][data-stamp="REFUNDED"]').first().waitFor({ timeout: 30_000 });
+      await shoot("order-reclaimed-1280", { fullPage: true });
+    } else {
+      console.log("no order to reclaim on screen (not expired yet, or reclaimed earlier in this fixture cycle)");
+    }
+
+    // A live market that is not on-chain yet is prepared when its page opens.
+    await openMarket("SOL");
+    const preparing = page.getByText("Preparing this market on Solana");
+    await Promise.race([preparing.waitFor({ timeout: 30_000 }), ticket.waitFor({ timeout: 30_000 })]);
+  if (await preparing.isVisible().catch(() => false)) await shoot("market-preparing-1280");
+    await ticket.waitFor({ timeout: 30_000 });
+    await shoot("market-prepared-1280");
+  } catch (error) {
+    // What was on screen when a step failed says more than the stack does.
+    await page.screenshot({ path: path.join(OUT, "failure.png"), fullPage: true }).catch(() => {});
+    throw error;
+  }
+}
+
+// 7. A returning, logged-in browser must not paint the logged-out landing page.
 await page.goto(`${BASE}/`, { waitUntil: "commit" });
 const flashed = await page.evaluate(() => {
   const login = document.querySelector('[data-testid="login"]');

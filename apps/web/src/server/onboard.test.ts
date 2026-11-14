@@ -16,6 +16,7 @@ function config(bootstrapped: boolean): ResolvedConfig {
       privyAppId: "app",
       explorerBase: "https://explorer.solana.com",
       bootstrapped,
+      fixtures: false,
     },
     deployment: bootstrapped ? ({ cluster: "devnet", programId: WALLET, stableMint: OTHER, faucet: OTHER } as Deployment) : null,
   };

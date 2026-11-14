@@ -18,9 +18,11 @@ import { SideToggle, type Side } from "@/components/ui/SideToggle";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Stamp, STAMP_VALUES, type StampValue } from "@/components/ui/Stamp";
 import { Timeline } from "@/components/ui/Timeline";
+import { formatStrike } from "@/features/markets/wording";
 import { WelcomeView, type WelcomeState } from "@/features/onboarding/WelcomeView";
 import { formatContracts, formatDollars, formatLocalTime, formatPrice, shortAddress } from "@/lib/format";
 import { askPrices, buildFixtures, FIXTURE_USER, fixtureSignature } from "@/lib/relayer/fixtures";
+import { TRADING_SECTIONS, TradingGallery } from "./TradingGallery";
 import styles from "./Gallery.module.css";
 
 const SECTIONS = [
@@ -43,6 +45,7 @@ const SECTIONS = [
   ["account-menu", "Account menu"],
   ["footer", "Footer"],
   ["welcome", "Welcome screen"],
+  ...TRADING_SECTIONS,
 ] as const;
 
 const COLOURS = [
@@ -364,7 +367,7 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
                         <span className={styles.marketTitle}>{market.title}</span>
                       </div>,
                       market.strike ? (
-                        <span key="b" className="mono">{`$${market.strike}`}</span>
+                        <span key="b" className="mono">{formatStrike(market.strike)}</span>
                       ) : (
                         <span key="b" className={styles.pending}>
                           set at start
@@ -648,6 +651,8 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
             ))}
           </div>
         </Section>
+
+        <TradingGallery anchorMs={anchorMs} Section={Section} Specimen={Specimen} />
       </main>
     </div>
   );

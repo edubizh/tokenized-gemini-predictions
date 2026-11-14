@@ -1,12 +1,11 @@
-import { fixtureResponse } from "@/lib/relayer/fixtures";
+import { fixturesMode } from "@/lib/config.server";
+import { ENSURE_DELAY_MS, fixtureWorld } from "@/lib/fixtures/world";
 import { matchRoute } from "@/lib/relayer/proxy";
 
 export const dynamic = "force-dynamic";
 
 const DEFAULT_RELAYER_URL = "http://127.0.0.1:8787";
 const UPSTREAM_TIMEOUT_MS = 8_000;
-/** Fixture times are offsets from an anchor that moves every five minutes, so countdowns run. */
-const FIXTURE_CYCLE_MS = 5 * 60 * 1000;
 
 type Context = { params: Promise<{ path: string[] }> };
 
@@ -16,9 +15,9 @@ async function proxy(request: Request, context: Context): Promise<Response> {
   if (!route) return Response.json({ error: "not_found" }, { status: 404 });
 
   const relayerUrl = process.env.RELAYER_URL ?? DEFAULT_RELAYER_URL;
-  if (relayerUrl === "fixtures") {
-    const now = Date.now();
-    const { status, body } = fixtureResponse(route, Math.floor(now / FIXTURE_CYCLE_MS) * FIXTURE_CYCLE_MS, now);
+  if (fixturesMode()) {
+    if (route.kind === "ensure") await new Promise((resolve) => setTimeout(resolve, ENSURE_DELAY_MS));
+    const { status, body } = fixtureWorld().respond(route, Date.now());
     return Response.json(body, { status });
   }
 

@@ -288,3 +288,22 @@
   max-width: 100%;
   height: 20rem;
 }
+
+/* Trading components */
+.ticketColumn {
+  width: var(--ticket-column);
+  max-width: 100%;
+}
+
+.pathList {
+  border-top: 1px solid var(--rule);
+}
+
+.pathList > * + * {
+  margin-top: var(--space-5) !important;
+}
+
+.pathWidth {
+  max-width: 44rem;
+  border-top: 1px solid var(--rule);
+}

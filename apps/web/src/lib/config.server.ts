@@ -28,6 +28,14 @@ export interface ResolvedConfig {
   deployment: Deployment | null;
 }
 
+/** The value of `RELAYER_URL` that replaces the relayer and the chain with simulated ones. */
+export const FIXTURES = "fixtures";
+
+/** True when this server simulates the relayer and the chain. */
+export function fixturesMode(env: Record<string, string | undefined> = process.env): boolean {
+  return env.RELAYER_URL === FIXTURES;
+}
+
 const DEVNET_RPC_URL = "https://api.devnet.solana.com";
 const EXPLORER_BASE = "https://explorer.solana.com";
 const DEPLOYMENT_FIELDS = [
@@ -91,6 +99,7 @@ export function resolveConfig(
       privyAppId,
       explorerBase: EXPLORER_BASE,
       bootstrapped: deployment !== null,
+      fixtures: env.RELAYER_URL === FIXTURES,
     },
     deployment,
   };
