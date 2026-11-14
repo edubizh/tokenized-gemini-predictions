@@ -36,6 +36,44 @@
   color: var(--ink-3);
 }
 
+/* Buy and Sell, in the heading's place when the wallet holds tokens of the market. */
+.tabs {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.tab {
+  min-height: 28px;
+  padding: 0 0 var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.tab:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.tab:disabled {
+  cursor: default;
+}
+
+.fields {
+  display: grid;
+  gap: var(--space-4);
+}
+
 .balance {
   font-size: var(--text-xs);
   line-height: var(--leading-xs);

@@ -3,6 +3,7 @@
 // cluster clock. Pure: the same facts always give the same four steps.
 
 import type { ApiOrder, SideName } from "@outcome/relayer/api-types";
+import { complementPx } from "@outcome/relayer/money";
 import { formatContracts, formatDollars, formatPrice } from "@/lib/format";
 
 /** An open order as read from its account. Times are cluster seconds. */
@@ -28,6 +29,8 @@ export interface LocalOrder {
   /** Signature of the transaction that placed the order. */
   signature: string | null;
   symbol: string;
+  /** Absent in records kept before selling existed: a buy. */
+  kind?: OrderKind;
   side: SideName;
   units: string;
   limitPx: string;
@@ -39,6 +42,8 @@ export interface LocalOrder {
   /** Signature of the user's own cancel, once they have reclaimed the hold. */
   reclaimSignature?: string;
 }
+
+export type OrderKind = "buy" | "sell";
 
 export interface TimelineInput {
   /** The order account; null when it does not exist; undefined before it has been read. */
@@ -76,9 +81,12 @@ export interface DerivedTimeline {
   canReclaim: boolean;
   /** Cluster seconds. */
   expiresAt: number;
+  kind: OrderKind;
   side: SideName;
   units: bigint;
+  /** Buy: the most paid per unit. Sell: the least accepted per unit. */
   limitPx: bigint;
+  /** Buy: the test dollars held. Zero for a sell, which holds its `units` in tokens instead. */
   holdMicros: bigint;
 }
 
@@ -92,20 +100,30 @@ const REFUSALS: ReadonlyArray<[prefix: string, words: string]> = [
   ["min_proceeds", "Not sent: the relayer did not accept the order's values."],
 ];
 
+/** A sale is refused when the least it could bring would not exceed the fee cap. */
+const SELL_REFUSALS: ReadonlyArray<[prefix: string, words: string]> = [
+  ["fee_cap", "Not sent: the sale would not have covered the fee cap."],
+  ["min_proceeds", "Not sent: the sale would not have covered the fee cap."],
+];
+
 /** Why the relayer refused an order before sending it, or null when it was not such a refusal. */
-export function refusalWords(order: Pick<ApiOrder, "venueOrderId" | "detail">): string | null {
+export function refusalWords(order: Pick<ApiOrder, "venueOrderId" | "detail"> & { kind?: OrderKind }): string | null {
   if (order.venueOrderId !== null || order.detail === null) return null;
   const detail = order.detail;
-  return REFUSALS.find(([prefix]) => detail === prefix || detail.startsWith(`${prefix}:`))?.[1] ?? null;
+  const known = order.kind === "sell" ? [...SELL_REFUSALS, ...REFUSALS] : REFUSALS;
+  return known.find(([prefix]) => detail === prefix || detail.startsWith(`${prefix}:`))?.[1] ?? null;
 }
 
-/** Average fill price in px, rounded half up to a whole px. */
+/**
+ * Average fill price in px, in the order's own terms, rounded half up to a whole px. A sale is
+ * filled as a buy of the opposite outcome, so each of its fills brought the complement.
+ */
 function averagePx(order: ApiOrder): bigint | null {
   let units = 0n;
   let value = 0n;
   for (const fill of order.fills) {
     units += BigInt(fill.units);
-    value += BigInt(fill.units) * BigInt(fill.px);
+    value += BigInt(fill.units) * (order.kind === "sell" ? complementPx(BigInt(fill.px)) : BigInt(fill.px));
   }
   if (units === 0n) {
     units = BigInt(order.filledUnits);
@@ -118,17 +136,50 @@ function step(id: DerivedStep["id"], status: StepStatus, title: string, text = "
   return { id, status, title, text, detail: extra.detail ?? null, atMs: extra.atMs ?? null, signature: extra.signature ?? null };
 }
 
-const EXPIRED = "Expired. Reclaim your hold.";
-const RETURNED = "Hold returned in full.";
+/** The words that differ between an order that holds test dollars and one that holds tokens. */
+const WORDS = {
+  buy: {
+    expired: "Expired. Reclaim your hold.",
+    returned: "Hold returned in full.",
+    returning: "Returning your hold",
+    returnedTitle: "Refunded",
+    reclaimTitle: "Refund",
+    resultTitle: "Tokens minted",
+    settling: "Minting your tokens",
+    nothing: "Nothing was bought",
+    noFill: "No fill at your limit",
+    tooLate: "The venue filled this order too late to record it on Solana. No tokens were minted.",
+    reclaimLater: "You can reclaim the hold once the order expires.",
+    failed: "The relayer could not finish this order. You can reclaim the hold once it expires.",
+  },
+  sell: {
+    expired: "Expired. Reclaim your tokens.",
+    returned: "Tokens returned to your wallet.",
+    returning: "Returning your tokens",
+    returnedTitle: "Tokens returned",
+    reclaimTitle: "Return",
+    resultTitle: "Tokens burned",
+    settling: "Burning the tokens and paying you",
+    nothing: "Nothing was sold",
+    noFill: "No fill at your minimum",
+    tooLate: "The venue filled this order too late to record it on Solana. No tokens were burned.",
+    reclaimLater: "You can reclaim the tokens once the order expires.",
+    failed: "The relayer could not finish this order. You can reclaim the tokens once it expires.",
+  },
+} as const;
 
 export function deriveTimeline(input: TimelineInput): DerivedTimeline {
   const { chainOrder, apiOrder: api, local, chainNowSecs } = input;
 
+  const kind: OrderKind = api?.kind ?? (chainOrder ? (chainOrder.kind === 1 ? "sell" : "buy") : (local?.kind ?? "buy"));
+  const words = WORDS[kind];
   const side: SideName = api?.side ?? (chainOrder ? (chainOrder.side === 0 ? "YES" : "NO") : (local?.side ?? "YES"));
   const units = api ? BigInt(api.units) : (chainOrder?.qtyUnits ?? BigInt(local?.units ?? "0"));
   const limitPx = api ? BigInt(api.limitPx) : (chainOrder?.limitPx ?? BigInt(local?.limitPx ?? "0"));
   const maxFee = api ? BigInt(api.maxFeeMicros) : (chainOrder?.maxFee ?? BigInt(local?.maxFeeMicros ?? "0"));
-  const holdMicros = units * limitPx + maxFee;
+  // A buy holds test dollars; a sell holds the tokens themselves.
+  const holdMicros = kind === "buy" ? units * limitPx + maxFee : 0n;
+  const opposite: SideName = side === "YES" ? "NO" : "YES";
   const expiresAt = chainOrder?.expiresAt ?? api?.expiresAt ?? local?.expiresAt ?? 0;
   const expired = chainNowSecs > expiresAt;
   const reclaimed = local?.reclaimSignature ?? null;
@@ -144,11 +195,16 @@ export function deriveTimeline(input: TimelineInput): DerivedTimeline {
   const open = !closed;
   const canReclaim = open && expired && chainOrder != null;
 
-  const held = step("held", "done", "Held on Solana", `${formatDollars(holdMicros)} held`, { signature: local?.signature ?? null, atMs: local?.placedAt ?? api?.createdAt ?? null });
-  const sentText = `Order sent, fill-or-kill at ${limitPx > 0n ? formatPrice(limitPx) : "your limit"}`;
+  const heldText = kind === "buy" ? `${formatDollars(holdMicros)} held` : `${formatContracts(units)} ${side} tokens held`;
+  const held = step("held", "done", "Held on Solana", heldText, { signature: local?.signature ?? null, atMs: local?.placedAt ?? api?.createdAt ?? null });
+  // The relayer turns a sale into a buy of the opposite outcome at the complement of its minimum.
+  const sentText =
+    kind === "buy"
+      ? `Order sent, fill-or-kill at ${limitPx > 0n ? formatPrice(limitPx) : "your limit"}`
+      : `Order sent as a buy of ${opposite}, fill-or-kill at ${limitPx > 0n && limitPx < 10_000n ? formatPrice(complementPx(limitPx)) : "the matching price"}`;
   const sentDone = step("sent", "done", "Sent to the venue", sentText);
-  const refunded = (signature: string | null, atMs: number | null) => step("result", "done", "Refunded", RETURNED, { signature, atMs });
-  const reclaim = step("result", "current", "Refund", EXPIRED);
+  const refunded = (signature: string | null, atMs: number | null) => step("result", "done", words.returnedTitle, words.returned, { signature, atMs });
+  const reclaim = step("result", "current", words.reclaimTitle, words.expired);
   /** The last step of an order whose hold has not come back through the relayer. */
   const unresolved = (waiting: DerivedStep) => (reclaimed !== null ? refunded(reclaimed, null) : expired ? reclaim : waiting);
   const finish = (steps: [DerivedStep, DerivedStep, DerivedStep], result: DerivedStep, stamp: OrderStamp): DerivedTimeline => ({
@@ -157,6 +213,7 @@ export function deriveTimeline(input: TimelineInput): DerivedTimeline {
     open,
     canReclaim,
     expiresAt,
+    kind,
     side,
     units,
     limitPx,
@@ -166,11 +223,11 @@ export function deriveTimeline(input: TimelineInput): DerivedTimeline {
 
   /** Before the relayer has sent anything: it has not seen the order, or has only just picked it up. */
   const beforeSending = (): DerivedTimeline => {
-    const nothing = step("filled", "skipped", "Not filled", "Nothing was bought");
+    const nothing = step("filled", "skipped", "Not filled", words.nothing);
     if (closed) return finish([held, step("sent", "skipped", "Not sent", "The relayer did not send this order"), nothing], refunded(reclaimed, null), "REFUNDED");
     if (expired) return finish([held, step("sent", "skipped", "Not sent", "The relayer did not pick this order up in time"), nothing], reclaim, "EXPIRED");
     const waiting = api === null ? "Waiting for the relayer" : "The relayer has the order and is sending it";
-    return finish([held, step("sent", "current", "Sent to the venue", waiting), step("filled", "pending", "Filled")], step("result", "pending", "Tokens minted"), "OPEN");
+    return finish([held, step("sent", "current", "Sent to the venue", waiting), step("filled", "pending", "Filled")], step("result", "pending", words.resultTitle), "OPEN");
   };
   if (api === null) return beforeSending();
 
@@ -178,15 +235,16 @@ export function deriveTimeline(input: TimelineInput): DerivedTimeline {
   const venueDetail = order.venueOrderId ? `Venue order ${order.venueOrderId}` : null;
   const average = averagePx(order);
   const filledStep = step("filled", "done", "Filled", `Filled ${formatContracts(BigInt(order.filledUnits))} at ${average === null ? "your limit" : formatPrice(average)}`, { detail: venueDetail });
-  const noFill = step("filled", "skipped", "Not filled", "No fill at your limit", { detail: venueDetail });
+  const noFill = step("filled", "skipped", "Not filled", words.noFill, { detail: venueDetail });
   const refusal = refusalWords(order);
+  const pendingResult = step("result", "pending", words.resultTitle);
 
   switch (order.state) {
     case "seen":
       return beforeSending();
 
     case "submitting":
-      return finish([held, sentDone, expired ? step("filled", "skipped", "Not filled", "The venue did not answer before the order expired") : step("filled", "current", "Filled", "Waiting for the venue's answer")], unresolved(step("result", "pending", "Tokens minted")), openStamp);
+      return finish([held, sentDone, expired ? step("filled", "skipped", "Not filled", "The venue did not answer before the order expired") : step("filled", "current", "Filled", "Waiting for the venue's answer")], unresolved(pendingResult), openStamp);
 
     case "venue_unknown":
       return finish(
@@ -197,44 +255,52 @@ export function deriveTimeline(input: TimelineInput): DerivedTimeline {
             ? step("filled", "skipped", "Result unknown", "The venue did not confirm a fill before the order expired", { detail: venueDetail })
             : step("filled", "current", "Filled", "The venue has not confirmed the result. The relayer is checking.", { detail: venueDetail }),
         ],
-        unresolved(step("result", "pending", "Tokens minted")),
+        unresolved(pendingResult),
         openStamp,
       );
 
     case "venue_filled":
-      return finish([held, sentDone, filledStep], unresolved(step("result", "current", "Tokens minted", "Minting your tokens")), openStamp);
+      return finish([held, sentDone, filledStep], unresolved(step("result", "current", words.resultTitle, words.settling)), openStamp);
 
     case "venue_not_filled":
-      return finish([held, sentDone, noFill], unresolved(step("result", "current", "Refunded", "Returning your hold")), openStamp);
+      return finish([held, sentDone, noFill], unresolved(step("result", "current", words.returnedTitle, words.returning)), openStamp);
 
     case "chain_filled": {
-      const returned = holdMicros - BigInt(order.amountMicros) - BigInt(order.feeMicros);
-      const minted = `${formatContracts(BigInt(order.filledUnits))} ${side} tokens minted.`;
-      const text = returned > 0n ? `${minted} ${formatDollars(returned)} of the hold returned.` : minted;
-      return finish([held, sentDone, filledStep], step("result", "done", "Tokens minted", text, { signature: order.chainSignature, atMs: order.updatedAt }), "FILLED");
+      const filledUnits = BigInt(order.filledUnits);
+      let text: string;
+      if (kind === "buy") {
+        const returned = holdMicros - BigInt(order.amountMicros) - BigInt(order.feeMicros);
+        const minted = `${formatContracts(filledUnits)} ${side} tokens minted.`;
+        text = returned > 0n ? `${minted} ${formatDollars(returned)} of the hold returned.` : minted;
+      } else {
+        // The fee comes out of the proceeds; tokens that were not sold go back to the wallet.
+        const burned = `${formatContracts(filledUnits)} ${side} tokens burned. ${formatDollars(BigInt(order.amountMicros) - BigInt(order.feeMicros))} paid.`;
+        text = filledUnits < units ? `${burned} ${formatContracts(units - filledUnits)} returned.` : burned;
+      }
+      return finish([held, sentDone, filledStep], step("result", "done", words.resultTitle, text, { signature: order.chainSignature, atMs: order.updatedAt }), "FILLED");
     }
 
     case "chain_cancelled": {
       const result = refunded(order.chainSignature ?? reclaimed, order.updatedAt);
       if (refusal !== null || order.venueOrderId === null) {
         const why = refusal ?? "The relayer did not send this order";
-        return finish([held, step("sent", "skipped", "Not sent", why), step("filled", "skipped", "Not filled", "Nothing was bought")], result, "REFUNDED");
+        return finish([held, step("sent", "skipped", "Not sent", why), step("filled", "skipped", "Not filled", words.nothing)], result, "REFUNDED");
       }
       return finish([held, sentDone, noFill], result, "REFUNDED");
     }
 
     case "orphaned": {
-      const late = step("filled", "skipped", "Filled too late", "The venue filled this order too late to record it on Solana. No tokens were minted.", { detail: venueDetail });
-      const result = closed ? refunded(order.chainSignature ?? reclaimed, order.chainSignature ? order.updatedAt : null) : unresolved(step("result", "current", "Refunded", "You can reclaim the hold once the order expires."));
+      const late = step("filled", "skipped", "Filled too late", words.tooLate, { detail: venueDetail });
+      const result = closed ? refunded(order.chainSignature ?? reclaimed, order.chainSignature ? order.updatedAt : null) : unresolved(step("result", "current", words.returnedTitle, words.reclaimLater));
       return finish([held, sentDone, late], result, openStamp);
     }
 
     case "failed": {
       const sent = refusal !== null || order.venueOrderId === null ? step("sent", "skipped", "Not sent", refusal ?? "The relayer could not send this order") : sentDone;
-      const middle = BigInt(order.filledUnits) > 0n ? filledStep : step("filled", "skipped", "Not filled", "Nothing was bought", { detail: venueDetail });
+      const middle = BigInt(order.filledUnits) > 0n ? filledStep : step("filled", "skipped", "Not filled", words.nothing, { detail: venueDetail });
       const result = closed
         ? refunded(order.chainSignature ?? reclaimed, order.chainSignature ? order.updatedAt : null)
-        : unresolved(step("result", "current", "Refunded", "The relayer could not finish this order. You can reclaim the hold once it expires."));
+        : unresolved(step("result", "current", words.returnedTitle, words.failed));
       return finish([held, sent, middle], result, openStamp);
     }
   }

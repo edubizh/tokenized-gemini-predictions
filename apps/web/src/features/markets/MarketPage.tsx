@@ -11,9 +11,11 @@ import { useBalances, useLocalOrders, useOpenOrders, useOrders, usePositions, ty
 import { orderEntries, SETTLING_MS, type OrderEntry } from "@/features/ticket/entries";
 import type { LocalOrders } from "@/features/ticket/local-orders";
 import { OrderTimelineView } from "@/features/ticket/OrderTimeline";
+import type { TicketAction } from "@/features/ticket/intent";
 import { Ticket, type TicketDraft } from "@/features/ticket/Ticket";
 import { deriveTimeline, type LocalOrder } from "@/features/ticket/timeline";
 import { explorerTxUrl, useConfig } from "@/lib/config";
+import { useReconnect } from "@/lib/privy/use-reconnect";
 import { ensureMarket } from "@/lib/relayer/client";
 import { chainNow, useHealth, useMarket } from "./hooks";
 import { ClosedPanel, HowItWorks, isLive, MarketHeaderView, PositionView, PreparingPanel } from "./MarketViews";
@@ -57,7 +59,7 @@ function useEnsureMarket(market: ApiMarket | null | undefined, refresh: () => vo
   return { preparing: needed, failed, retry: () => symbol !== null && void run(symbol) };
 }
 
-export function MarketPage({ symbol, initialSide }: { symbol: string; initialSide: SideName }) {
+export function MarketPage({ symbol, initialSide, initialAction = "buy" }: { symbol: string; initialSide: SideName; initialAction?: TicketAction }) {
   const config = useConfig();
   const { health } = useHealth();
   const { balances } = useBalances();
@@ -68,6 +70,7 @@ export function MarketPage({ symbol, initialSide }: { symbol: string; initialSid
   const placing = usePlaceOrder();
   const reclaiming = useReclaimOrder();
   const faucet = useFaucet();
+  const reconnect = useReconnect();
   const [activeAddress, setActiveAddress] = useState<string | null>(null);
   // Drawn again when a countdown reaches zero, so what depends on the time is derived afresh.
   const [, redraw] = useReducer((count: number) => count + 1, 0);
@@ -126,6 +129,7 @@ export function MarketPage({ symbol, initialSide }: { symbol: string; initialSid
       address: entry.address,
       signature: null,
       symbol: market.symbol,
+      kind: entry.chain.kind === 1 ? "sell" : "buy",
       side: entry.chain.side === 0 ? "YES" : "NO",
       units: entry.chain.qtyUnits.toString(),
       limitPx: entry.chain.limitPx.toString(),
@@ -150,9 +154,15 @@ export function MarketPage({ symbol, initialSide }: { symbol: string; initialSid
         onReclaim: () => void reclaim(entry),
         progress: reclaiming.address === entry.address ? reclaiming.progress : null,
         error: reclaiming.address === entry.address ? reclaiming.error : null,
+        reconnect,
       }}
     />
   );
+
+  // The wallet's tokens of this market's two mints, which is what the ticket can sell.
+  const onchain = market.onchain;
+  const heldOf = (mint: string | undefined) => positions.data?.find((position) => position.mint === mint)?.units ?? 0n;
+  const held = positions.data === undefined || !onchain ? null : { YES: heldOf(onchain.yesMint), NO: heldOf(onchain.noMint) };
 
   const active = activeAddress === null ? undefined : entries.find((entry) => entry.address === activeAddress);
   const listed = entries.filter((entry) => entry.address !== active?.address);
@@ -174,7 +184,10 @@ export function MarketPage({ symbol, initialSide }: { symbol: string; initialSid
         market={market}
         health={health}
         balances={balances}
+        held={held}
         initialSide={initialSide}
+        initialAction={initialAction}
+        reconnect={reconnect}
         progress={placing.progress}
         error={placing.error}
         onSubmit={(draft) => void place(draft)}

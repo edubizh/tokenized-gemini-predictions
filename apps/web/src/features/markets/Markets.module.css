@@ -332,3 +332,12 @@
     border: 2px solid var(--ink);
   }
 }
+
+/* One sentence under the three steps: how a sale differs. */
+.howNote {
+  max-width: 62ch;
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+}

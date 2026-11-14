@@ -14,6 +14,7 @@ import { formatClock, type TimeOptions } from "@/features/markets/wording";
 import { OrderTimelineView } from "@/features/ticket/OrderTimeline";
 import type { SendProgress } from "@/features/ticket/Ticket";
 import { formatContracts, formatDollars, formatPrice, shortAddress } from "@/lib/format";
+import type { ReconnectView } from "@/lib/privy/reconnect";
 import type { ActivityRow } from "./rows";
 import styles from "./Activity.module.css";
 
@@ -31,6 +32,8 @@ export interface ActivityReclaim {
   address: string | null;
   progress: SendProgress | null;
   error: string | null;
+  /** Set while the trading wallet is not connected in this tab. */
+  reconnect?: ReconnectView | null;
   onReclaim(row: ActivityRow): void;
 }
 
@@ -59,15 +62,23 @@ function day(atMs: number, timeZone?: string): string {
 function OrderReceiptView({ row, txUrl, addressUrl }: { row: ActivityRow; txUrl(signature: string): string; addressUrl(address: string): string }) {
   const { receipt, timeline } = row;
   const symbol = row.entry.symbol ?? row.market?.symbol ?? null;
+  const sale = receipt.sale;
+  const tokens = (units: bigint) => `${formatContracts(units)} ${timeline.side}`;
+  const waiting = timeline.canReclaim ? "waiting to be reclaimed" : "still held";
+  let note: string;
+  if (sale) {
+    note =
+      sale.paidMicros === null
+        ? "The tokens stay with the program on Solana until the order fills, is cancelled, or is reclaimed."
+        : "A sale is filled as a buy of the opposite outcome. The fee comes out of the proceeds, and only when a fill is recorded on Solana.";
+  } else {
+    note =
+      receipt.returnedMicros === null
+        ? "The hold stays with the program on Solana until the order fills, is cancelled, or is reclaimed."
+        : "Amounts are in test dollars. Cost and fee are taken from the hold only when a fill is recorded on Solana.";
+  }
   return (
-    <Receipt
-      title="Order receipt"
-      note={
-        receipt.returnedMicros === null
-          ? "The hold stays with the program on Solana until the order fills, is cancelled, or is reclaimed."
-          : "Amounts are in test dollars. Cost and fee are taken from the hold only when a fill is recorded on Solana."
-      }
-    >
+    <Receipt title="Order receipt" note={note}>
       {row.title && <ReceiptLine label="Market">{row.title}</ReceiptLine>}
       <ReceiptLine label="Venue symbol">{symbol ?? "not known"}</ReceiptLine>
       <ReceiptLine label="Venue order id">{receipt.venueOrderId ?? "not sent"}</ReceiptLine>
@@ -89,14 +100,30 @@ function OrderReceiptView({ row, txUrl, addressUrl }: { row: ActivityRow; txUrl(
           </ExternalLink>
         </ReceiptLine>
       ))}
-      <ReceiptLine label="Held" total>
-        {formatDollars(receipt.heldMicros)}
-      </ReceiptLine>
-      <ReceiptLine label="Cost">{formatDollars(receipt.costMicros)}</ReceiptLine>
-      <ReceiptLine label="Fee">{formatDollars(receipt.feeMicros)}</ReceiptLine>
-      <ReceiptLine label="Hold returned" total>
-        {receipt.returnedMicros === null ? (timeline.canReclaim ? "waiting to be reclaimed" : "still held") : formatDollars(receipt.returnedMicros)}
-      </ReceiptLine>
+      {sale ? (
+        <>
+          <ReceiptLine label="Tokens held" total>
+            {tokens(sale.heldUnits)}
+          </ReceiptLine>
+          <ReceiptLine label="Proceeds">{formatDollars(sale.proceedsMicros)}</ReceiptLine>
+          <ReceiptLine label="Fee">{formatDollars(receipt.feeMicros)}</ReceiptLine>
+          <ReceiptLine label="Tokens returned">{sale.returnedUnits === null ? waiting : tokens(sale.returnedUnits)}</ReceiptLine>
+          <ReceiptLine label="Test dollars paid" total>
+            {sale.paidMicros === null ? "not yet" : formatDollars(sale.paidMicros)}
+          </ReceiptLine>
+        </>
+      ) : (
+        <>
+          <ReceiptLine label="Held" total>
+            {formatDollars(receipt.heldMicros)}
+          </ReceiptLine>
+          <ReceiptLine label="Cost">{formatDollars(receipt.costMicros)}</ReceiptLine>
+          <ReceiptLine label="Fee">{formatDollars(receipt.feeMicros)}</ReceiptLine>
+          <ReceiptLine label="Hold returned" total>
+            {receipt.returnedMicros === null ? waiting : formatDollars(receipt.returnedMicros)}
+          </ReceiptLine>
+        </>
+      )}
     </Receipt>
   );
 }
@@ -207,6 +234,7 @@ export function ActivityView({ rows, nowMs, chainNow, frozenAtMs, onExpired, rec
                         onReclaim: () => reclaim.onReclaim(row),
                         progress: reclaim.address === row.address ? reclaim.progress : null,
                         error: reclaim.address === row.address ? reclaim.error : null,
+                        reconnect: reclaim.reconnect,
                       }}
                     />
                     <div className={styles.receipt}>

@@ -109,3 +109,43 @@ describe("orderReceipt", () => {
     ]);
   });
 });
+
+describe("a sell", () => {
+  // 3.00 YES at no less than $0.55, filled as a buy of NO at $0.44: $1.68 of proceeds, $0.06 of fee.
+  const sellChain: ChainOrderView = { ...chain, kind: 1, qtyUnits: 300n, limitPx: 5_500n, maxFee: 90_000n };
+  const sellLocal: LocalOrder = { ...local, kind: "sell", units: "300", limitPx: "5500", maxFeeMicros: "90000" };
+  const sellApi = (patch: Partial<ApiOrder>) => api({ kind: "sell", units: "300", limitPx: "5500", maxFeeMicros: "90000", ...patch });
+  const sold = { ...venue, filledUnits: "300", amountMicros: "1680000", feeMicros: "60000", fills: [{ tradeId: "1", units: "300", px: "4400", feeMicros: "60000" }] };
+  const sellInput = (patch: Partial<TimelineInput>): TimelineInput => ({ chainOrder: sellChain, apiOrder: null, local: sellLocal, chainNowSecs: NOW, ...patch });
+  const sellReceipt = (patch: Partial<TimelineInput>) => {
+    const full = sellInput(patch);
+    return orderReceipt(deriveTimeline(full), full.apiOrder);
+  };
+
+  it("says what a sale gave", () => {
+    expect(outcomeWords(deriveTimeline(sellInput({ chainOrder: null, apiOrder: sellApi({ state: "chain_filled", ...sold, chainSignature: "fillSig" }) })))).toBe(
+      "Filled 3.00 at $0.56. 3.00 YES tokens burned. $1.62 paid.",
+    );
+  });
+
+  it("accounts for a filled sale in tokens held and test dollars paid", () => {
+    const filledReceipt = sellReceipt({ chainOrder: null, apiOrder: sellApi({ state: "chain_filled", ...sold, chainSignature: "fillSig" }) });
+    expect(filledReceipt).toMatchObject({
+      heldMicros: 0n,
+      feeMicros: 60_000n,
+      // The fill is shown at the price the sale brought, not the price of the opposite buy.
+      fills: [{ tradeId: "1", units: 300n, px: 5_600n, feeMicros: 60_000n }],
+      sale: { heldUnits: 300n, proceedsMicros: 1_680_000n, paidMicros: 1_620_000n, returnedUnits: 0n },
+    });
+    expect(filledReceipt.signatures.map((entry) => entry.label)).toEqual(["Held on Solana", "Tokens burned"]);
+  });
+
+  it("returns every token when nothing filled, and nothing yet while the order is open", () => {
+    expect(sellReceipt({ chainOrder: null, apiOrder: sellApi({ state: "chain_cancelled", ...venue, chainSignature: "cancelSig" }) }).sale).toEqual({ heldUnits: 300n, proceedsMicros: 0n, paidMicros: 0n, returnedUnits: 300n });
+    expect(sellReceipt({}).sale).toEqual({ heldUnits: 300n, proceedsMicros: 0n, paidMicros: null, returnedUnits: null });
+  });
+
+  it("has no sale part for a buy", () => {
+    expect(receipt({}).sale).toBeUndefined();
+  });
+});

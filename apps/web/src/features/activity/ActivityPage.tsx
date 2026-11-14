@@ -8,6 +8,7 @@ import { orderEntries, SETTLING_MS } from "@/features/ticket/entries";
 import { useLocalOrders, useOpenOrders, useOrders } from "@/features/ticket/hooks";
 import type { LocalOrder } from "@/features/ticket/timeline";
 import { explorerAddressUrl, explorerTxUrl, useConfig } from "@/lib/config";
+import { useReconnect } from "@/lib/privy/use-reconnect";
 import { ActivityView } from "./ActivityView";
 import { buildActivityRows, type ActivityRow } from "./rows";
 
@@ -17,6 +18,7 @@ export function ActivityPage() {
   const local = useLocalOrders();
   const markets = useMarkets("all");
   const reclaiming = useReclaimOrder();
+  const reconnect = useReconnect();
   // Drawn again when an order's countdown reaches zero, so its stamp and Reclaim appear on time.
   const [, redraw] = useReducer((count: number) => count + 1, 0);
 
@@ -45,6 +47,7 @@ export function ActivityPage() {
         address: row.address,
         signature: null,
         symbol: row.entry.symbol ?? row.market?.symbol ?? "",
+        kind: chain.kind === 1 ? "sell" : "buy",
         side: chain.side === 0 ? "YES" : "NO",
         units: chain.qtyUnits.toString(),
         limitPx: chain.limitPx.toString(),
@@ -67,7 +70,7 @@ export function ActivityPage() {
         nowMs={now}
         chainNow={chainNow}
         onExpired={redraw}
-        reclaim={{ address: reclaiming.address, progress: reclaiming.progress, error: reclaiming.error, onReclaim: (row) => void onReclaim(row) }}
+        reclaim={{ address: reclaiming.address, progress: reclaiming.progress, error: reclaiming.error, reconnect, onReclaim: (row) => void onReclaim(row) }}
         txUrl={(signature) => explorerTxUrl(config, signature)}
         addressUrl={(address) => explorerAddressUrl(config, address)}
       />

@@ -103,6 +103,34 @@ describe("order instructions", async () => {
     expect(placed.data).toMatchObject({ side: 1, qtyUnits: 200n, limitPx: 4_500, maxFee: 70_000n });
   });
 
+  it("builds the test-dollar account and place_sell for one transaction", async () => {
+    const { buildPlaceSell } = await import("./instructions");
+    const { parsePlaceSellInstruction } = await import("@outcome/program-client");
+    const { order, instructions } = await buildPlaceSell({ programId: program, user, stableMint, market, outcomeMint, side: "YES", units: 300n, minPx: 5_500n, maxFeeMicros: 90_000n, nonce: 17n });
+    expect(order).toBe(await findOrderAddress(program, user, 17n));
+    expect(instructions).toHaveLength(2);
+
+    // A fill pays test dollars, so the account they go to is created if it is missing.
+    const [userStable] = await findAssociatedTokenPda({ owner: user, mint: stableMint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
+    const create = instructions[0]!;
+    expect(create.accounts?.map((account) => account.address).slice(0, 4)).toEqual([user, userStable, user, stableMint]);
+    expect(create.accounts?.at(-1)?.address).toBe(TOKEN_PROGRAM_ADDRESS);
+
+    const placed = parsePlaceSellInstruction(instructions[1] as Parameters<typeof parsePlaceSellInstruction>[0]);
+    const [userOutcome] = await findAssociatedTokenPda({ owner: user, mint: outcomeMint, tokenProgram: TOKEN_2022_PROGRAM_ADDRESS });
+    expect(placed.programAddress).toBe(program);
+    expect(placed.accounts.user.address).toBe(user);
+    expect(placed.accounts.payer.address).toBe(user);
+    expect(placed.accounts.trader.address).toBe((await findTraderPda({ user }))[0]);
+    expect(placed.accounts.market.address).toBe(market);
+    expect(placed.accounts.order.address).toBe(order);
+    expect(placed.accounts.escrow.address).toBe((await findEscrowPda({ order }))[0]);
+    expect(placed.accounts.userOutcome.address).toBe(userOutcome);
+    expect(placed.accounts.outcomeMint.address).toBe(outcomeMint);
+    expect(placed.accounts.tokenProgram.address).toBe(TOKEN_2022_PROGRAM_ADDRESS);
+    expect(placed.data).toMatchObject({ side: 0, qtyUnits: 300n, minPx: 5_500, maxFee: 90_000n });
+  });
+
   it("cancels a buy back to the user's test-dollar account", async () => {
     const order = await findOrderAddress(program, user, 16n);
     const [cancel] = await buildCancelOrder({ programId: program, caller: user, order: { address: order, user, market, kind: 0, rentPayer: user }, stableMint });

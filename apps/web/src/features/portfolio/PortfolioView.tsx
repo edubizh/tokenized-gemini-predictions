@@ -17,6 +17,8 @@ import { marketHref } from "@/features/markets/MarketsList";
 import { formatClock, marketTitle, type TimeOptions } from "@/features/markets/wording";
 import type { Balances } from "@/lib/chain/reads";
 import { formatContracts, formatDollars, formatSol, shortAddress } from "@/lib/format";
+import type { ReconnectView } from "@/lib/privy/reconnect";
+import { ReconnectWords } from "@/lib/privy/ReconnectWords";
 import type { RedeemState } from "./actions";
 import { resultWords, sideStatement, type Portfolio, type PositionRow } from "./positions";
 import styles from "./Portfolio.module.css";
@@ -51,6 +53,8 @@ export interface PortfolioViewProps extends TimeOptions {
   receipts: readonly RedemptionReceipt[];
   redeeming: RedeemState;
   onRedeem(row: PositionRow): void;
+  /** Set while the trading wallet is not connected in this tab: reconnecting takes Redeem's place. */
+  reconnect?: ReconnectView | null;
   /** The wall clock the page is drawn for, unix milliseconds. */
   nowMs: number;
   /** The cluster clock, unix milliseconds: redemption opens on it. */
@@ -64,7 +68,7 @@ export interface PortfolioViewProps extends TimeOptions {
 }
 
 const TOKENS: Column = { id: "tokens", header: "Tokens", align: "right", width: "5.5rem" };
-const ACTIONS: Column = { id: "actions", header: "Actions", actions: true, width: "5.5rem" };
+const ACTIONS: Column = { id: "actions", header: "Actions", actions: true, width: "6.5rem" };
 const columns = (value: string, time: string): Column[] => [
   { id: "position", header: "Position", primary: true },
   TOKENS,
@@ -158,7 +162,7 @@ function RedemptionReceiptView({ receipt, txUrl, timeZone }: { receipt: Redempti
 }
 
 /** The wallet's test dollars and outcome tokens, grouped by where each market is in its life. */
-export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, redeeming, onRedeem, nowMs, chainNow, frozen, onDeadline, txUrl, addressUrl, timeZone }: PortfolioViewProps) {
+export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, redeeming, onRedeem, reconnect = null, nowMs, chainNow, frozen, onDeadline, txUrl, addressUrl, timeZone }: PortfolioViewProps) {
   const redeemed = new Set(receipts.map((receipt) => receipt.mint));
   const redeemable = (portfolio?.redeemable ?? []).filter((row) => !redeemed.has(row.mint));
   const winning = redeemable.filter((row) => (row.payoutMicros ?? 0n) > 0n);
@@ -227,7 +231,9 @@ export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, 
                       <span className={styles.sub}>{`pays ${formatDollars(row.fullPayoutMicros)} if ${row.side}`}</span>
                     </div>,
                     closes(row),
-                    null,
+                    <ButtonLink key="action" size="row" href={marketHref(row.market.symbol, row.side, "sell")}>
+                      Sell<span className="sr-only">{` ${title(row)}`}</span>
+                    </ButtonLink>,
                   ]}
                 />
               ))}
@@ -284,7 +290,11 @@ export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, 
                           tokens(row),
                           pays(row),
                           <Stamp key="time" value={won ? "REDEEMABLE" : "LOST"} />,
-                          won ? (
+                          reconnect ? (
+                            <Button key="action" size="row" onClick={reconnect.onReconnect} aria-label={`Reconnect wallet to ${won ? "redeem" : "clear"} ${title(row)}`}>
+                              Reconnect
+                            </Button>
+                          ) : won ? (
                             <Button key="action" size="row" onClick={() => onRedeem(row)} busy={busy(row)} aria-label={`Redeem ${title(row)}`}>
                               Redeem
                             </Button>
@@ -305,6 +315,11 @@ export function PortfolioView({ balances, portfolio, unnamed, faucet, receipts, 
                     <RedemptionReceiptView key={receipt.signature} receipt={receipt} txUrl={txUrl} timeZone={timeZone} />
                   ))}
                 </div>
+              )}
+              {reconnect && redeemable.length > 0 && (
+                <p className={styles.reconnect} role="status">
+                  <ReconnectWords reconnect={reconnect} />
+                </p>
               )}
               {redeeming.error && (
                 <div className={styles.problem}>

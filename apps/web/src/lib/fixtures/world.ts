@@ -34,6 +34,9 @@ interface SimOrder {
   user: string;
   symbol: string;
   market: string;
+  kind: "buy" | "sell";
+  /** The mint of the tokens bought or sold. */
+  mint: string;
   side: SideName;
   units: bigint;
   limitPx: bigint;
@@ -42,8 +45,10 @@ interface SimOrder {
   placedAtMs: number;
   /** Cluster seconds. */
   expiresAt: number;
-  /** The price it fills at; null when the limit is below the ask or the book is too thin. */
+  /** The price it fills at, in its own terms; null when the book does not reach its limit or is too thin. */
   fillPx: bigint | null;
+  /** Why the relayer refuses it before sending, if it does. */
+  refusal: string | null;
 }
 
 export interface PlaceInput {
@@ -54,6 +59,11 @@ export interface PlaceInput {
   units: bigint;
   limitPx: bigint;
   maxFeeMicros: bigint;
+}
+
+export interface PlaceSellInput extends PlaceInput {
+  /** The mint of the tokens being sold. */
+  outcomeMint: string;
 }
 
 export interface RedeemInput {
@@ -79,6 +89,8 @@ function simState(order: SimOrder, nowMs: number): ApiOrder["state"] | null {
   const age = nowMs - order.placedAtMs;
   if (age < SEEN_AT) return null;
   if (age < SUBMITTING_AT) return "seen";
+  // An order the relayer refuses is cancelled without ever reaching the venue.
+  if (order.refusal !== null) return "chain_cancelled";
   if (age < VENUE_AT) return "submitting";
   const filled = order.fillPx !== null;
   if (age < CHAIN_AT) return filled ? "venue_filled" : "venue_not_filled";
@@ -192,6 +204,8 @@ export class FixtureWorld {
       user: input.user,
       symbol: market.symbol,
       market: market.onchain.market,
+      kind: "buy",
+      mint: input.side === "YES" ? market.onchain.yesMint : market.onchain.noMint,
       side: input.side,
       units: input.units,
       limitPx: input.limitPx,
@@ -200,6 +214,46 @@ export class FixtureWorld {
       placedAtMs: nowMs,
       expiresAt: Math.min(Math.floor(nowMs / 1000) + ORDER_TTL_SECS, market.onchain.closeTs),
       fillPx: fills ? askPx : null,
+      refusal: null,
+    });
+  }
+
+  /**
+   * Records a `place_sell`: the tokens leave the wallet for the order's escrow. The relayer sends
+   * the sale as a buy of the opposite outcome, so it fills when the bid for its side reaches the
+   * minimum, and it is refused unsent when the least it could bring would not exceed the fee cap.
+   * Throws with a program error name when the program would refuse it.
+   */
+  placeSell(input: PlaceSellInput, nowMs: number): void {
+    const market = this.findMarket(input.market, nowMs);
+    if (!market?.onchain) throw new Error("MarketNotOpen");
+    if (input.outcomeMint !== (input.side === "YES" ? market.onchain.yesMint : market.onchain.noMint)) throw new Error("WrongMint");
+    if (market.onchain.status !== "open") throw new Error("MarketNotOpen");
+    if (nowMs >= market.lastOrderAt) throw new Error("TooCloseToClose");
+    if (input.units <= 0n) throw new Error("BadQuantity");
+    if (input.maxFeeMicros > input.units * input.limitPx) throw new Error("FeeCapTooHigh");
+    const held = BigInt(this.chain(input.user, nowMs).positions.find((position) => position.mint === input.outcomeMint)?.units ?? "0");
+    if (input.units > held) throw new Error("InsufficientFunds");
+    const bid = input.side === "YES" ? market.book?.bidPx : market.book?.askPx;
+    const bidPx = bid == null ? null : input.side === "YES" ? BigInt(bid) : complementPx(BigInt(bid));
+    const wanted = BigInt((input.side === "YES" ? market.book?.bidUnits : market.book?.askUnits) ?? "0");
+    const fills = market.tradable && bidPx !== null && input.limitPx <= bidPx && input.units <= wanted;
+    this.placed.set(input.order, {
+      address: input.order,
+      user: input.user,
+      symbol: market.symbol,
+      market: market.onchain.market,
+      kind: "sell",
+      mint: input.outcomeMint,
+      side: input.side,
+      units: input.units,
+      limitPx: input.limitPx,
+      maxFeeMicros: input.maxFeeMicros,
+      nonce: this.nextNonce(input.user),
+      placedAtMs: nowMs,
+      expiresAt: Math.min(Math.floor(nowMs / 1000) + ORDER_TTL_SECS, market.onchain.closeTs),
+      fillPx: fills ? bidPx : null,
+      refusal: input.units * input.limitPx > input.maxFeeMicros ? null : "fee_cap",
     });
   }
 
@@ -236,13 +290,16 @@ export class FixtureWorld {
     const state = simState(order, nowMs);
     if (state === null) return null;
     const filled = order.fillPx !== null && (state === "venue_filled" || state === "chain_filled");
-    const fee = filled ? takerFee(order.units, order.fillPx as bigint) : 0n;
-    const sent = state !== "seen";
+    const selling = order.kind === "sell";
+    // A sale is filled as a buy of the opposite outcome: its fills are priced at the complement.
+    const venuePx = order.fillPx === null ? null : selling ? complementPx(order.fillPx) : order.fillPx;
+    const fee = filled ? takerFee(order.units, venuePx as bigint) : 0n;
+    const sent = state !== "seen" && order.refusal === null;
     return {
       address: order.address,
       user: order.user,
       symbol: order.symbol,
-      kind: "buy",
+      kind: order.kind,
       side: order.side,
       units: order.units.toString(),
       limitPx: order.limitPx.toString(),
@@ -253,9 +310,9 @@ export class FixtureWorld {
       filledUnits: filled ? order.units.toString() : "0",
       amountMicros: filled ? cost(order.units, order.fillPx as bigint).toString() : "0",
       feeMicros: fee.toString(),
-      fills: filled ? [{ tradeId: `28417301${order.nonce}`, units: order.units.toString(), px: (order.fillPx as bigint).toString(), feeMicros: fee.toString() }] : [],
+      fills: filled ? [{ tradeId: `28417301${order.nonce}`, units: order.units.toString(), px: (venuePx as bigint).toString(), feeMicros: fee.toString() }] : [],
       chainSignature: state === "chain_filled" || state === "chain_cancelled" ? fixtureSignature(`settle:${order.address}`) : null,
-      detail: state === "venue_not_filled" || state === "chain_cancelled" ? "no offers at or below the limit" : null,
+      detail: order.refusal ?? (state === "venue_not_filled" || state === "chain_cancelled" ? (selling ? "no bids at or above the minimum" : "no offers at or below the limit") : null),
       createdAt: order.placedAtMs + SEEN_AT,
       updatedAt: order.placedAtMs + Math.min(nowMs - order.placedAtMs, CHAIN_AT),
     };
@@ -298,6 +355,31 @@ export class FixtureWorld {
     for (const order of this.placed.values()) {
       if (order.user !== wallet) continue;
       const state = simState(order, nowMs);
+      if (order.kind === "sell") {
+        const price = order.fillPx as bigint;
+        if (state === "chain_filled") {
+          // Burned, and the proceeds less the fee paid in test dollars.
+          add(order.mint, -order.units);
+          stable += cost(order.units, price) - takerFee(order.units, complementPx(price));
+        } else if (state !== "chain_cancelled" && !this.wasCancelled(order.address, order.placedAtMs)) {
+          // Held in the order's escrow until it fills, is cancelled or is reclaimed.
+          add(order.mint, -order.units);
+          openOrders.push({
+            address: order.address,
+            user: order.user,
+            market: order.market,
+            side: order.side === "YES" ? 0 : 1,
+            kind: 1,
+            qtyUnits: order.units.toString(),
+            limitPx: order.limitPx.toString(),
+            maxFee: order.maxFeeMicros.toString(),
+            expiresAt: order.expiresAt,
+            rentPayer: order.user,
+            nonce: order.nonce.toString(),
+          });
+        }
+        continue;
+      }
       const hold = order.units * order.limitPx + order.maxFeeMicros;
       if (state === "chain_filled") {
         const price = order.fillPx as bigint;
@@ -400,5 +482,9 @@ export function fixtureWorld(): FixtureWorld {
   holder.__outcomeFixtureState ??= emptyState();
   // A state kept across a reload of this module may predate a field.
   holder.__outcomeFixtureState.redemptions ??= [];
+  for (const order of holder.__outcomeFixtureState.placed.values()) {
+    order.kind ??= "buy";
+    order.refusal ??= null;
+  }
   return new FixtureWorld(holder.__outcomeFixtureState);
 }

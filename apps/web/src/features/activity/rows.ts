@@ -30,7 +30,7 @@ export function buildActivityRows(entries: readonly OrderEntry[], markets: reado
       entry,
       market,
       title: market ? marketTitle(market) : null,
-      kind: entry.api?.kind ?? (entry.chain?.kind === 1 ? "sell" : "buy"),
+      kind: timeline.kind,
       timeline,
       words: outcomeWords(timeline),
       receipt: orderReceipt(timeline, entry.api),

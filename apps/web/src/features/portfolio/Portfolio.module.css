@@ -261,3 +261,11 @@
 .problem {
   margin-top: var(--space-4);
 }
+
+/* Under the redeemable rows while the wallet has to be reconnected before anything can be signed. */
+.reconnect {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+}

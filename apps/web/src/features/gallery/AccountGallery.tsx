@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { ApiMarket, ApiStatus } from "@outcome/relayer/api-types";
+import type { ApiMarket, ApiOrder, ApiStatus } from "@outcome/relayer/api-types";
 import { ActivityView } from "@/features/activity/ActivityView";
 import { buildActivityRows } from "@/features/activity/rows";
 import { PortfolioView, type PortfolioViewProps, type RedemptionReceipt } from "@/features/portfolio/PortfolioView";
@@ -89,13 +89,33 @@ export function AccountGallery({ anchorMs, Section, Specimen }: { anchorMs: numb
   const local: Record<string, LocalOrder> = Object.fromEntries(
     fixtures.orders.map((order) => [
       order.address,
-      { address: order.address, signature: fixtureSignature(`gallery-place:${order.address}`), symbol: order.symbol, side: order.side, units: order.units, limitPx: order.limitPx, maxFeeMicros: order.maxFeeMicros, placedAt: order.createdAt - 1_200, expiresAt: order.expiresAt },
+      { address: order.address, signature: fixtureSignature(`gallery-place:${order.address}`), symbol: order.symbol, kind: order.kind, side: order.side, units: order.units, limitPx: order.limitPx, maxFeeMicros: order.maxFeeMicros, placedAt: order.createdAt - 1_200, expiresAt: order.expiresAt },
     ]),
   );
   const rows = buildActivityRows(orderEntries({ api: fixtures.orders, open: { orders: open, startedAt: anchorMs }, local, nowMs: anchorMs }), markets, later);
   const filled = fixtures.orders.find((order) => order.state === "chain_filled")?.address ?? "";
   const expired = fixtures.orders.find((order) => order.state === "venue_unknown")?.address ?? "";
   const refunded = fixtures.orders.find((order) => order.state === "chain_cancelled")?.address ?? "";
+  // A sale of 2.00 YES at no less than $0.54, filled as a buy of NO at $0.45: $1.10, less a 4 cent fee.
+  const sold = fixtureAddress("gallery-sold");
+  const soldAt = anchorMs - 11 * 60_000;
+  const sale: ApiOrder = {
+    ...(fixtures.orders.find((order) => order.state === "chain_filled") as ApiOrder),
+    address: sold,
+    kind: "sell",
+    units: "200",
+    limitPx: "5400",
+    maxFeeMicros: "70000",
+    filledUnits: "200",
+    amountMicros: "1100000",
+    feeMicros: "40000",
+    fills: [{ tradeId: "2841730099", units: "200", px: "4500", feeMicros: "40000" }],
+    chainSignature: fixtureSignature("gallery-sold"),
+    expiresAt: Math.floor(soldAt / 1000) + 45,
+    createdAt: soldAt,
+    updatedAt: soldAt + 3_000,
+  };
+  const saleRows = buildActivityRows(orderEntries({ api: [sale], open: { orders: [], startedAt: anchorMs }, local: {}, nowMs: anchorMs }), markets, later);
   const activity = (shown: typeof rows | null, expanded: string[] = [], failed?: string) => (
     <div className={styles.screen}>
       <ActivityView
@@ -141,6 +161,9 @@ export function AccountGallery({ anchorMs, Section, Specimen }: { anchorMs: numb
         <Specimen label="After a redemption and a clear: receipts in the rows' place" wide>
           {portfolio({ balances: { lamports: 49_990_000n, stableMicros: 999_100_000n }, portfolio: portfolioOf(held.slice(0, 5)), receipts })}
         </Specimen>
+        <Specimen label="Wallet not connected in this tab: Reconnect in place of Redeem and Clear" wide>
+          {portfolio({ portfolio: portfolioOf(held.slice(3, 5)), reconnect: { onReconnect: () => {}, problem: null } })}
+        </Specimen>
         <Specimen label="The redemption was refused" wide>
           {portfolio({
             portfolio: portfolioOf(held.slice(3, 5)),
@@ -177,6 +200,9 @@ export function AccountGallery({ anchorMs, Section, Specimen }: { anchorMs: numb
             rows.filter((row) => [filled, refunded, expired].includes(row.address)),
             [filled, refunded, expired],
           )}
+        </Specimen>
+        <Specimen label="Opened: a sale, with tokens held and test dollars paid" wide>
+          {activity(saleRows, [sold])}
         </Specimen>
         <Specimen label="Reclaim failed" wide>
           {activity(

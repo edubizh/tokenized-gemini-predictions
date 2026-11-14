@@ -88,3 +88,74 @@ describe("the simulated relayer: markets", () => {
     expect(new Set(all.map((market) => market.symbol)).size).toBe(all.length);
   });
 });
+
+describe("the simulated chain and relayer: place_sell", () => {
+  const ORDER = fixtureAddress("world-test-sell");
+  const sellInput = (live: ApiMarket, patch: Partial<Parameters<FixtureWorld["placeSell"]>[0]> = {}) => ({
+    user: WALLET,
+    market: live.onchain!.market,
+    order: ORDER,
+    outcomeMint: live.onchain!.yesMint,
+    side: "YES" as const,
+    units: 300n,
+    limitPx: 5_500n,
+    maxFeeMicros: 90_000n,
+    ...patch,
+  });
+  const order = (world: FixtureWorld, nowMs: number) => world.orders(WALLET, nowMs).find((entry) => entry.address === ORDER);
+
+  it("holds the tokens in an open sell order", () => {
+    const { world, live } = setup();
+    expect(held(world, live.onchain!.yesMint)).toBe("300");
+    world.placeSell(sellInput(live), NOW);
+    expect(held(world, live.onchain!.yesMint)).toBe("0");
+    expect(stable(world)).toBe(1_000_000_000n);
+    expect(world.chain(WALLET, NOW).openOrders.find((entry) => entry.address === ORDER)).toMatchObject({ kind: 1, side: 0, qtyUnits: "300", limitPx: "5500", maxFee: "90000" });
+  });
+
+  it("fills a sale at or below the bid: tokens burned, proceeds less the fee paid", () => {
+    const { world, live } = setup();
+    world.placeSell(sellInput(live), NOW);
+    const later = NOW + 6_000;
+    // Sold at the $0.55 bid: $1.65, less a fee of 6 cents.
+    expect(order(world, later)).toMatchObject({ kind: "sell", state: "chain_filled", filledUnits: "300", amountMicros: "1650000", feeMicros: "60000", fills: [{ units: "300", px: "4500" }] });
+    expect(held(world, live.onchain!.yesMint, later)).toBe("0");
+    expect(stable(world, later)).toBe(1_001_590_000n);
+    expect(world.chain(WALLET, later).openOrders.some((entry) => entry.address === ORDER)).toBe(false);
+  });
+
+  it("does not fill a sale above the bid, and returns the tokens", () => {
+    const { world, live } = setup();
+    world.placeSell(sellInput(live, { limitPx: 5_600n }), NOW);
+    expect(order(world, NOW + 4_000)).toMatchObject({ state: "venue_not_filled", filledUnits: "0" });
+    expect(held(world, live.onchain!.yesMint, NOW + 4_000)).toBe("0");
+    const later = NOW + 6_000;
+    expect(order(world, later)).toMatchObject({ kind: "sell", state: "chain_cancelled", amountMicros: "0", fills: [] });
+    expect(held(world, live.onchain!.yesMint, later)).toBe("300");
+    expect(stable(world, later)).toBe(1_000_000_000n);
+  });
+
+  it("is refused by the relayer when the minimum proceeds do not exceed the fee cap", () => {
+    const { world, live } = setup();
+    world.placeSell(sellInput(live, { limitPx: 300n, maxFeeMicros: 90_000n }), NOW);
+    expect(order(world, NOW + 6_000)).toMatchObject({ state: "chain_cancelled", venueOrderId: null, detail: "fee_cap" });
+    expect(held(world, live.onchain!.yesMint, NOW + 6_000)).toBe("300");
+  });
+
+  it("returns the tokens when the user reclaims the order", () => {
+    const { world, live } = setup();
+    world.placeSell(sellInput(live, { limitPx: 5_600n }), NOW);
+    world.cancel(ORDER, NOW + 1_000);
+    expect(held(world, live.onchain!.yesMint, NOW + 1_000)).toBe("300");
+    expect(world.chain(WALLET, NOW + 1_000).openOrders.some((entry) => entry.address === ORDER)).toBe(false);
+  });
+
+  it("refuses as the program would", () => {
+    const { world, live, won } = setup();
+    expect(() => world.placeSell(sellInput(live, { units: 301n }), NOW)).toThrow("InsufficientFunds");
+    expect(() => world.placeSell(sellInput(live, { maxFeeMicros: 1_650_001n }), NOW)).toThrow("FeeCapTooHigh");
+    expect(() => world.placeSell(sellInput(live, { outcomeMint: won.onchain!.yesMint }), NOW)).toThrow("WrongMint");
+    expect(() => world.placeSell(sellInput(won, { outcomeMint: won.onchain!.yesMint }), NOW)).toThrow("MarketNotOpen");
+    expect(held(world, live.onchain!.yesMint)).toBe("300");
+  });
+});

@@ -2,7 +2,7 @@
 // relayer's markets, and grouped by where each market is in its life. Pure.
 
 import type { ApiMarket, SideName } from "@outcome/relayer/api-types";
-import { complementPx } from "@outcome/relayer/money";
+import { bidPx } from "@/features/markets/book";
 import { formatClock, formatStrike, payoutStatement, type TimeOptions } from "@/features/markets/wording";
 import { formatPrice } from "@/lib/format";
 
@@ -53,13 +53,6 @@ export interface PortfolioClock {
   wallMs: number;
   /** The cluster clock, unix seconds: redemption opens on it. */
   chainSecs: number;
-}
-
-/** The best bid for one side in px: the YES bid, or the complement of the YES ask for NO. */
-function bidPx(market: Pick<ApiMarket, "book">, side: SideName): bigint | null {
-  const raw = side === "YES" ? market.book?.bidPx : market.book?.askPx;
-  if (raw === null || raw === undefined) return null;
-  return side === "YES" ? BigInt(raw) : complementPx(BigInt(raw));
 }
 
 function rowFor(balance: TokenBalance, market: ApiMarket, side: SideName, clock: PortfolioClock): PositionRow {

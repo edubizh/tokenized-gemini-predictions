@@ -10,6 +10,8 @@ import { AccountProvider } from "./account";
 /** The login provider is always given the devnet chain id; the wallet only signs. */
 export const SIGNING_CHAIN = "solana:devnet" as const;
 
+// Auto-connect stays off: tried with it on, a wallet that was connected before a page reload did
+// not come back by itself, so the app offers Reconnect wallet wherever a signature is needed.
 const solanaConnectors = toSolanaWalletConnectors({ shouldAutoConnect: false });
 
 function subscriptionsUrl(rpcUrl: string): string {

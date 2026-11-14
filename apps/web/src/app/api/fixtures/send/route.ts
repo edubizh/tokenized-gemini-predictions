@@ -4,6 +4,7 @@ import {
   OutcomeTokensInstruction,
   parseCancelOrderInstruction,
   parsePlaceBuyInstruction,
+  parsePlaceSellInstruction,
   parseRedeemInstruction,
   Side,
 } from "@outcome/program-client";
@@ -44,6 +45,23 @@ export async function POST(request: Request): Promise<Response> {
               side: data.side === Side.Yes ? "YES" : "NO",
               units: data.qtyUnits,
               limitPx: BigInt(data.limitPx),
+              maxFeeMicros: data.maxFee,
+            },
+            now,
+          );
+          break;
+        }
+        case OutcomeTokensInstruction.PlaceSell: {
+          const { accounts, data } = parsePlaceSellInstruction(instruction);
+          world.placeSell(
+            {
+              user: accounts.user.address,
+              market: accounts.market.address,
+              order: accounts.order.address,
+              outcomeMint: accounts.outcomeMint.address,
+              side: data.side === Side.Yes ? "YES" : "NO",
+              units: data.qtyUnits,
+              limitPx: BigInt(data.minPx),
               maxFeeMicros: data.maxFee,
             },
             now,

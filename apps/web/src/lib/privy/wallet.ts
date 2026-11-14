@@ -57,7 +57,7 @@ export function useSendTransaction(): (request: SendRequest) => Promise<string> 
     async (request) => {
       if (config.fixtures) return sendFixtureInstructions(request);
       const signer = wallet?.signer;
-      if (!wallet || !signer) throw new Error("Your wallet is not connected in this tab. Log in again to reconnect it.");
+      if (!wallet || !signer) throw new Error("Your wallet is not connected in this tab. Reconnect it, then try again.");
       return sendInstructions({
         rpc: getRpc(config.rpcUrl),
         programId: config.programId,

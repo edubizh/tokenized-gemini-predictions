@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import type { ApiMarket } from "@outcome/relayer/api-types";
 import { TransactionError } from "@/lib/chain/errors";
-import { buildCancelOrder, buildPlaceBuy, PLACE_ORDER_COMPUTE_UNITS } from "@/lib/chain/instructions";
+import { buildCancelOrder, buildPlaceBuy, buildPlaceSell, PLACE_ORDER_COMPUTE_UNITS } from "@/lib/chain/instructions";
 import { getReads, type OpenOrder } from "@/lib/chain/reads";
 import type { SendStage } from "@/lib/chain/send";
 import { clock } from "@/lib/clock";
@@ -23,6 +23,7 @@ const PROGRAM_ERRORS: Record<string, string> = {
   BadPrice: "The program does not accept this price. Nothing was held.",
   OffTick: "The price is not on the market's tick. Nothing was held.",
   FeeCapTooHigh: "The fee cap is above what the program allows. Nothing was held.",
+  InsufficientFunds: "The wallet does not hold enough for this order. Nothing was held.",
   OrderNotExpired: "The order has not expired yet, so it cannot be reclaimed. Wait for the countdown.",
 };
 
@@ -48,7 +49,10 @@ export interface PlaceOrder {
   clearError(): void;
 }
 
-/** Places a buy: the outcome token account if it is missing, then `place_buy`, in one transaction. */
+/**
+ * Places an order in one transaction. A buy: the outcome token account if it is missing, then
+ * `place_buy`. A sale: the test-dollar account if it is missing, then `place_sell`.
+ */
 export function usePlaceOrder(): PlaceOrder {
   const config = useConfig();
   const account = useAccount();
@@ -67,7 +71,7 @@ export function usePlaceOrder(): PlaceOrder {
         // The nonce decides the order's address, so it is read at click time.
         const trader = await getReads(config).fetchTrader(wallet);
         if (!trader) throw new Error("This wallet is not registered yet. Use Get test funds on the welcome page first.");
-        const { order, instructions } = await buildPlaceBuy({
+        const common = {
           programId: config.programId,
           user: wallet,
           stableMint: config.stableMint,
@@ -75,16 +79,17 @@ export function usePlaceOrder(): PlaceOrder {
           outcomeMint: draft.side === "YES" ? market.onchain.yesMint : market.onchain.noMint,
           side: draft.side,
           units: draft.units,
-          limitPx: draft.limitPx,
           maxFeeMicros: draft.maxFeeMicros,
           nonce: trader.nextNonce,
-        });
+        };
+        const { order, instructions } = draft.action === "sell" ? await buildPlaceSell({ ...common, minPx: draft.limitPx }) : await buildPlaceBuy({ ...common, limitPx: draft.limitPx });
         const signature = await send({ instructions, computeUnitLimit: PLACE_ORDER_COMPUTE_UNITS, onStage: (stage) => setProgress(progressOf(stage)) });
         refresh();
         return {
           address: order,
           signature,
           symbol: market.symbol,
+          kind: draft.action,
           side: draft.side,
           units: draft.units.toString(),
           limitPx: draft.limitPx.toString(),

@@ -26,3 +26,24 @@ export function availableAt(market: Booked, side: SideName, limitPx: bigint): bi
   if (ask === null || limitPx < ask) return 0n;
   return askUnits(market, side);
 }
+
+/** The best bid for one side in px: the YES bid, or the complement of the YES ask for NO. Null when nobody bids. */
+export function bidPx(market: Booked, side: SideName): bigint | null {
+  const raw = side === "YES" ? market.book?.bidPx : market.book?.askPx;
+  if (raw === null || raw === undefined) return null;
+  return side === "YES" ? BigInt(raw) : complementPx(BigInt(raw));
+}
+
+/** Units wanted at the bid of a side. */
+export function bidUnits(market: Booked, side: SideName): bigint {
+  const raw = side === "YES" ? market.book?.bidUnits : market.book?.askUnits;
+  return BigInt(raw ?? "0");
+}
+
+/** Units a sale with this minimum could give up now: zero above the bid. Null when there is no book. */
+export function wantedAt(market: Booked, side: SideName, minPx: bigint): bigint | null {
+  if (!market.book) return null;
+  const bid = bidPx(market, side);
+  if (bid === null || minPx > bid) return 0n;
+  return bidUnits(market, side);
+}

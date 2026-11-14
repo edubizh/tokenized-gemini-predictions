@@ -130,6 +130,9 @@ export function HowItWorks() {
           </p>
         </li>
       </ol>
+      <p className={styles.howNote}>
+        Selling runs the same three steps with the tokens as the hold: the relayer buys the opposite outcome at the matching price, a fill burns your tokens and pays test dollars, and no fill returns the tokens.
+      </p>
     </section>
   );
 }

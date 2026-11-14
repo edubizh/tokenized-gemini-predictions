@@ -171,3 +171,71 @@ describe("deriveTimeline", () => {
     expect(t.steps[0]).toMatchObject({ text: "$1.70 held", signature: null });
   });
 });
+
+describe("deriveTimeline for a sell", () => {
+  // 3.00 YES at no less than $0.55: the venue order is a buy of NO at $0.45, fee cap $0.09.
+  const sellChain: ChainOrderView = { ...chain, kind: 1, qtyUnits: 300n, limitPx: 5_500n, maxFee: 90_000n };
+  const sellLocal: LocalOrder = { ...local, kind: "sell", units: "300", limitPx: "5500", maxFeeMicros: "90000" };
+  const sellApi = (patch: Partial<ApiOrder>) => api({ kind: "sell", units: "300", limitPx: "5500", maxFeeMicros: "90000", ...patch });
+  // Filled as a buy of NO at $0.44, so the sale brought $0.56 a contract.
+  const sold = { venueOrderId: "73615284000001117", filledUnits: "300", amountMicros: "1680000", feeMicros: "60000", fills: [{ tradeId: "1", units: "300", px: "4400", feeMicros: "60000" }] };
+  const sell = (patch: Partial<TimelineInput>) => deriveTimeline({ chainOrder: sellChain, apiOrder: null, local: sellLocal, chainNowSecs: NOW, ...patch });
+
+  it("holds tokens, not test dollars", () => {
+    const t = sell({ chainOrder: undefined });
+    expect(t.steps[0]).toMatchObject({ status: "done", title: "Held on Solana", text: "3.00 YES tokens held", signature: PLACE_SIG });
+    expect(t.steps[3]).toMatchObject({ status: "pending", title: "Tokens burned" });
+    expect(t).toMatchObject({ kind: "sell", side: "YES", units: 300n, limitPx: 5_500n, holdMicros: 0n, stamp: "OPEN" });
+    expect(derive({}).kind).toBe("buy");
+  });
+
+  it("says the venue order is a buy of the opposite outcome at the complement", () => {
+    expect(shape(sell({ apiOrder: sellApi({ state: "submitting", venueOrderId: "7" }) }))).toEqual([
+      "done:3.00 YES tokens held",
+      "done:Order sent as a buy of NO, fill-or-kill at $0.45",
+      "current:Waiting for the venue's answer",
+      "pending:",
+    ]);
+  });
+
+  it("reports the fill at the price the sale brought", () => {
+    const t = sell({ apiOrder: sellApi({ state: "venue_filled", ...sold }) });
+    expect(t.steps[2]).toMatchObject({ status: "done", text: "Filled 3.00 at $0.56", detail: "Venue order 73615284000001117" });
+    expect(t.steps[3]).toMatchObject({ status: "current", title: "Tokens burned", text: "Burning the tokens and paying you" });
+  });
+
+  it("ends a fill with the tokens burned and the test dollars paid", () => {
+    const t = sell({ chainOrder: null, apiOrder: sellApi({ state: "chain_filled", ...sold, chainSignature: "fillSig" }) });
+    expect(t.steps[3]).toMatchObject({ status: "done", title: "Tokens burned", text: "3.00 YES tokens burned. $1.62 paid.", signature: "fillSig" });
+    expect(t).toMatchObject({ stamp: "FILLED", open: false });
+  });
+
+  it("returns the tokens when nothing filled", () => {
+    const waiting = sell({ apiOrder: sellApi({ state: "venue_not_filled", venueOrderId: "7" }) });
+    expect(waiting.steps[2]).toMatchObject({ status: "skipped", text: "No fill at your minimum" });
+    expect(waiting.steps[3]).toMatchObject({ status: "current", title: "Tokens returned", text: "Returning your tokens" });
+    const done = sell({ chainOrder: null, apiOrder: sellApi({ state: "chain_cancelled", venueOrderId: "7", chainSignature: "cancelSig" }) });
+    expect(done.steps[3]).toMatchObject({ status: "done", title: "Tokens returned", text: "Tokens returned to your wallet.", signature: "cancelSig" });
+    expect(done).toMatchObject({ stamp: "REFUNDED", open: false });
+  });
+
+  it.each(["fee_cap", "min_proceeds"])("says a sale was refused because it could not cover the fee cap (%s)", (detail) => {
+    const t = sell({ chainOrder: null, apiOrder: sellApi({ state: "chain_cancelled", detail, chainSignature: "cancelSig" }) });
+    expect(t.steps[1]).toMatchObject({ status: "skipped", title: "Not sent", text: "Not sent: the sale would not have covered the fee cap." });
+    expect(t.steps[2]).toMatchObject({ status: "skipped", text: "Nothing was sold" });
+    expect(t.steps[3]?.text).toBe("Tokens returned to your wallet.");
+  });
+
+  it("offers to reclaim the tokens of an expired sell, and shows the reclaim", () => {
+    const expired = sell({ chainNowSecs: EXPIRES + 1 });
+    expect(expired.steps[3]).toMatchObject({ status: "current", title: "Return", text: "Expired. Reclaim your tokens." });
+    expect(expired).toMatchObject({ stamp: "EXPIRED", canReclaim: true });
+    const reclaimed = sell({ chainOrder: null, chainNowSecs: EXPIRES + 30, local: { ...sellLocal, reclaimSignature: "reclaimSig" } });
+    expect(reclaimed.steps[3]).toMatchObject({ status: "done", title: "Tokens returned", text: "Tokens returned to your wallet.", signature: "reclaimSig" });
+  });
+
+  it("knows a sell from the order account or the relayer alone", () => {
+    expect(sell({ local: null }).kind).toBe("sell");
+    expect(sell({ local: null, chainOrder: undefined, apiOrder: sellApi({ state: "seen" }) }).steps[0]?.text).toBe("3.00 YES tokens held");
+  });
+});

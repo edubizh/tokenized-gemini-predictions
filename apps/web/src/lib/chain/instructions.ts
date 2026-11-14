@@ -10,7 +10,7 @@ import {
 } from "@solana/kit";
 import { findAssociatedTokenPda, getCreateAssociatedTokenIdempotentInstructionAsync, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-import { getCancelOrderInstructionAsync, getPlaceBuyInstructionAsync, getRedeemInstructionAsync, Side } from "@outcome/program-client";
+import { getCancelOrderInstructionAsync, getPlaceBuyInstructionAsync, getPlaceSellInstructionAsync, getRedeemInstructionAsync, Side } from "@outcome/program-client";
 
 export const COMPUTE_BUDGET_PROGRAM_ADDRESS: Address = address("ComputeBudget111111111111111111111111111111");
 
@@ -93,6 +93,65 @@ export async function buildPlaceBuy(input: PlaceBuyInput): Promise<{ order: Addr
     { programAddress },
   );
   return { order, instructions: [createOutcomeAccount, placeBuy] };
+}
+
+export interface PlaceSellInput {
+  programId: string;
+  /** The trading wallet: signer, fee payer and rent payer. */
+  user: string;
+  stableMint: string;
+  /** The on-chain market account. */
+  market: string;
+  /** The market's mint for the side being sold. */
+  outcomeMint: string;
+  side: "YES" | "NO";
+  units: bigint;
+  /** The least accepted per unit. */
+  minPx: bigint;
+  maxFeeMicros: bigint;
+  /** The trader's `next_nonce`, read at click time. */
+  nonce: bigint;
+}
+
+/**
+ * One transaction's worth of instructions for a sale: the user's test-dollar account (created if
+ * missing, so a fill has somewhere to pay), then `place_sell`, which moves the tokens from the
+ * user's associated Token-2022 account into the order's escrow.
+ */
+export async function buildPlaceSell(input: PlaceSellInput): Promise<{ order: Address; instructions: Instruction[] }> {
+  const user = address(input.user);
+  const signer = createNoopSigner(user);
+  const stableMint = address(input.stableMint);
+  const outcomeMint = address(input.outcomeMint);
+
+  const order = await findOrderAddress(input.programId, input.user, input.nonce);
+  const [userStable] = await findAssociatedTokenPda({ owner: user, mint: stableMint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
+  const [userOutcome] = await findAssociatedTokenPda({ owner: user, mint: outcomeMint, tokenProgram: TOKEN_2022_PROGRAM_ADDRESS });
+
+  const createStableAccount = await getCreateAssociatedTokenIdempotentInstructionAsync({
+    payer: signer,
+    ata: userStable,
+    owner: user,
+    mint: stableMint,
+    tokenProgram: TOKEN_PROGRAM_ADDRESS,
+  });
+  // The escrow, a Token-2022 account of the outcome mint, is derived by the generated client.
+  const placeSell = await getPlaceSellInstructionAsync(
+    {
+      user: signer,
+      payer: signer,
+      market: address(input.market),
+      order,
+      userOutcome,
+      outcomeMint,
+      side: input.side === "YES" ? Side.Yes : Side.No,
+      qtyUnits: input.units,
+      minPx: Number(input.minPx),
+      maxFee: input.maxFeeMicros,
+    },
+    { programAddress: address(input.programId) },
+  );
+  return { order, instructions: [createStableAccount, placeSell] };
 }
 
 export interface CancelOrderInput {

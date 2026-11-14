@@ -6,6 +6,7 @@ import { Countdown, CountdownView } from "@/components/ui/Countdown";
 import { PriceButton } from "@/components/ui/PriceButton";
 import { Row, RowList, type Column } from "@/components/ui/RowList";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { marketHref } from "@/features/ticket/intent";
 import { askPx } from "./book";
 import { closesLine, formatClock, listedMarkets, marketTitle, notTradableWords, payoutStatement, type TimeOptions } from "./wording";
 import styles from "./Markets.module.css";
@@ -16,9 +17,7 @@ const COLUMNS: Column[] = [
   { id: "buy", header: "Buy", actions: true, width: "10rem" },
 ];
 
-export function marketHref(symbol: string, side?: "YES" | "NO"): string {
-  return `/markets/${symbol}${side ? `?side=${side.toLowerCase()}` : ""}`;
-}
+export { marketHref };
 
 export interface MarketsListViewProps extends TimeOptions {
   markets: readonly ApiMarket[];

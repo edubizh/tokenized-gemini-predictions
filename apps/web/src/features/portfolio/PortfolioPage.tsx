@@ -6,6 +6,7 @@ import { chainNow, useMarkets } from "@/features/markets/hooks";
 import { marketTitle } from "@/features/markets/wording";
 import { useBalances, usePositions } from "@/features/ticket/hooks";
 import { explorerAddressUrl, explorerTxUrl, useConfig } from "@/lib/config";
+import { useReconnect } from "@/lib/privy/use-reconnect";
 import { useRedeem } from "./actions";
 import { PortfolioView, type RedemptionReceipt } from "./PortfolioView";
 import { buildPortfolio, type PositionRow } from "./positions";
@@ -17,6 +18,7 @@ export function PortfolioPage() {
   const markets = useMarkets("all");
   const faucet = useFaucet();
   const redeeming = useRedeem();
+  const reconnect = useReconnect();
   // Kept for as long as the page is open: the chain no longer has the tokens to show.
   const [receipts, setReceipts] = useState<RedemptionReceipt[]>([]);
   // Drawn again when a countdown reaches zero, so a position moves to its next group on time.
@@ -54,6 +56,7 @@ export function PortfolioPage() {
         receipts={receipts}
         redeeming={redeeming}
         onRedeem={(row) => void onRedeem(row)}
+        reconnect={reconnect}
         nowMs={now}
         chainNow={chainNow}
         onDeadline={redraw}

@@ -9,6 +9,7 @@ import { RelayerNoticeView } from "@/features/markets/RelayerNotice";
 import { OrderTimelineView } from "@/features/ticket/OrderTimeline";
 import { Ticket, type TicketProps } from "@/features/ticket/Ticket";
 import { deriveTimeline, type ChainOrderView, type LocalOrder, type TimelineInput } from "@/features/ticket/timeline";
+import { wrongWalletMessage, type ReconnectView } from "@/lib/privy/reconnect";
 import { buildFixtures, FIXTURE_USER, fixtureAddress, fixtureSignature } from "@/lib/relayer/fixtures";
 import styles from "./Gallery.module.css";
 
@@ -19,6 +20,7 @@ export const TRADING_SECTIONS = [
   ["ticket", "Ticket"],
   ["ticket-panels", "In the ticket's place"],
   ["order-paths", "Order timeline paths"],
+  ["reconnect", "Reconnect wallet"],
   ["position", "Position and explanation"],
 ] as const;
 
@@ -51,6 +53,12 @@ export function TradingGallery({ anchorMs, Section, Specimen }: { anchorMs: numb
     </div>
   );
   const paused: ApiHealth = { ...health, paused: { place: true, fill: false } };
+  // A wallet holding 3.00 YES and 1.25 NO of the first market, which is what its ticket can sell.
+  const holding = { YES: 300n, NO: 125n };
+  const sellTicket = (props: Partial<TicketProps>) => ticket({ held: holding, initialAction: "sell", initialQuantity: undefined, ...props });
+  // The wallet of a wallet login is not connected in the tab after a reload: nothing can sign.
+  const reconnect: ReconnectView = { onReconnect: () => {}, problem: null };
+  const wrongWallet: ReconnectView = { onReconnect: () => {}, problem: wrongWalletMessage(FIXTURE_USER, fixtureAddress("another-wallet")) };
 
   // 2.00 YES at a limit of $0.57 on the first market: cost $1.14, fee cap $0.07, hold $1.21.
   const address = fixtureAddress("gallery-order");
@@ -85,7 +93,14 @@ export function TradingGallery({ anchorMs, Section, Specimen }: { anchorMs: numb
   const settleSig = fixtureSignature("gallery-settle");
   const later = chainSecs + 90;
 
-  const paths: Array<[label: string, input: Partial<TimelineInput>, extra?: { reclaim?: "idle" | "wallet" | "error"; another?: boolean }]> = [
+  // A sale of 3.00 YES at no less than $0.55: the venue order is a buy of NO at $0.45, fee cap $0.09.
+  const sellLocal: LocalOrder = { ...local, kind: "sell", units: "300", limitPx: "5500", maxFeeMicros: "90000" };
+  const sellChain: ChainOrderView = { ...chain, kind: 1, qtyUnits: 300n, limitPx: 5_500n, maxFee: 90_000n };
+  const sellApi = (patch: Partial<ApiOrder>) => api({ kind: "sell", units: "300", limitPx: "5500", maxFeeMicros: "90000", ...patch });
+  const sold = { ...venue, filledUnits: "300", amountMicros: "1680000", feeMicros: "60000", fills: [{ tradeId: "2841730117", units: "300", px: "4400", feeMicros: "60000" }] };
+  const selling = { chainOrder: sellChain, local: sellLocal };
+
+  const paths: Array<[label: string, input: Partial<TimelineInput>, extra?: { reclaim?: "idle" | "wallet" | "error" | "reconnect"; another?: boolean }]> = [
     ["Just placed: waiting for the relayer", { chainOrder: undefined }],
     ["Picked up by the relayer", { apiOrder: api({ state: "seen" }) }],
     ["At the venue", { apiOrder: api({ state: "submitting", ...venue }) }],
@@ -106,6 +121,14 @@ export function TradingGallery({ anchorMs, Section, Specimen }: { anchorMs: numb
     ["Orphaned: filled too late, refunded", { chainOrder: null, apiOrder: api({ state: "orphaned", ...fill, chainSignature: settleSig }), chainNowSecs: later }],
     ["Failed, before expiry", { apiOrder: api({ state: "failed", detail: "market closed before the order could be sent" }) }],
     ["Failed, expired", { apiOrder: api({ state: "failed" }), chainNowSecs: later }, { reclaim: "idle" }],
+    ["Sell: tokens held, waiting for the relayer", { ...selling, chainOrder: undefined }],
+    ["Sell: at the venue, as a buy of the opposite outcome", { ...selling, apiOrder: sellApi({ state: "submitting", ...venue }) }],
+    ["Sell: filled at the venue, burning and paying", { ...selling, apiOrder: sellApi({ state: "venue_filled", ...sold }) }],
+    ["Sell: filled, tokens burned and test dollars paid", { ...selling, chainOrder: null, apiOrder: sellApi({ state: "chain_filled", ...sold, chainSignature: settleSig }) }, { another: true }],
+    ["Sell: not filled, tokens returned", { ...selling, chainOrder: null, apiOrder: sellApi({ state: "chain_cancelled", ...venue, chainSignature: settleSig }) }, { another: true }],
+    ["Sell: refused, it would not have covered the fee cap", { ...selling, chainOrder: null, apiOrder: sellApi({ state: "chain_cancelled", detail: "fee_cap", chainSignature: settleSig }) }],
+    ["Sell: expired and still open, Reclaim tokens", { ...selling, chainNowSecs: later }, { reclaim: "idle" }],
+    ["Sell: reclaimed by the user", { ...selling, chainOrder: null, chainNowSecs: later, local: { ...sellLocal, reclaimSignature: fixtureSignature("gallery-reclaim-sell") } }],
   ];
 
   return (
@@ -168,6 +191,17 @@ export function TradingGallery({ anchorMs, Section, Specimen }: { anchorMs: numb
           <Specimen label="Sending">{ticket({ progress: "sending" })}</Specimen>
           <Specimen label="The send failed">{ticket({ error: "Orders for this market have closed. Nothing was held." })}</Specimen>
           <Specimen label="Balances not read yet">{ticket({ balances: null })}</Specimen>
+          <Specimen label="Holding tokens: Buy and Sell tabs">{ticket({ held: holding })}</Specimen>
+          <Specimen label="Sell, YES: everything held, at the bid">{sellTicket({})}</Specimen>
+          <Specimen label="Sell, NO">{sellTicket({ initialSide: "NO" })}</Specimen>
+          <Specimen label="Sell: more than is held">{sellTicket({ initialQuantity: "4.00" })}</Specimen>
+          <Specimen label="Sell: none of this side held">{sellTicket({ held: { YES: 300n, NO: 0n }, initialSide: "NO" })}</Specimen>
+          <Specimen label="Sell: minimum above the highest bid">{sellTicket({ initialPrice: "0.60" })}</Specimen>
+          <Specimen label="Sell: more than buyers want">{sellTicket({ held: { YES: 30_000n, NO: 0n } })}</Specimen>
+          <Specimen label="Sell: would not cover the fee cap">{sellTicket({ initialPrice: "0.03" })}</Specimen>
+          <Specimen label="Sell: no quantity covers the fee cap">{sellTicket({ initialPrice: "0.01" })}</Specimen>
+          <Specimen label="Sell: check your wallet">{sellTicket({ progress: "wallet" })}</Specimen>
+          <Specimen label="Sell: tokens not read yet">{sellTicket({ held: null })}</Specimen>
         </div>
       </Section>
 
@@ -240,9 +274,39 @@ export function TradingGallery({ anchorMs, Section, Specimen }: { anchorMs: numb
                           onReclaim: () => {},
                           progress: extra.reclaim === "wallet" ? "wallet" : null,
                           error: extra.reclaim === "error" ? "The order has not expired yet, so it cannot be reclaimed. Wait for the countdown." : null,
+                          reconnect: extra.reclaim === "reconnect" ? reconnect : null,
                         }
                       : undefined
                   }
+                />
+              </div>
+            </Specimen>
+          ))}
+        </div>
+      </Section>
+
+      <Section id="reconnect" title="Reconnect wallet" note="After a page reload a wallet login is still logged in, but its wallet is no longer connected in the tab. Wherever a signature is needed, Reconnect wallet takes the action's place.">
+        <div className={styles.grid} style={{ marginBottom: "var(--space-6)" }}>
+          <Specimen label="Ticket">{ticket({ reconnect })}</Specimen>
+          <Specimen label="Ticket, selling">{sellTicket({ reconnect })}</Specimen>
+          <Specimen label="A different wallet was connected">{ticket({ reconnect: wrongWallet })}</Specimen>
+        </div>
+        <div className={styles.pathList}>
+          {(
+            [
+              ["Reclaim on an expired order", reconnect],
+              ["Reclaim, after a different wallet was connected", wrongWallet],
+            ] as const
+          ).map(([label, state]) => (
+            <Specimen key={label} label={label} wide>
+              <div className={styles.pathWidth}>
+                <OrderTimelineView
+                  timeline={deriveTimeline({ chainOrder: chain, apiOrder: null, local, chainNowSecs: later })}
+                  txUrl={txUrl}
+                  chainNow={() => later * 1000}
+                  frozenAtMs={later * 1000}
+                  timeZone={TZ}
+                  reclaim={{ onReclaim: () => {}, progress: null, error: null, reconnect: state }}
                 />
               </div>
             </Specimen>

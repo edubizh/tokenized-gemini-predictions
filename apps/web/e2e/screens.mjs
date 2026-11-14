@@ -6,13 +6,16 @@
 // Writes PNG files to e2e/out/ at 1280x800 and 390x844: the landing page, the system page, the
 // component gallery (full page) and, after logging in with the test account, the welcome screen,
 // the markets list, a market with its ticket, an order followed from the ticket to its receipt
-// (filled, not filled, reclaimed), the portfolio with a redemption, and the activity list with an
-// order opened. The order and redemption screens run only in fixtures mode, where nothing reaches
-// a chain.
+// (filled, not filled, reclaimed), a sale from the portfolio through the ticket's sell tab (filled,
+// and not filled with the tokens returned), the portfolio with a redemption, the activity list
+// with an order opened, and a wallet login after a page reload, where Reconnect wallet takes the
+// place of the action. The order, sale and redemption screens run only in fixtures mode, where
+// nothing reaches a chain.
 // The test login is read from PRIVY_TEST_EMAIL and PRIVY_TEST_OTP and is never printed.
 import { chromium } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { installTestWallet, loadTestWalletKey, TEST_WALLET_NAME } from "./lib/test-wallet.mjs";
 
 const BASE = process.env.SCREENS_BASE_URL ?? "http://localhost:3100";
 const OUT = path.join(import.meta.dirname, "out");
@@ -60,7 +63,7 @@ for (const viewport of VIEWPORTS) {
   await page.waitForSelector("#welcome");
   await shoot(`gallery-${viewport.name}`, { fullPage: true });
   // The trading sections one by one, as the whole page is too long to read at a glance.
-  for (const id of ["network-strip", "welcome", "relayer-notice", "markets-list", "market-header", "ticket", "ticket-panels", "order-paths", "position", "portfolio", "activity", "system"]) {
+  for (const id of ["network-strip", "welcome", "relayer-notice", "markets-list", "market-header", "ticket", "ticket-panels", "order-paths", "reconnect", "position", "portfolio", "activity", "system"]) {
     await page.locator(`#${id}`).screenshot({ path: path.join(OUT, `gallery-${id}-${viewport.name}.png`) });
   }
 
@@ -184,15 +187,52 @@ if (!fixtures) {
     await ticket.waitFor({ timeout: 30_000 });
     await shoot("market-prepared-1280");
 
+    // Selling: from a Live row of the portfolio to the ticket's sell tab, with that side chosen.
+    await page.goto(`${BASE}/portfolio`, { waitUntil: "networkidle" });
+    const live = page.getByRole("table", { name: "Live positions" });
+    await live.waitFor({ timeout: 30_000 });
+    await shoot("portfolio-live-sell-1280");
+    await live.getByRole("link", { name: /^Sell / }).first().click();
+    await page.waitForURL(/action=sell/);
+    const sellTicket = page.locator('[data-testid="ticket"][data-action="sell"]');
+    const sell = async (quantity, price) => {
+      await sellTicket.waitFor({ timeout: 30_000 });
+      await sellTicket.getByLabel("Quantity", { exact: true }).fill(quantity);
+      await sellTicket.getByLabel("Minimum price", { exact: true }).fill(price);
+    };
+    await sellTicket.waitFor({ timeout: 30_000 });
+    await shootBoth("market-sell");
+    // A sale that could not cover the fee cap is explained, not placed.
+    await sell("3.00", "0.03");
+    await shootBoth("sell-fee-cap");
+    // A sale at the bid: the tokens are burned and test dollars are paid.
+    await sell("2.00", "0.55");
+    await sellTicket.getByRole("button", { name: /Place order/ }).click();
+    await page.locator('[data-testid="order-slip"][data-stamp="FILLED"]').waitFor({ timeout: 30_000 });
+    await shootBoth("sell-filled");
+    // A sale above the highest bid: not filled, the tokens come back.
+    await slip.getByRole("button", { name: "Place another order" }).click();
+    await sell("1.00", "0.60");
+    await sellTicket.getByRole("button", { name: /Place order/ }).click();
+    await page.locator('[data-testid="order-slip"][data-stamp="REFUNDED"]').waitFor({ timeout: 30_000 });
+    await shootBoth("sell-returned");
+
     // Activity: every order with its stamp; one opened in place into its steps and receipt.
     await page.goto(`${BASE}/activity`, { waitUntil: "networkidle" });
     const orders = page.getByRole("table", { name: "Your orders", exact: true });
     await orders.waitFor({ timeout: 30_000 });
     await shootBoth("activity");
-    const filledRow = orders.getByRole("row").filter({ has: page.locator('[data-testid="activity-order"][data-stamp="FILLED"]') }).first();
+    const filledRows = orders.getByRole("row").filter({ has: page.locator('[data-testid="activity-order"][data-stamp="FILLED"]') });
+    const filledRow = filledRows.filter({ has: page.getByText("buy", { exact: true }) }).first();
     await filledRow.getByRole("button", { name: /Details/ }).click();
     await page.getByText("Order receipt").first().waitFor({ timeout: 10_000 });
     await shootBoth("activity-open");
+    // The sale that filled, opened: tokens held, proceeds, fee, test dollars paid.
+    await filledRow.getByRole("button", { name: /Details/ }).click();
+    const soldRow = filledRows.filter({ has: page.getByText("sell", { exact: true }) }).first();
+    await soldRow.getByRole("button", { name: /Details/ }).click();
+    await page.getByText("Test dollars paid").first().waitFor({ timeout: 10_000 });
+    await shootBoth("activity-sale-open");
 
     // Portfolio: the groups, then a redemption. The simulated balance must go up by the payout.
     await page.goto(`${BASE}/portfolio`, { waitUntil: "networkidle" });
@@ -230,6 +270,59 @@ const flashed = await page.evaluate(() => {
 });
 console.log("landing painted for a logged-in user:", flashed);
 await page.waitForURL(/\/(welcome|markets)/, { timeout: 60_000 });
+
+// 8. A wallet login after a page reload: the account is still logged in, but its wallet is no
+// longer connected in the tab, so Reconnect wallet takes the place of whatever needs a signature.
+// The wallet is the injected test wallet; its key file is only read, never created here.
+const KEY_FILE = process.env.E2E_WALLET_KEYPAIR ?? path.resolve(import.meta.dirname, "../../../.keys/e2e-wallet-keypair.json");
+if (!fixtures || !existsSync(KEY_FILE)) {
+  console.log("skipping the reconnect screens: they need fixtures mode and the test wallet's key file");
+} else {
+  const walletContext = await browser.newContext({ viewport: VIEWPORTS[0], deviceScaleFactor: 2, timezoneId: "UTC", reducedMotion: "reduce" });
+  await walletContext.addInitScript(installTestWallet, { keypair: loadTestWalletKey(KEY_FILE), name: TEST_WALLET_NAME });
+  const walletPage = await walletContext.newPage();
+  const capture = async (name) => {
+    await walletPage.evaluate(() => document.fonts.ready);
+    await walletPage.waitForTimeout(400);
+    await walletPage.screenshot({ path: path.join(OUT, `${name}.png`) });
+    console.log("wrote", `e2e/out/${name}.png`);
+  };
+  try {
+    await walletPage.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    await walletPage.click('[data-testid="login"]:not([disabled])');
+    await walletPage.getByText("Continue with a wallet").click();
+    await walletPage.waitForTimeout(1_500);
+    await walletPage.getByText(TEST_WALLET_NAME, { exact: false }).first().click();
+    await walletPage.waitForURL(/\/(welcome|markets)/, { timeout: 90_000 });
+    await walletPage.goto(`${BASE}/markets`, { waitUntil: "networkidle" });
+    await walletPage.getByRole("row").filter({ hasText: "BTC Up" }).first().getByRole("link", { name: "BTC Up", exact: true }).click();
+    await walletPage.waitForURL(/\/markets\/.+/);
+    // The navigation above was a full page load, which is the reload this is about.
+    const reconnect = walletPage.locator('[data-testid="reconnect"]');
+    await reconnect.waitFor({ timeout: 60_000 });
+    for (const viewport of VIEWPORTS) {
+      await walletPage.setViewportSize(viewport);
+      await reconnect.scrollIntoViewIfNeeded();
+      await capture(`reconnect-${viewport.name}`);
+    }
+    await walletPage.setViewportSize(VIEWPORTS[0]);
+    await walletPage.goto(`${BASE}/portfolio`, { waitUntil: "networkidle" });
+    await walletPage.getByRole("table", { name: "Redeemable positions" }).getByRole("button", { name: /^Reconnect wallet to/ }).first().waitFor({ timeout: 30_000 });
+    await walletPage.getByRole("table", { name: "Redeemable positions" }).scrollIntoViewIfNeeded();
+    await capture("reconnect-portfolio-1280");
+    // Reconnecting through the login provider's wallet dialog brings the action back.
+    await walletPage.getByRole("button", { name: /^Reconnect wallet to/ }).first().click();
+    await walletPage.waitForTimeout(1_500);
+    await walletPage.getByText(TEST_WALLET_NAME, { exact: false }).first().click();
+    await walletPage.getByRole("button", { name: /^Redeem / }).first().waitFor({ timeout: 30_000 });
+    console.log("after reconnecting, Redeem is back in place of Reconnect:", (await walletPage.getByRole("button", { name: /^Reconnect wallet to/ }).count()) === 0);
+  } catch (error) {
+    await walletPage.screenshot({ path: path.join(OUT, "failure-reconnect.png"), fullPage: true }).catch(() => {});
+    throw error;
+  } finally {
+    await walletContext.close();
+  }
+}
 
 await browser.close();
 if (problems.length > 0) {

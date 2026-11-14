@@ -8,6 +8,8 @@ import { Stamp } from "@/components/ui/Stamp";
 import { Timeline, type TimelineStep } from "@/components/ui/Timeline";
 import { formatClock } from "@/features/markets/wording";
 import { formatContracts, formatPrice, shortAddress } from "@/lib/format";
+import type { ReconnectView } from "@/lib/privy/reconnect";
+import { ReconnectWords } from "@/lib/privy/ReconnectWords";
 import type { SendProgress } from "./Ticket";
 import type { DerivedTimeline } from "./timeline";
 import styles from "./Ticket.module.css";
@@ -17,6 +19,8 @@ export interface ReclaimState {
   progress: SendProgress | null;
   /** Why the last attempt failed. */
   error: string | null;
+  /** Set while the trading wallet is not connected in this tab: reconnecting takes Reclaim's place. */
+  reconnect?: ReconnectView | null;
 }
 
 export interface OrderTimelineViewProps {
@@ -62,7 +66,11 @@ export function OrderTimelineView({ timeline, marketTitle, txUrl, chainNow, froz
   }));
   const expiresAtMs = timeline.expiresAt * 1000;
   const running = timeline.open && !timeline.canReclaim && expiresAtMs > (frozenAtMs ?? chainNow());
-  const terms = `Buy ${timeline.side} ${formatContracts(timeline.units)} at ${formatPrice(timeline.limitPx)}`;
+  const selling = timeline.kind === "sell";
+  const kindWord = selling ? "Sell" : "Buy";
+  const terms = `${kindWord} ${timeline.side} ${formatContracts(timeline.units)} at ${formatPrice(timeline.limitPx)}`;
+  const size = variant === "slip" ? "default" : "row";
+  const reconnect = timeline.canReclaim ? (reclaim?.reconnect ?? null) : null;
   const showFoot = running || (timeline.canReclaim && reclaim) || onPlaceAnother;
 
   return (
@@ -70,7 +78,7 @@ export function OrderTimelineView({ timeline, marketTitle, txUrl, chainNow, froz
       {variant !== "detail" && (
         <div className={styles.summaryLine}>
           <p className={styles.terms}>
-            <span className={styles.kind}>Buy</span>
+            <span className={styles.kind}>{kindWord}</span>
             <span className={`${styles.side} ${timeline.side === "YES" ? styles.yes : styles.no}`}>{timeline.side}</span>
             <span className={styles.figure}>{formatContracts(timeline.units)}</span>
             <span className={styles.at}>at</span>
@@ -84,7 +92,7 @@ export function OrderTimelineView({ timeline, marketTitle, txUrl, chainNow, froz
       <Timeline steps={steps} label={`Progress of the order to ${terms.toLowerCase()}`} />
 
       {reclaim?.error && (
-        <Notice tone="negative" title="The hold was not reclaimed">
+        <Notice tone="negative" title={selling ? "The tokens were not reclaimed" : "The hold was not reclaimed"}>
           {reclaim.error}
         </Notice>
       )}
@@ -98,16 +106,27 @@ export function OrderTimelineView({ timeline, marketTitle, txUrl, chainNow, froz
               <CountdownView remainingMs={expiresAtMs - frozenAtMs} label="order expires in" closedText="order expired" calm />
             )
           ) : (
-            timeline.canReclaim && reclaim && <span className={styles.footNote}>The relayer can no longer fill this order.</span>
+            timeline.canReclaim &&
+            reclaim && (
+              <span className={styles.footNote} role={reconnect ? "status" : undefined}>
+                {reconnect ? <ReconnectWords reconnect={reconnect} /> : "The relayer can no longer fill this order."}
+              </span>
+            )
           )}
           <div className={styles.actions}>
-            {timeline.canReclaim && reclaim && (
-              <Button size={variant === "slip" ? "default" : "row"} block={variant === "slip"} onClick={reclaim.onReclaim} busy={reclaim.progress === "wallet" ? "Check your wallet" : reclaim.progress === "sending" ? "Sending" : false}>
-                Reclaim hold
-              </Button>
-            )}
+            {timeline.canReclaim &&
+              reclaim &&
+              (reconnect ? (
+                <Button size={size} block={variant === "slip"} onClick={reconnect.onReconnect}>
+                  Reconnect wallet
+                </Button>
+              ) : (
+                <Button size={size} block={variant === "slip"} onClick={reclaim.onReclaim} busy={reclaim.progress === "wallet" ? "Check your wallet" : reclaim.progress === "sending" ? "Sending" : false}>
+                  {selling ? "Reclaim tokens" : "Reclaim hold"}
+                </Button>
+              ))}
             {onPlaceAnother && (
-              <Button size={variant === "slip" ? "default" : "row"} block={variant === "slip"} onClick={onPlaceAnother}>
+              <Button size={size} block={variant === "slip"} onClick={onPlaceAnother}>
                 Place another order
               </Button>
             )}
