@@ -66,10 +66,11 @@
     display: none;
   }
 
+  /* Cells start on one line so their labels line up; a button centres on the values beside it. */
   .row {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
+    align-items: flex-start;
     gap: var(--space-2) var(--space-5);
     padding-block: var(--space-3);
   }
@@ -94,6 +95,7 @@
   }
 
   .actions {
+    align-self: center;
     margin-left: auto;
   }
 

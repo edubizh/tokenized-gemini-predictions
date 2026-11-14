@@ -32,8 +32,11 @@ export interface OrderTimelineViewProps {
   onExpired?(): void;
   reclaim?: ReclaimState;
   onPlaceAnother?(): void;
-  /** `slip` is the ticket turned receipt; `entry` is a row in a list of orders. */
-  variant?: "slip" | "entry";
+  /**
+   * `slip` is the ticket turned receipt; `entry` is a row in a list of orders; `detail` is the
+   * steps alone, under a row that already shows the order's terms and stamp.
+   */
+  variant?: "slip" | "entry" | "detail";
   timeZone?: string;
 }
 
@@ -63,18 +66,20 @@ export function OrderTimelineView({ timeline, marketTitle, txUrl, chainNow, froz
   const showFoot = running || (timeline.canReclaim && reclaim) || onPlaceAnother;
 
   return (
-    <article className={variant === "slip" ? styles.slip : styles.entry} aria-label={`${marketTitle ? `${marketTitle}: ` : ""}${terms}`} data-testid={`order-${variant}`} data-stamp={timeline.stamp}>
-      <div className={styles.summaryLine}>
-        <p className={styles.terms}>
-          <span className={styles.kind}>Buy</span>
-          <span className={`${styles.side} ${timeline.side === "YES" ? styles.yes : styles.no}`}>{timeline.side}</span>
-          <span className={styles.figure}>{formatContracts(timeline.units)}</span>
-          <span className={styles.at}>at</span>
-          <span className={styles.figure}>{formatPrice(timeline.limitPx)}</span>
-          {marketTitle && <span className={styles.at}>{`· ${marketTitle}`}</span>}
-        </p>
-        <Stamp value={timeline.stamp} />
-      </div>
+    <article className={variant === "slip" ? styles.slip : variant === "detail" ? styles.detail : styles.entry} aria-label={`${marketTitle ? `${marketTitle}: ` : ""}${terms}`} data-testid={`order-${variant}`} data-stamp={timeline.stamp}>
+      {variant !== "detail" && (
+        <div className={styles.summaryLine}>
+          <p className={styles.terms}>
+            <span className={styles.kind}>Buy</span>
+            <span className={`${styles.side} ${timeline.side === "YES" ? styles.yes : styles.no}`}>{timeline.side}</span>
+            <span className={styles.figure}>{formatContracts(timeline.units)}</span>
+            <span className={styles.at}>at</span>
+            <span className={styles.figure}>{formatPrice(timeline.limitPx)}</span>
+            {marketTitle && <span className={styles.at}>{`· ${marketTitle}`}</span>}
+          </p>
+          <Stamp value={timeline.stamp} />
+        </div>
+      )}
 
       <Timeline steps={steps} label={`Progress of the order to ${terms.toLowerCase()}`} />
 

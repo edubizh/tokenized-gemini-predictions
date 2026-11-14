@@ -4,7 +4,7 @@
 
 import type { ApiMarket, ApiOrder, SideName } from "@outcome/relayer/api-types";
 import { complementPx, cost, takerFee } from "@outcome/relayer/money";
-import { buildFixtures, fixtureAddress, fixtureResponse, fixtureSignature, type FixtureResponse } from "@/lib/relayer/fixtures";
+import { buildFixtures, buildJustSettledMarket, fixtureAddress, fixtureResponse, fixtureSignature, type FixtureResponse } from "@/lib/relayer/fixtures";
 import type { RelayerRoute } from "@/lib/relayer/proxy";
 import type { FixtureChain, FixtureOpenOrder } from "./chain-types";
 
@@ -56,6 +56,21 @@ export interface PlaceInput {
   maxFeeMicros: bigint;
 }
 
+export interface RedeemInput {
+  holder: string;
+  /** The on-chain market account. */
+  market: string;
+  outcomeMint: string;
+  amount: bigint;
+}
+
+interface Redemption {
+  holder: string;
+  mint: string;
+  units: bigint;
+  payoutMicros: bigint;
+}
+
 function anchorOf(nowMs: number): number {
   return Math.floor(nowMs / FIXTURE_CYCLE_MS) * FIXTURE_CYCLE_MS;
 }
@@ -77,13 +92,19 @@ interface WorldState {
   cancelled: Map<string, number>;
   /** Markets the relayer has been asked to create on-chain. */
   ensured: Set<string>;
+  /** Every `redeem` the simulated chain has accepted. */
+  redemptions: Redemption[];
   transactions: number;
+}
+
+function emptyState(): WorldState {
+  return { placed: new Map(), cancelled: new Map(), ensured: new Set(), redemptions: [], transactions: 0 };
 }
 
 export class FixtureWorld {
   private readonly state: WorldState;
 
-  constructor(state: WorldState = { placed: new Map(), cancelled: new Map(), ensured: new Set(), transactions: 0 }) {
+  constructor(state: WorldState = emptyState()) {
     this.state = state;
   }
 
@@ -107,7 +128,8 @@ export class FixtureWorld {
   /**
    * Markets of one anchor: the fixture set plus two more contracts in the first market's window,
    * as a venue lists several assets for the same fifteen minutes. The last of them starts without
-   * its on-chain account, so opening it shows the market being prepared.
+   * its on-chain account, so opening it shows the market being prepared. Then the market that has
+   * just settled, and the one from the cycle before, whose redemption opens during this cycle.
    */
   private markets(nowMs: number, anchor = anchorOf(nowMs)): ApiMarket[] {
     const base = buildFixtures(anchor, nowMs).markets;
@@ -132,7 +154,13 @@ export class FixtureWorld {
           : null,
       };
     };
-    return [...base, sibling("ETH", "Ether", "3415.2266666667", "3800", "4100"), sibling("SOL", "Solana", "187.9104166667", "6200", "6500")];
+    return [
+      ...base,
+      sibling("ETH", "Ether", "3415.2266666667", "3800", "4100"),
+      sibling("SOL", "Solana", "187.9104166667", "6200", "6500"),
+      buildJustSettledMarket(anchor),
+      buildJustSettledMarket(anchor - FIXTURE_CYCLE_MS),
+    ];
   }
 
   /** By venue symbol or by on-chain market address, across recent anchors. */
@@ -178,6 +206,25 @@ export class FixtureWorld {
   /** Records a `cancel_order` sent by the user. */
   cancel(orderAddress: string, nowMs: number): void {
     this.cancelled.set(orderAddress, nowMs);
+  }
+
+  /**
+   * Records a `redeem`: burns the tokens and pays what the market's settlement gives their side,
+   * which is nothing for the side that lost. Throws with a program error name when the program
+   * would refuse it.
+   */
+  redeem(input: RedeemInput, nowMs: number): void {
+    const market = this.findMarket(input.market, nowMs);
+    const onchain = market?.onchain;
+    if (!onchain) throw new Error("NotSettled");
+    if (input.outcomeMint !== onchain.yesMint && input.outcomeMint !== onchain.noMint) throw new Error("WrongMint");
+    if (onchain.status !== "settled" || onchain.redeemAfter === null) throw new Error("NotSettled");
+    if (Math.floor(nowMs / 1000) < onchain.redeemAfter) throw new Error("RedeemLocked");
+    if (input.amount <= 0n) throw new Error("BadQuantity");
+    const held = BigInt(this.chain(input.holder, nowMs).positions.find((position) => position.mint === input.outcomeMint)?.units ?? "0");
+    if (input.amount > held) throw new Error("InsufficientFunds");
+    const payout = BigInt((input.outcomeMint === onchain.yesMint ? onchain.yesPayout : onchain.noPayout) ?? "0");
+    this.state.redemptions.push({ holder: input.holder, mint: input.outcomeMint, units: input.amount, payoutMicros: input.amount * payout });
   }
 
   private wasCancelled(address: string, sinceMs: number): boolean {
@@ -242,6 +289,9 @@ export class FixtureWorld {
     add(markets[3]?.onchain?.yesMint, 500n);
     add(markets[4]?.onchain?.yesMint, 500n);
     add(markets[5]?.onchain?.yesMint, 250n);
+    // Two that won on the NO side: one whose redemption opens soon, one from the cycle before.
+    add(buildJustSettledMarket(anchorOf(nowMs)).onchain?.noMint, 200n);
+    add(buildJustSettledMarket(anchorOf(nowMs) - FIXTURE_CYCLE_MS).onchain?.noMint, 200n);
 
     let stable = STARTING_STABLE_MICROS;
     const openOrders: FixtureOpenOrder[] = [];
@@ -291,10 +341,17 @@ export class FixtureWorld {
       });
     }
 
+    for (const redemption of this.state.redemptions) {
+      if (redemption.holder !== wallet) continue;
+      stable += redemption.payoutMicros;
+      const held = positions.get(redemption.mint);
+      if (held !== undefined) positions.set(redemption.mint, held - redemption.units);
+    }
+
     return {
       trader: { address: fixtureAddress(`trader:${wallet}`), nextNonce: this.nextNonce(wallet).toString() },
       balances: { lamports: STARTING_LAMPORTS.toString(), stableMicros: stable.toString() },
-      positions: [...positions].map(([mint, units]) => ({ mint, units: units.toString() })),
+      positions: [...positions].filter(([, units]) => units > 0n).map(([mint, units]) => ({ mint, units: units.toString() })),
       openOrders,
     };
   }
@@ -304,7 +361,13 @@ export class FixtureWorld {
     switch (route.kind) {
       case "markets": {
         const markets = this.markets(nowMs);
-        return { status: 200, body: { markets: route.scope === "all" ? markets : markets.filter((market) => market.expiresAt > nowMs && market.settleState === "open") } };
+        if (route.scope !== "all") return { status: 200, body: { markets: markets.filter((market) => market.expiresAt > nowMs && market.settleState === "open") } };
+        // A relayer keeps the markets of earlier windows, so tokens and orders from them can be named.
+        const known = new Map(markets.map((market) => [market.symbol, market]));
+        for (let back = 1; back < ANCHORS_BACK; back++) {
+          for (const market of this.markets(nowMs, anchorOf(nowMs) - back * FIXTURE_CYCLE_MS)) if (!known.has(market.symbol)) known.set(market.symbol, market);
+        }
+        return { status: 200, body: { markets: [...known.values()] } };
       }
       case "ensure":
       case "market": {
@@ -334,6 +397,8 @@ const holder = globalThis as { __outcomeFixtureState?: WorldState };
 
 /** One world per server process, shared by every route. */
 export function fixtureWorld(): FixtureWorld {
-  holder.__outcomeFixtureState ??= { placed: new Map(), cancelled: new Map(), ensured: new Set(), transactions: 0 };
+  holder.__outcomeFixtureState ??= emptyState();
+  // A state kept across a reload of this module may predate a field.
+  holder.__outcomeFixtureState.redemptions ??= [];
   return new FixtureWorld(holder.__outcomeFixtureState);
 }

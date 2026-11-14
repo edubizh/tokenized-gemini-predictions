@@ -5,7 +5,6 @@ import { useEffect, type ReactNode } from "react";
 import { Shell } from "@/components/shell/Shell";
 import { Notice } from "@/components/ui/Notice";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { HealthProvider } from "@/features/markets/hooks";
 import { RelayerNotice } from "@/features/markets/RelayerNotice";
 import { useConfig } from "@/lib/config";
 import { useAccount } from "@/lib/privy/account";
@@ -40,10 +39,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <Shell>
       {verdict === "allow" ? (
-        <HealthProvider>
+        <>
           <RelayerNotice />
           {children}
-        </HealthProvider>
+        </>
       ) : (
         <div aria-busy="true" style={{ display: "grid", gap: "var(--space-3)" }}>
           <span className="sr-only">Loading your account</span>

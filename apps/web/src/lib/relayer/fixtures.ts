@@ -186,6 +186,20 @@ function buildOrder(spec: OrderSpec, index: number, markets: readonly ApiMarket[
   };
 }
 
+/**
+ * A market that settled NO a moment ago: redemption opens five and a half minutes after the
+ * anchor, so within one fixture cycle it is first locked and then, in the next cycle, open.
+ * Not part of `buildFixtures`; the simulated relayer lists it beside the others.
+ */
+export function buildJustSettledMarket(anchorMs: number): ApiMarket {
+  const anchor = Math.floor(anchorMs / 1000) * 1000;
+  const market = buildMarket(
+    { underlying: "BTC", name: "Bitcoin", expiresIn: 9 * MINUTE + 41 * SECOND - 2 * WINDOW, strike: "104094.25", bidPx: null, askPx: null, supply: [0n, 200n], phase: "settled_no", settlementValue: "104061.8" },
+    anchor,
+  );
+  return { ...market, onchain: market.onchain && { ...market.onchain, redeemAfter: Math.floor((anchor + 5 * MINUTE + 30 * SECOND) / 1000) } };
+}
+
 export interface Fixtures {
   markets: ApiMarket[];
   orders: ApiOrder[];

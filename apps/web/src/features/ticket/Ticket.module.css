@@ -94,6 +94,17 @@
   border-bottom: 1px solid var(--rule);
 }
 
+/* The steps alone, under a row that already shows the order's terms. */
+.detail {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.detail .actions {
+  margin-left: auto;
+}
+
 .summaryLine {
   display: flex;
   flex-wrap: wrap;

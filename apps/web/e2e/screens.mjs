@@ -3,10 +3,12 @@
 //   pnpm exec next dev -p 3100            (with RELAYER_URL=fixtures in the environment)
 //   node --env-file=../../.env e2e/screens.mjs
 //
-// Writes PNG files to e2e/out/ at 1280x800 and 390x844: the landing page, the component gallery
-// (full page) and, after logging in with the test account, the welcome screen, the markets list,
-// a market with its ticket, and an order followed from the ticket to its receipt (filled, not
-// filled, reclaimed). The order screens run only in fixtures mode, where nothing reaches a chain.
+// Writes PNG files to e2e/out/ at 1280x800 and 390x844: the landing page, the system page, the
+// component gallery (full page) and, after logging in with the test account, the welcome screen,
+// the markets list, a market with its ticket, an order followed from the ticket to its receipt
+// (filled, not filled, reclaimed), the portfolio with a redemption, and the activity list with an
+// order opened. The order and redemption screens run only in fixtures mode, where nothing reaches
+// a chain.
 // The test login is read from PRIVY_TEST_EMAIL and PRIVY_TEST_OTP and is never printed.
 import { chromium } from "@playwright/test";
 import { mkdirSync } from "node:fs";
@@ -58,9 +60,14 @@ for (const viewport of VIEWPORTS) {
   await page.waitForSelector("#welcome");
   await shoot(`gallery-${viewport.name}`, { fullPage: true });
   // The trading sections one by one, as the whole page is too long to read at a glance.
-  for (const id of ["relayer-notice", "markets-list", "market-header", "ticket", "ticket-panels", "order-paths", "position"]) {
+  for (const id of ["network-strip", "welcome", "relayer-notice", "markets-list", "market-header", "ticket", "ticket-panels", "order-paths", "position", "portfolio", "activity", "system"]) {
     await page.locator(`#${id}`).screenshot({ path: path.join(OUT, `gallery-${id}-${viewport.name}.png`) });
   }
+
+  // The system page is readable without a login.
+  await page.goto(`${BASE}/system`, { waitUntil: "networkidle" });
+  await page.getByRole("table", { name: "Reconciliation by market" }).waitFor({ timeout: 30_000 });
+  await shoot(`system-${viewport.name}`, { fullPage: true });
 }
 
 // 2. Keyboard focus, to check the ring.
@@ -176,6 +183,38 @@ if (!fixtures) {
   if (await preparing.isVisible().catch(() => false)) await shoot("market-preparing-1280");
     await ticket.waitFor({ timeout: 30_000 });
     await shoot("market-prepared-1280");
+
+    // Activity: every order with its stamp; one opened in place into its steps and receipt.
+    await page.goto(`${BASE}/activity`, { waitUntil: "networkidle" });
+    const orders = page.getByRole("table", { name: "Your orders", exact: true });
+    await orders.waitFor({ timeout: 30_000 });
+    await shootBoth("activity");
+    const filledRow = orders.getByRole("row").filter({ has: page.locator('[data-testid="activity-order"][data-stamp="FILLED"]') }).first();
+    await filledRow.getByRole("button", { name: /Details/ }).click();
+    await page.getByText("Order receipt").first().waitFor({ timeout: 10_000 });
+    await shootBoth("activity-open");
+
+    // Portfolio: the groups, then a redemption. The simulated balance must go up by the payout.
+    await page.goto(`${BASE}/portfolio`, { waitUntil: "networkidle" });
+    const redeemable = page.getByRole("table", { name: "Redeemable positions" });
+    await redeemable.waitFor({ timeout: 30_000 });
+    const balance = page.locator('[data-testid="portfolio-balance"]');
+    const before = await balance.innerText();
+    await shootBoth("portfolio");
+    const receipts = page.locator('[data-testid="redemption-receipt"]');
+    await redeemable.getByRole("button", { name: /^Redeem / }).first().click();
+    await redeemable.locator("button[data-busy]").first().waitFor({ timeout: 10_000 });
+    await shoot("portfolio-redeeming-1280", { fullPage: true });
+    await receipts.first().waitFor({ timeout: 30_000 });
+    await page.waitForFunction((was) => document.querySelector('[data-testid="portfolio-balance"]')?.textContent !== was, before, { timeout: 30_000 });
+    console.log("test dollars before and after the redemption:", before, "->", await balance.innerText());
+    const clear = page.getByRole("button", { name: /^Clear / }).first();
+    if (await clear.isVisible().catch(() => false)) {
+      const had = await receipts.count();
+      await clear.click();
+      await page.waitForFunction((count) => document.querySelectorAll('[data-testid="redemption-receipt"]').length > count, had, { timeout: 30_000 });
+    }
+    await shootBoth("portfolio-redeemed");
   } catch (error) {
     // What was on screen when a step failed says more than the stack does.
     await page.screenshot({ path: path.join(OUT, "failure.png"), fullPage: true }).catch(() => {});

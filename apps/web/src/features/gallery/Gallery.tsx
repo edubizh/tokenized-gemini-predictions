@@ -3,7 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { AccountMenu } from "@/components/shell/AccountMenu";
 import { Footer } from "@/components/shell/Footer";
-import { NetworkStrip } from "@/components/shell/NetworkStrip";
+import { NetworkStripView } from "@/components/shell/NetworkStrip";
 import { TopBar } from "@/components/shell/TopBar";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Countdown, CountdownView } from "@/components/ui/Countdown";
@@ -18,10 +18,11 @@ import { SideToggle, type Side } from "@/components/ui/SideToggle";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Stamp, STAMP_VALUES, type StampValue } from "@/components/ui/Stamp";
 import { Timeline } from "@/components/ui/Timeline";
-import { formatStrike } from "@/features/markets/wording";
+import { formatClock, formatStrike } from "@/features/markets/wording";
 import { WelcomeView, type WelcomeState } from "@/features/onboarding/WelcomeView";
-import { formatContracts, formatDollars, formatLocalTime, formatPrice, shortAddress } from "@/lib/format";
+import { formatContracts, formatDollars, formatPrice, shortAddress } from "@/lib/format";
 import { askPrices, buildFixtures, FIXTURE_USER, fixtureSignature } from "@/lib/relayer/fixtures";
+import { ACCOUNT_SECTIONS, AccountGallery } from "./AccountGallery";
 import { TRADING_SECTIONS, TradingGallery } from "./TradingGallery";
 import styles from "./Gallery.module.css";
 
@@ -46,6 +47,7 @@ const SECTIONS = [
   ["footer", "Footer"],
   ["welcome", "Welcome screen"],
   ...TRADING_SECTIONS,
+  ...ACCOUNT_SECTIONS,
 ] as const;
 
 const COLOURS = [
@@ -61,7 +63,7 @@ const TYPE = [
   ["lg", "20px, section titles", "Your orders in this market"],
   ["base", "16px, body", "Tokens are minted only after the order fills."],
   ["sm", "14px, dense rows and helper text", "Anything unused is refunded."],
-  ["xs", "12px, captions and stamps", "Held on Solana at 14:05:09"],
+  ["xs", "12px, captions and stamps", "Held on Solana at 2:05:09 PM"],
 ] as const;
 
 const EXPLORER = { cluster: "devnet", rpcUrl: "https://api.devnet.solana.com", explorerBase: "https://explorer.solana.com" } as const;
@@ -120,7 +122,7 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
     { id: "order", header: "Order", primary: true },
     { id: "limit", header: "Limit", align: "right", width: "4.5rem" },
     { id: "paid", header: "Paid", align: "right", width: "5.5rem" },
-    { id: "placed", header: "Placed", align: "right", width: "6.5rem" },
+    { id: "placed", header: "Placed", align: "right", width: "7rem" },
     { id: "status", header: "Status", width: "6.5rem" },
   ];
 
@@ -129,7 +131,7 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
     ["Ready, with a connected wallet", { kind: "ready" }, external],
     ["Working, step one", { kind: "working", step: "login" }, wallet],
     ["Working, step two", { kind: "working", step: "funding" }, wallet],
-    ["Done", { kind: "done", signature, at: formatLocalTime(anchorMs, { seconds: true, timeZone: "UTC" }) }, wallet],
+    ["Done", { kind: "done", signature, at: formatClock(anchorMs, { seconds: true, zone: true, timeZone: "UTC" }) }, wallet],
     ["Already registered", { kind: "already" }, wallet],
     ["Not set up yet", { kind: "not_bootstrapped" }, wallet],
     ["Error, with a retry", { kind: "error", message: "The transaction failed and nothing was sent. The faucet account is empty. You can try again." }, wallet],
@@ -406,7 +408,7 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
                       {order.state === "chain_filled" ? formatDollars(BigInt(order.amountMicros) + BigInt(order.feeMicros)) : "–"}
                     </span>,
                     <span key="t" className={styles.time}>
-                      {formatLocalTime(order.createdAt, { timeZone: "UTC" })}
+                      {formatClock(order.createdAt, { zone: true, timeZone: "UTC" })}
                     </span>,
                     <Stamp key="s" value={ORDER_STAMP[order.state] ?? "OPEN"} />,
                   ]}
@@ -583,9 +585,18 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
           </div>
         </Section>
 
-        <Section id="network-strip" title="Network strip" note="Fixed at the top of every page, as it is on this one. It cannot be dismissed.">
-          <div className={styles.frame}>
-            <NetworkStrip fixed={false} />
+        <Section id="network-strip" title="Network strip" note="Fixed at the top of every page, as it is on this one. It cannot be dismissed, and it names the venue the relayer reports.">
+          <div className={styles.stack}>
+            <Specimen label="The relayer trades on the exchange sandbox" wide>
+              <div className={styles.frame}>
+                <NetworkStripView venue="sandbox" fixed={false} />
+              </div>
+            </Specimen>
+            <Specimen label="The relayer runs against a simulated venue" wide>
+              <div className={styles.frame}>
+                <NetworkStripView venue="mock" fixed={false} />
+              </div>
+            </Specimen>
           </div>
         </Section>
 
@@ -653,6 +664,7 @@ export function Gallery({ anchorMs }: { anchorMs: number }) {
         </Section>
 
         <TradingGallery anchorMs={anchorMs} Section={Section} Specimen={Specimen} />
+        <AccountGallery anchorMs={anchorMs} Section={Section} Specimen={Specimen} />
       </main>
     </div>
   );

@@ -1,0 +1,263 @@
+/* The balance: one ruled line of facts, the test dollars first and largest. */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, auto));
+  justify-content: start;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+.fact {
+  display: grid;
+  align-content: start;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-6) var(--space-4) 0;
+}
+
+.fact + .fact {
+  padding-left: var(--space-6);
+  border-left: 1px solid var(--rule);
+}
+
+.factLabel {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.factValue {
+  display: flex;
+  align-items: flex-end;
+  min-height: calc(var(--text-2xl) * var(--leading-2xl));
+  line-height: var(--leading-base);
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.balance {
+  font-size: var(--text-2xl);
+  line-height: var(--leading-2xl);
+  letter-spacing: -0.01em;
+}
+
+.factNote {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--ink-3);
+}
+
+/* Shown under the balance when it is too low to trade with. */
+.low {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+}
+
+@media (max-width: 40rem) {
+  .facts {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .fact {
+    padding-right: var(--space-4);
+  }
+
+  .fact:first-child {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .fact:nth-child(2) {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .fact + .fact {
+    padding-left: 0;
+  }
+
+  .fact:nth-child(3) {
+    padding-left: var(--space-4);
+  }
+}
+
+/* The groups: ledger sections under one another. */
+.groups {
+  display: grid;
+  gap: var(--space-7);
+  margin-top: var(--space-7);
+}
+
+.group {
+  min-width: 0;
+}
+
+.groupHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--ink-3);
+}
+
+.groupNote {
+  max-width: 62ch;
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+}
+
+.groupBody {
+  margin-top: var(--space-3);
+}
+
+/* A group with nothing in it keeps its place as one ruled line. */
+.emptyLine {
+  padding: var(--space-3) var(--space-2);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-3);
+}
+
+/* A position row */
+.position {
+  display: grid;
+  gap: 2px;
+  padding-block: var(--space-1);
+  min-width: 0;
+}
+
+.name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+}
+
+.side {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+}
+
+.yes {
+  color: var(--yes);
+}
+
+.no {
+  color: var(--no);
+}
+
+.title {
+  font-weight: var(--weight-semibold);
+  text-decoration-color: transparent;
+}
+
+.title:hover {
+  text-decoration-color: currentColor;
+}
+
+.statement {
+  max-width: 62ch;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+}
+
+.figure {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.nothing {
+  color: var(--ink-3);
+}
+
+.about {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+  color: var(--ink-2);
+}
+
+.stack {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.sub {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.words {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.mint {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+/* A full address where there is room for it, a short one where there is not. */
+.short {
+  display: none;
+}
+
+@media (max-width: 40rem) {
+  .full {
+    display: none;
+  }
+
+  .short {
+    display: inline;
+  }
+
+  .stack {
+    justify-items: start;
+  }
+}
+
+/* A redemption: the row gives way to its receipt. */
+.receipts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 24rem));
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.groupBody > .receipts:first-child {
+  margin-top: 0;
+}
+
+.problem {
+  margin-top: var(--space-4);
+}

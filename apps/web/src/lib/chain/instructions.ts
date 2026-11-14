@@ -10,7 +10,7 @@ import {
 } from "@solana/kit";
 import { findAssociatedTokenPda, getCreateAssociatedTokenIdempotentInstructionAsync, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-import { getCancelOrderInstructionAsync, getPlaceBuyInstructionAsync, Side } from "@outcome/program-client";
+import { getCancelOrderInstructionAsync, getPlaceBuyInstructionAsync, getRedeemInstructionAsync, Side } from "@outcome/program-client";
 
 export const COMPUTE_BUDGET_PROGRAM_ADDRESS: Address = address("ComputeBudget111111111111111111111111111111");
 
@@ -125,4 +125,47 @@ export async function buildCancelOrder(input: CancelOrderInput): Promise<Instruc
     { programAddress: address(input.programId) },
   );
   return [cancel];
+}
+
+export interface RedeemInput {
+  programId: string;
+  /** The trading wallet: signer and fee payer. It need not be a registered trader. */
+  holder: string;
+  /** The on-chain market account. */
+  market: string;
+  /** The market's mint for the tokens being redeemed; it decides which payout applies. */
+  outcomeMint: string;
+  stableMint: string;
+  /** Units to burn. */
+  amount: bigint;
+}
+
+/**
+ * One transaction's worth of instructions for a redemption: the holder's test-dollar account
+ * (created if missing, so the payout has somewhere to go), then `redeem`, which burns the tokens
+ * and pays what the settlement gives their side from the market's vault. Tokens of the side that
+ * lost redeem for nothing, and the transaction still succeeds.
+ */
+export async function buildRedeem(input: RedeemInput): Promise<Instruction[]> {
+  if (input.amount <= 0n) throw new Error("Nothing to redeem.");
+  const holder = address(input.holder);
+  const signer = createNoopSigner(holder);
+  const stableMint = address(input.stableMint);
+  const outcomeMint = address(input.outcomeMint);
+  const [holderStable] = await findAssociatedTokenPda({ owner: holder, mint: stableMint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
+  const [holderOutcome] = await findAssociatedTokenPda({ owner: holder, mint: outcomeMint, tokenProgram: TOKEN_2022_PROGRAM_ADDRESS });
+
+  const createStableAccount = await getCreateAssociatedTokenIdempotentInstructionAsync({
+    payer: signer,
+    ata: holderStable,
+    owner: holder,
+    mint: stableMint,
+    tokenProgram: TOKEN_PROGRAM_ADDRESS,
+  });
+  // The vault, the PDA of `["redeem", market]`, is derived by the generated client.
+  const redeem = await getRedeemInstructionAsync(
+    { holder: signer, market: address(input.market), outcomeMint, holderOutcome, holderStable, stableMint, amount: input.amount },
+    { programAddress: address(input.programId) },
+  );
+  return [createStableAccount, redeem];
 }

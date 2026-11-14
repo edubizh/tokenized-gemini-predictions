@@ -1,15 +1,15 @@
-import { PageHeader, Shell } from "@/components/shell/Shell";
-import { EmptyState } from "@/components/ui/EmptyState";
+import { Shell } from "@/components/shell/Shell";
+import { SystemPage } from "@/features/system/SystemPage";
+import { loadConfig } from "@/lib/config.server";
 
 export const metadata = { title: "How it works" };
+export const dynamic = "force-dynamic";
 
-export default function SystemPage() {
+export default function Page() {
+  const { public: config, deployment } = loadConfig();
   return (
     <Shell>
-      <PageHeader title="How it works">
-        A program on Solana devnet holds each order's test dollars. A relayer places the matching order on an exchange sandbox, and tokens are minted only after that order fills. The relayer is trusted to report fills and results honestly; the program limits what it can do to any one order.
-      </PageHeader>
-      <EmptyState>Relayer status, the reconciliation table and the program's addresses will be shown here.</EmptyState>
+      <SystemPage addresses={{ program: config.programId, config: deployment?.config ?? null, stableMint: config.stableMint, treasury: deployment?.treasury ?? null }} />
     </Shell>
   );
 }

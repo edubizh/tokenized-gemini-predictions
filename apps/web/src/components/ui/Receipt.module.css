@@ -58,8 +58,10 @@
   transform: translateY(-3px);
 }
 
+/* A long value, such as a venue symbol, gives way and wraps before it pushes past the edge. */
 .value {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 70%;
   font-family: var(--font-mono);
   font-weight: var(--weight-medium);

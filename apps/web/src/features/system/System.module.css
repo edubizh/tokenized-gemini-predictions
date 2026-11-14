@@ -1,0 +1,239 @@
+.sections {
+  display: grid;
+  gap: var(--space-7);
+}
+
+.section {
+  min-width: 0;
+}
+
+.section h2 {
+  margin-bottom: var(--space-3);
+}
+
+.sectionNote {
+  max-width: 62ch;
+  margin-top: calc(var(--space-2) * -1);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+}
+
+.prose {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 62ch;
+  margin-bottom: var(--space-4);
+  color: var(--ink-2);
+}
+
+.prose strong {
+  font-weight: var(--weight-medium);
+  color: var(--ink);
+}
+
+/* Numbered steps under one rule each. */
+.steps {
+  border-top: 1px solid var(--rule);
+}
+
+.steps li {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr);
+  column-gap: var(--space-3);
+  padding: var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.stepNumber {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
+  color: var(--ink-3);
+}
+
+.stepText {
+  max-width: 62ch;
+  color: var(--ink-2);
+}
+
+.stepText strong {
+  font-weight: var(--weight-medium);
+  color: var(--ink);
+}
+
+/* A ledger of named facts: what it is, its value, a few words about it. */
+.ledger {
+  border-top: 1px solid var(--rule);
+}
+
+.ledgerRow {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 18rem) minmax(0, 1fr);
+  column-gap: var(--space-5);
+  align-items: baseline;
+  min-height: 44px;
+  padding: var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--rule);
+}
+
+.wideValue .ledgerRow {
+  grid-template-columns: 11rem minmax(0, 28rem) minmax(0, 1fr);
+}
+
+.ledgerLabel {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.ledgerValue {
+  min-width: 0;
+  font-weight: var(--weight-medium);
+}
+
+.ledgerNote {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.attention {
+  color: var(--caution);
+}
+
+.wrong {
+  color: var(--negative);
+}
+
+.fine {
+  color: var(--positive);
+}
+
+/* A full address where there is room for it, a short one where there is not. */
+.short {
+  display: none;
+}
+
+/* A full address leaves little room beside it: its note goes underneath. */
+@media (max-width: 68rem) {
+  .wideValue .ledgerRow {
+    grid-template-columns: 11rem minmax(0, 1fr);
+    row-gap: 2px;
+  }
+
+  .wideValue .ledgerNote {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 52rem) {
+  .ledgerRow,
+  .wideValue .ledgerRow {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 2px;
+  }
+
+  .wideValue .ledgerNote {
+    grid-column: 1;
+  }
+
+  .full {
+    display: none;
+  }
+
+  .short {
+    display: inline;
+  }
+}
+
+/* Reconciliation rows */
+.market {
+  display: grid;
+  gap: 2px;
+  padding-block: var(--space-1);
+  min-width: 0;
+}
+
+.marketTitle {
+  font-weight: var(--weight-semibold);
+}
+
+.sub {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--ink-3);
+}
+
+.figure {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.zero {
+  color: var(--ink-3);
+}
+
+.verdict {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+.emptyLine {
+  padding: var(--space-3) var(--space-2);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-3);
+}
+
+/* The treasury check: a receipt beside the sentence that explains it. */
+.treasury {
+  display: grid;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.treasuryReceipt {
+  max-width: 26rem;
+}
+
+@media (min-width: 52rem) {
+  .treasury {
+    grid-template-columns: minmax(0, 26rem) minmax(0, 1fr);
+    column-gap: var(--space-7);
+  }
+}
+
+.alert {
+  display: grid;
+  gap: 2px;
+  padding-block: var(--space-1);
+  min-width: 0;
+}
+
+.alertKind {
+  font-weight: var(--weight-medium);
+}
+
+.alertDetail {
+  max-width: 62ch;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--ink-2);
+}

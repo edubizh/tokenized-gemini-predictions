@@ -4,6 +4,7 @@ import {
   OutcomeTokensInstruction,
   parseCancelOrderInstruction,
   parsePlaceBuyInstruction,
+  parseRedeemInstruction,
   Side,
 } from "@outcome/program-client";
 import { fixturesMode, loadConfig } from "@/lib/config.server";
@@ -52,6 +53,11 @@ export async function POST(request: Request): Promise<Response> {
         case OutcomeTokensInstruction.CancelOrder:
           world.cancel(parseCancelOrderInstruction(instruction).accounts.order.address, now);
           break;
+        case OutcomeTokensInstruction.Redeem: {
+          const { accounts, data } = parseRedeemInstruction(instruction);
+          world.redeem({ holder: accounts.holder.address, market: accounts.market.address, outcomeMint: accounts.outcomeMint.address, amount: data.amount }, now);
+          break;
+        }
         default:
           break;
       }

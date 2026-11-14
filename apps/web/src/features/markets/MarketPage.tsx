@@ -8,11 +8,11 @@ import { Notice } from "@/components/ui/Notice";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { usePlaceOrder, useReclaimOrder } from "@/features/ticket/actions";
 import { useBalances, useLocalOrders, useOpenOrders, useOrders, usePositions, type OpenOrdersRead } from "@/features/ticket/hooks";
+import { orderEntries, SETTLING_MS, type OrderEntry } from "@/features/ticket/entries";
 import type { LocalOrders } from "@/features/ticket/local-orders";
 import { OrderTimelineView } from "@/features/ticket/OrderTimeline";
 import { Ticket, type TicketDraft } from "@/features/ticket/Ticket";
 import { deriveTimeline, type LocalOrder } from "@/features/ticket/timeline";
-import type { OpenOrder } from "@/lib/chain/reads";
 import { explorerTxUrl, useConfig } from "@/lib/config";
 import { ensureMarket } from "@/lib/relayer/client";
 import { chainNow, useHealth, useMarket } from "./hooks";
@@ -20,38 +20,12 @@ import { ClosedPanel, HowItWorks, isLive, MarketHeaderView, PositionView, Prepar
 import styles from "./Markets.module.css";
 
 const LISTED_ORDERS = 3;
-/** A just-placed order can be missing from one read of the chain or of the relayer. */
-const SETTLING_MS = 20_000;
 
-interface Entry {
-  address: string;
-  api: ApiOrder | null;
-  /** Undefined while it is not yet known whether the order account exists. */
-  chain: OpenOrder | null | undefined;
-  local: LocalOrder | null;
-  at: number;
-}
+type Entry = OrderEntry;
 
 /** Everything known about the user's orders in one market, newest first. */
 function entriesFor(market: ApiMarket, api: readonly ApiOrder[] | undefined, open: OpenOrdersRead | undefined, local: LocalOrders, nowMs: number): Entry[] {
-  const addresses = new Set<string>();
-  for (const order of api ?? []) if (order.symbol === market.symbol) addresses.add(order.address);
-  for (const order of open?.orders ?? []) if (order.market === market.onchain?.market) addresses.add(order.address);
-  for (const order of Object.values(local)) if (order.symbol === market.symbol) addresses.add(order.address);
-
-  return [...addresses]
-    .map((address): Entry => {
-      const apiOrder = api?.find((order) => order.address === address) ?? null;
-      const mine = local[address] ?? null;
-      let chain: OpenOrder | null | undefined = open === undefined ? undefined : (open.orders.find((order) => order.address === address) ?? null);
-      if (chain === null && mine && !mine.reclaimSignature) {
-        const readBeforePlacing = (open?.startedAt ?? 0) < mine.placedAt;
-        const relayerNotYet = apiOrder === null && nowMs - mine.placedAt < SETTLING_MS;
-        if (readBeforePlacing || relayerNotYet) chain = undefined;
-      }
-      return { address, api: apiOrder, chain, local: mine, at: mine?.placedAt ?? apiOrder?.createdAt ?? nowMs };
-    })
-    .sort((a, b) => b.at - a.at);
+  return orderEntries({ api, open, local, nowMs }).filter((entry) => entry.symbol === market.symbol || (entry.marketAddress !== null && entry.marketAddress === market.onchain?.market));
 }
 
 /** Asks the relayer, once per market, to create a live market that is not on-chain yet. */

@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { formatClock } from "@/features/markets/wording";
 import { explorerTxUrl, useConfig } from "@/lib/config";
-import { formatLocalTime } from "@/lib/format";
 import { useAccount } from "@/lib/privy/account";
 import { WelcomeView, type WelcomeState } from "./WelcomeView";
 
@@ -38,7 +38,7 @@ export function Welcome() {
       });
       const body = (await response.json().catch(() => ({}))) as { registered?: boolean; signature?: string; error?: string; detail?: string };
       if (response.ok && body.registered && body.signature) {
-        setLocal({ kind: "done", signature: body.signature, at: formatLocalTime(Date.now(), { seconds: true }) });
+        setLocal({ kind: "done", signature: body.signature, at: formatClock(Date.now(), { seconds: true, zone: true }) });
         refresh();
       } else if (response.ok) {
         setLocal({ kind: "already" });

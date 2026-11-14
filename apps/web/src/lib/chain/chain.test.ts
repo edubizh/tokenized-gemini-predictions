@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { address } from "@solana/kit";
-import { OUTCOME_TOKENS_PROGRAM_ADDRESS } from "@outcome/program-client";
-import { COMPUTE_BUDGET_PROGRAM_ADDRESS, computeUnitLimitInstruction } from "./instructions";
+import { AccountRole, address, type Instruction } from "@solana/kit";
+import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import { findVaultPda, OUTCOME_TOKENS_PROGRAM_ADDRESS, parseRedeemInstruction } from "@outcome/program-client";
+import { buildRedeem, COMPUTE_BUDGET_PROGRAM_ADDRESS, computeUnitLimitInstruction } from "./instructions";
 import { describeTransactionError, programErrorName } from "./errors";
 
 const program = OUTCOME_TOKENS_PROGRAM_ADDRESS;
@@ -116,5 +118,47 @@ describe("order instructions", async () => {
 
   it("needs the outcome mint to cancel a sell", async () => {
     await expect(buildCancelOrder({ programId: program, caller: user, order: { address: user, user, market, kind: 1, rentPayer: user }, stableMint })).rejects.toThrow(/outcome mint/);
+  });
+});
+
+describe("buildRedeem", () => {
+  const holder = address("8rj8Yq7cTmWXxvPx9aK9JVnRjUhhQn4SV1vLx9pYDK8p");
+  const market = address("So11111111111111111111111111111111111111112");
+  const outcomeMint = address("SysvarRent111111111111111111111111111111111");
+  const stableMint = address("SysvarC1ock11111111111111111111111111111111");
+
+  it("creates the holder's test-dollar account if it is missing, then redeems from the associated accounts", async () => {
+    const instructions = await buildRedeem({ programId: program, holder, market, outcomeMint, stableMint, amount: 500n });
+    expect(instructions).toHaveLength(2);
+    const [create, redeem] = instructions as [Instruction, Instruction];
+
+    const [holderStable] = await findAssociatedTokenPda({ owner: holder, mint: stableMint, tokenProgram: TOKEN_PROGRAM_ADDRESS });
+    const [holderOutcome] = await findAssociatedTokenPda({ owner: holder, mint: outcomeMint, tokenProgram: TOKEN_2022_PROGRAM_ADDRESS });
+    const [vault] = await findVaultPda({ market }, { programAddress: program });
+
+    expect(create.programAddress).toBe(ASSOCIATED_TOKEN_PROGRAM_ADDRESS);
+    // Discriminator 1 is the idempotent create: it does nothing when the account exists.
+    expect(Array.from(create.data ?? [])).toEqual([1]);
+    const created = (create.accounts ?? []).map((account) => account.address);
+    expect(created.slice(0, 4)).toEqual([holder, holderStable, holder, stableMint]);
+    expect(created).toContain(TOKEN_PROGRAM_ADDRESS);
+
+    expect(redeem.programAddress).toBe(program);
+    const parsed = parseRedeemInstruction(redeem as Parameters<typeof parseRedeemInstruction>[0]);
+    expect(parsed.data.amount).toBe(500n);
+    expect(parsed.accounts.holder.address).toBe(holder);
+    expect(parsed.accounts.holder.role).toBe(AccountRole.READONLY_SIGNER);
+    expect(parsed.accounts.market.address).toBe(market);
+    expect(parsed.accounts.outcomeMint.address).toBe(outcomeMint);
+    expect(parsed.accounts.holderOutcome.address).toBe(holderOutcome);
+    expect(parsed.accounts.vault.address).toBe(vault);
+    expect(parsed.accounts.holderStable.address).toBe(holderStable);
+    expect(parsed.accounts.stableMint.address).toBe(stableMint);
+    expect(parsed.accounts.stableTokenProgram.address).toBe(TOKEN_PROGRAM_ADDRESS);
+    expect(parsed.accounts.outcomeTokenProgram.address).toBe(TOKEN_2022_PROGRAM_ADDRESS);
+  });
+
+  it("refuses an amount of zero before anything is built", async () => {
+    await expect(buildRedeem({ programId: program, holder, market, outcomeMint, stableMint, amount: 0n })).rejects.toThrow("Nothing to redeem.");
   });
 });

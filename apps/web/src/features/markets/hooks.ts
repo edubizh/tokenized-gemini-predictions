@@ -21,7 +21,7 @@ export interface HealthState {
 
 const HealthContext = createContext<HealthState | null>(null);
 
-/** Polls the relayer's `/health` once for the whole page and keeps the app's clock aligned with the cluster. */
+/** Polls the relayer's `/health` once for the whole app and keeps the app's clock aligned with the cluster. Mounted in the root layout. */
 export function HealthProvider({ children }: { children: ReactNode }) {
   const read = useCallback(async (signal: AbortSignal) => {
     const health = await getHealth(signal);
