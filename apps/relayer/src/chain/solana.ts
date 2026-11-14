@@ -41,7 +41,7 @@ import {
   getCreateAssociatedTokenIdempotentInstructionAsync,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
-import { fetchMint as fetchOutcomeMint, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import { fetchAllMaybeMint as fetchAllMaybeOutcomeMint, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { fetchSysvarClock } from "@solana/sysvars";
 import { createRetryingRpc } from "./rpc.ts";
 import type { Chain, ChainConfig, ChainMarket, ChainOrder, MarketChain, NewChainMarket } from "./chain.ts";
@@ -253,9 +253,15 @@ export function createSolanaChain(options: SolanaChainOptions): Chain & MarketCh
     return { account, create };
   }
 
-  async function supplyOf(mint: Address): Promise<bigint> {
-    if (mint === DEFAULT_ADDRESS) return 0n;
-    return (await fetchOutcomeMint(rpc, mint, { commitment })).data.supply;
+  /** Supplies of a market's two outcome mints in one request; a mint that is not created yet counts as zero. */
+  async function suppliesOf(yesMint: Address, noMint: Address): Promise<{ yes: bigint; no: bigint }> {
+    const created = [yesMint, noMint].filter((mint) => mint !== DEFAULT_ADDRESS);
+    const accounts = created.length === 0 ? [] : await fetchAllMaybeOutcomeMint(rpc, created, { commitment });
+    const supply = (mint: Address): bigint => {
+      const account = accounts.find((candidate) => candidate.address === mint);
+      return account !== undefined && account.exists ? account.data.supply : 0n;
+    };
+    return { yes: supply(yesMint), no: supply(noMint) };
   }
 
   async function market(symbol: string): Promise<ChainMarket | null> {
@@ -263,8 +269,7 @@ export function createSolanaChain(options: SolanaChainOptions): Chain & MarketCh
     const account = await fetchMaybeMarket(rpc, marketAddress, { commitment });
     if (!account.exists) return null;
     symbols.set(marketAddress, account.data.symbol);
-    const [yes, no] = await Promise.all([supplyOf(account.data.yesMint), supplyOf(account.data.noMint)]);
-    return toChainMarket(marketAddress, account.data, { yes, no });
+    return toChainMarket(marketAddress, account.data, await suppliesOf(account.data.yesMint, account.data.noMint));
   }
 
   async function config(): Promise<ChainConfig> {

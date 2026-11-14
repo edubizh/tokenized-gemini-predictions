@@ -20,6 +20,8 @@ export interface MarketManagerOptions {
   /** Seconds the on-chain order cutoff sits ahead of the venue's. */
   cutoffBufferSecs: number;
   booksPerRefresh: number;
+  /** A market's on-chain state is read again once its cached copy is this old. */
+  chainRefreshMs: number;
   /** Unix milliseconds. */
   now(): number;
 }
@@ -28,6 +30,7 @@ export const DEFAULT_MARKET_OPTIONS = {
   maxSupplyUnits: 1_000_000n,
   cutoffBufferSecs: 30,
   booksPerRefresh: 2,
+  chainRefreshMs: 15_000,
 } as const satisfies Partial<MarketManagerOptions>;
 
 export type MarketManagerInput = Omit<MarketManagerOptions, keyof typeof DEFAULT_MARKET_OPTIONS> &
@@ -118,6 +121,7 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
     maxSupplyUnits: input.maxSupplyUnits ?? DEFAULT_MARKET_OPTIONS.maxSupplyUnits,
     cutoffBufferSecs: input.cutoffBufferSecs ?? DEFAULT_MARKET_OPTIONS.cutoffBufferSecs,
     booksPerRefresh: input.booksPerRefresh ?? DEFAULT_MARKET_OPTIONS.booksPerRefresh,
+    chainRefreshMs: input.chainRefreshMs ?? DEFAULT_MARKET_OPTIONS.chainRefreshMs,
   };
   const curated = new Set(o.series);
   /** Best prices as they came with the contract list; a side the venue left out is undefined. */
@@ -128,6 +132,8 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
   const bookTurns = new Map<string, number>();
   let turn = 0;
   const chainMarkets = new Map<string, ChainMarket>();
+  /** When each market's on-chain state was last read, unix milliseconds. */
+  const chainReadAt = new Map<string, number>();
   const flights = new Map<string, Promise<ApiMarket>>();
   let venueOnline = true;
   let paused = false;
@@ -219,11 +225,17 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
   }
 
   async function refreshChain(failures: RefreshError["parts"]): Promise<void> {
+    // Live and unsettled markets are read again only when the cached copy has aged: the public
+    // RPC endpoint limits requests per address, and supplies do not need to be fresher than this.
+    const now = o.now();
+    const due = (symbol: string): boolean => now - (chainReadAt.get(symbol) ?? Number.NEGATIVE_INFINITY) >= o.chainRefreshMs;
     const symbols = new Set<string>();
-    for (const market of o.registry.live(o.now(), o.series)) {
-      if (market.marketAddress !== null) symbols.add(market.symbol);
+    for (const market of o.registry.live(now, o.series)) {
+      if (market.marketAddress !== null && due(market.symbol)) symbols.add(market.symbol);
     }
-    for (const market of o.registry.onchainUnsettled()) symbols.add(market.symbol);
+    for (const market of o.registry.onchainUnsettled()) {
+      if (due(market.symbol)) symbols.add(market.symbol);
+    }
     // Older markets are read until their final state is cached: once after a restart, and once
     // more after settlement so the view carries the payouts and the redemption time.
     let catchUp = 0;
@@ -240,6 +252,7 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
       try {
         const market = await o.chain.market(symbol);
         if (market !== null) chainMarkets.set(symbol, market);
+        chainReadAt.set(symbol, o.now());
       } catch (error) {
         failures.push({ part: "chain", error });
       }
@@ -268,6 +281,7 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
     if (created.yesMint === null || created.noMint === null) throw new Error(`market ${symbol} is missing an outcome mint`);
     o.registry.setOnchain(symbol, { marketAddress: created.address, yesMint: created.yesMint, noMint: created.noMint });
     chainMarkets.set(symbol, created);
+    chainReadAt.set(symbol, o.now());
     return toView(o.registry.get(symbol) ?? market);
   }
 

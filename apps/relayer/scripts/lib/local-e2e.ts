@@ -69,7 +69,7 @@ const DUSD = 1_000_000n;
 const LAMPORTS_PER_SOL = 1_000_000_000n;
 
 const repoRoot = path.resolve(import.meta.dirname, "../../../..");
-const programSo = process.env.PROGRAM_SO ?? path.join(repoRoot, ".data", "outcome_tokens.p4.so");
+const programSo = process.env.PROGRAM_SO ?? path.join(repoRoot, "anchor", "target", "deploy", "outcome_tokens.so");
 const ledgerDir = path.join(repoRoot, ".data", "local-e2e-ledger");
 const programId = OUTCOME_TOKENS_PROGRAM_ADDRESS;
 

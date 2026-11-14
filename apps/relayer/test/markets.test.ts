@@ -190,10 +190,11 @@ describe("refresh", () => {
   });
 
   it("refreshes the chain state of on-chain markets and keeps going when the venue list fails", async () => {
-    const { venue, chain, manager } = await listed();
+    const { venue, chain, clock, manager } = await listed();
     await manager.ensureOnchain(BTC);
     chain.setSupply(BTC, 300n, 100n);
     chain.reads.length = 0;
+    clock.ms += 15_000; // the copy cached by ensureOnchain has aged
     vi.spyOn(venue, "listContracts").mockRejectedValueOnce(new Error("venue down"));
 
     const failure = await manager.refresh().catch((error: unknown) => error);
@@ -202,6 +203,22 @@ describe("refresh", () => {
     expect((failure as RefreshError).parts.map((part) => part.part)).toEqual(["venue_list"]);
     expect(chain.reads).toEqual([BTC]);
     expect(manager.view(BTC)?.onchain).toMatchObject({ yesSupply: "300", noSupply: "100", status: "open" });
+  });
+
+  it("reads the chain state of a live market at most once per refresh interval", async () => {
+    const { chain, clock, manager } = await listed({}, { chainRefreshMs: 15_000 });
+    await manager.ensureOnchain(BTC);
+    chain.reads.length = 0;
+
+    await manager.refresh();
+    clock.ms += 14_000;
+    await manager.refresh();
+    expect(chain.reads).toEqual([]); // ensureOnchain left a fresh copy in the cache
+
+    clock.ms += 1_000;
+    await manager.refresh();
+    await manager.refresh();
+    expect(chain.reads).toEqual([BTC]);
   });
 
   it("keeps reading an expired on-chain market until its settlement is cached, then stops", async () => {
@@ -225,13 +242,14 @@ describe("refresh", () => {
   });
 
   it("reports a chain read that fails after the other markets were read", async () => {
-    const { venue, chain, manager } = await listed();
+    const { venue, chain, clock, manager } = await listed();
     venue.addContract(info(ETH));
     await manager.refresh();
     await manager.ensureOnchain(BTC);
     await manager.ensureOnchain(ETH);
     chain.setSupply(ETH, 50n, 0n);
     chain.fail("market", 1);
+    clock.ms += 15_000; // both cached copies have aged
 
     const failure = await manager.refresh().catch((error: unknown) => error);
     expect((failure as RefreshError).parts.map((part) => part.part)).toEqual(["chain"]);
@@ -276,6 +294,7 @@ describe("tradable", () => {
     await halted.manager.ensureOnchain(BTC);
     expect(reason(halted)).toBeNull();
     await halted.chain.haltMarket(BTC);
+    halted.clock.ms += 15_000; // the cached on-chain copy has aged
     await halted.manager.refresh();
     expect(reason(halted)).toBe("market_not_open");
   });
