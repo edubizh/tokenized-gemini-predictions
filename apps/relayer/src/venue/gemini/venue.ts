@@ -473,7 +473,8 @@ function eventTickerOf(symbol: string): string | null {
  * States and the resolution side are read leniently (unknown values pass through or become
  * null) and an unreadable date becomes an invalid Date. The price and quantity grid is not
  * guessed: an unreadable increment throws. Display fields come from the event (title, series)
- * and the contract (label, strike, settlement value) and are left out or null when absent.
+ * and the contract (label, strike, settlement value) and are left out or null when absent. The
+ * best bid and ask come from the contract's `prices` and are left out when it has none.
  */
 function toContractInfo(symbol: string, eventTicker: string, row: Row, event: Row): ContractInfo {
   const grid = (field: string, decimals: number): bigint => {
@@ -500,6 +501,8 @@ function toContractInfo(symbol: string, eventTicker: string, row: Row, event: Ro
     ...(typeof event.series === "string" ? { series: event.series } : {}),
     strike: isRecord(row.strike) ? text(row.strike.value) : null,
     settlementValue: text(row.settlementValue),
+    // `prices` is `{ buy: {}, sell: {} }` without quotes; a side that is absent has no quote.
+    ...(isRecord(row.prices) ? { bestBidPx: wholePx(row.prices.bestBid), bestAskPx: wholePx(row.prices.bestAsk) } : {}),
   };
 }
 

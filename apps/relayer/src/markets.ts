@@ -8,7 +8,7 @@ import { seriesOf } from "./registry.ts";
 import type { Registry, RegistryMarket } from "./registry.ts";
 import { cutoffMs } from "./venue/tradable.ts";
 import type { Outcome } from "./venue/types.ts";
-import type { Venue } from "./venue/venue.ts";
+import type { TopOfBook, Venue } from "./venue/venue.ts";
 
 export interface MarketManagerOptions {
   venue: Venue;
@@ -34,7 +34,7 @@ export type MarketManagerInput = Omit<MarketManagerOptions, keyof typeof DEFAULT
   Partial<Pick<MarketManagerOptions, keyof typeof DEFAULT_MARKET_OPTIONS>>;
 
 export interface MarketManager {
-  /** Venue list -> registry; a few books; chain state of on-chain markets. */
+  /** Venue list -> registry and book prices; a few book sizes; chain state of on-chain markets. */
   refresh(): Promise<void>;
   /** Built from cached data only, no I/O. */
   views(scope: "live" | "all"): ApiMarket[];
@@ -120,7 +120,10 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
     booksPerRefresh: input.booksPerRefresh ?? DEFAULT_MARKET_OPTIONS.booksPerRefresh,
   };
   const curated = new Set(o.series);
-  const books = new Map<string, ApiBook>();
+  /** Best prices as they came with the contract list; a side the venue left out is undefined. */
+  const quotes = new Map<string, { bidPx: bigint | null | undefined; askPx: bigint | null | undefined; at: number }>();
+  /** The last top of book read per symbol: the source of sizes, and of prices the list lacks. */
+  const tops = new Map<string, { top: TopOfBook; at: number }>();
   /** When each live symbol last had its turn at a book read; a higher number is more recent. */
   const bookTurns = new Map<string, number>();
   let turn = 0;
@@ -128,6 +131,23 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
   const flights = new Map<string, Promise<ApiMarket>>();
   let venueOnline = true;
   let paused = false;
+
+  /** Prices from the contract list, else from the last book read; sizes from the last book read, "0" when unknown. */
+  function bookOf(symbol: string): ApiBook | null {
+    const quote = quotes.get(symbol);
+    const read = tops.get(symbol);
+    if (quote === undefined && read === undefined) return null;
+    const bidPx = quote?.bidPx !== undefined ? quote.bidPx : (read?.top.bidPx ?? null);
+    const askPx = quote?.askPx !== undefined ? quote.askPx : (read?.top.askPx ?? null);
+    return {
+      bidPx: bidPx === null ? null : bidPx.toString(),
+      bidUnits: (read?.top.bidUnits ?? 0n).toString(),
+      askPx: askPx === null ? null : askPx.toString(),
+      askUnits: (read?.top.askUnits ?? 0n).toString(),
+      // When the prices were read.
+      at: quote?.at ?? read?.at ?? 0,
+    };
+  }
 
   function toView(market: RegistryMarket): ApiMarket {
     const now = o.now();
@@ -137,7 +157,7 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
       onchain === null
         ? venueLastOrderAt - o.cutoffBufferSecs * 1_000
         : Math.min(venueLastOrderAt, (onchain.closeTs - onchain.placeCutoffSecs) * 1_000);
-    const book = books.get(market.symbol) ?? null;
+    const book = bookOf(market.symbol);
 
     let reason: NotTradableReason | null = null;
     if (!venueOnline) reason = "venue_offline";
@@ -177,9 +197,10 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
   async function refreshBooks(failures: RefreshError["parts"]): Promise<void> {
     const live = o.registry.live(o.now(), o.series);
     const liveSymbols = new Set(live.map((market) => market.symbol));
-    for (const symbol of [...books.keys(), ...bookTurns.keys()]) {
+    for (const symbol of [...quotes.keys(), ...tops.keys(), ...bookTurns.keys()]) {
       if (liveSymbols.has(symbol)) continue;
-      books.delete(symbol);
+      quotes.delete(symbol);
+      tops.delete(symbol);
       bookTurns.delete(symbol);
     }
     // Stable sort: among symbols that waited equally long, the soonest expiry goes first.
@@ -190,14 +211,7 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
       // The turn is spent even when the read fails, so one bad book cannot starve the others.
       bookTurns.set(symbol, ++turn);
       try {
-        const top = await o.venue.topOfBook(symbol);
-        books.set(symbol, {
-          bidPx: top.bidPx === null ? null : top.bidPx.toString(),
-          bidUnits: top.bidUnits.toString(),
-          askPx: top.askPx === null ? null : top.askPx.toString(),
-          askUnits: top.askUnits.toString(),
-          at: o.now(),
-        });
+        tops.set(symbol, { top: await o.venue.topOfBook(symbol), at: o.now() });
       } catch (error) {
         failures.push({ part: "books", error });
       }
@@ -268,6 +282,12 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
             o.registry.upsertContract(info, now);
           } catch (error) {
             failures.push({ part: "contract", error });
+            continue;
+          }
+          if (info.bestBidPx !== undefined || info.bestAskPx !== undefined) {
+            quotes.set(info.symbol, { bidPx: info.bestBidPx, askPx: info.bestAskPx, at: now });
+          } else {
+            quotes.delete(info.symbol);
           }
         }
       } catch (error) {

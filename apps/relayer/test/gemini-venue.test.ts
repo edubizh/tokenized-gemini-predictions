@@ -741,6 +741,35 @@ describe("contract and listContracts", () => {
     ]);
   });
 
+  it("reads the top of book the event list and the single event carry, in YES price space", async () => {
+    const { venue, http } = await connected();
+    const quoted = { buy: { yes: "0.11", no: "0.97" }, sell: { yes: "0.03", no: "0.89" }, bestBid: "0.03", bestAsk: "0.11" };
+    http.respond(() => ({
+      data: [
+        {
+          ticker: EVENT,
+          contracts: [
+            contractRow({ prices: quoted }),
+            contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-DOWN", prices: { buy: {}, sell: {} } }),
+            contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-FLAT", prices: { buy: {}, sell: {}, bestBid: "0.4", bestAsk: "soon" } }),
+            contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-BARE" }),
+          ],
+        },
+      ],
+    }));
+    const listed = await drive(venue.listContracts(), 1_000);
+    expect(listed.map((contract) => [contract.bestBidPx, contract.bestAskPx])).toEqual([
+      [300n, 1_100n],
+      [null, null],
+      [4_000n, null],
+      [undefined, undefined],
+    ]);
+    expect(listed[3]).not.toHaveProperty("bestBidPx");
+
+    http.respond(() => ({ ticker: EVENT, contracts: [contractRow({ prices: quoted })] }));
+    await expect(drive(venue.contract(SYMBOL), 1_000)).resolves.toMatchObject({ bestBidPx: 300n, bestAskPx: 1_100n });
+  });
+
   it("passes unknown states through and reads the resolution side leniently", async () => {
     const { venue, http } = await connected();
     http.respond(() => ({ ticker: EVENT, contracts: [contractRow({ status: "settled", marketState: "closed", resolutionSide: "YES" })] }));

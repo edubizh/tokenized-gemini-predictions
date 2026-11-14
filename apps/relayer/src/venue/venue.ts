@@ -27,6 +27,12 @@ export interface ContractInfo {
   strike?: string | null;
   /** Final reference value in dollars as the venue prints it; null until resolved. */
   settlementValue?: string | null;
+  /**
+   * Top of book in YES price space as it came with the contract; null when that side has no
+   * quote. Left out by a venue whose contract data carries no quotes.
+   */
+  bestBidPx?: bigint | null;
+  bestAskPx?: bigint | null;
 }
 
 /** Best bid and ask in YES price space. A null price means that side of the book is empty. */

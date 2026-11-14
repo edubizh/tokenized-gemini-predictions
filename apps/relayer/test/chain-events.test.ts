@@ -1,11 +1,13 @@
 import { address, getBase64Decoder, type Address } from "@solana/kit";
 import {
+  getMarketSettledEventEncoder,
   getOrderCancelledEventEncoder,
   getOrderFilledEventEncoder,
   getOrderPlacedEventEncoder,
+  getSettlementRevokedEventEncoder,
 } from "@outcome/program-client";
 import { describe, expect, it } from "vitest";
-import { orderClosure, programEvents } from "../src/chain/events.ts";
+import { marketSettlement, orderClosure, programEvents } from "../src/chain/events.ts";
 
 const PROGRAM = address("8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn");
 const OTHER_PROGRAM = address("ComputeBudget111111111111111111111111111111");
@@ -50,6 +52,15 @@ function placedLine(): string {
     nonce: 3n,
   });
   return `Program data: ${base64(bytes)}`;
+}
+
+function settledLine(market: Address = MARKET, yesPayout = 10_000n, redeemAfter = 1_800_000_030n): string {
+  const bytes = getMarketSettledEventEncoder().encode({ market, yesPayout, noPayout: 10_000n - yesPayout, funding: 2_000_000n, redeemAfter });
+  return `Program data: ${base64(bytes)}`;
+}
+
+function revokedLine(market: Address = MARKET): string {
+  return `Program data: ${base64(getSettlementRevokedEventEncoder().encode({ market }))}`;
 }
 
 function wrap(program: string, ...inner: string[]): string[] {
@@ -128,5 +139,30 @@ describe("orderClosure", () => {
     expect(orderClosure(wrap(PROGRAM, placedLine()), PROGRAM, ORDER)).toBeNull();
     expect(orderClosure(wrap(OTHER_PROGRAM, filledLine()), PROGRAM, ORDER)).toBeNull();
     expect(orderClosure([], PROGRAM, ORDER)).toBeNull();
+  });
+});
+
+describe("marketSettlement", () => {
+  it("finds the settlement of the market with its decoded values", () => {
+    const logs = wrap(PROGRAM, "Program log: Instruction: SettleMarket", settledLine());
+    expect(marketSettlement(logs, PROGRAM, MARKET)).toEqual({
+      market: MARKET,
+      yesPayout: 10_000n,
+      noPayout: 0n,
+      funding: 2_000_000n,
+      redeemAfter: 1_800_000_030n,
+    });
+  });
+
+  it("returns the last settlement when one transaction settles the market more than once", () => {
+    const logs = [...wrap(PROGRAM, settledLine(MARKET, 10_000n)), ...wrap(PROGRAM, revokedLine()), ...wrap(PROGRAM, settledLine(MARKET, 1_000n, 1_800_000_090n))];
+    expect(marketSettlement(logs, PROGRAM, MARKET)).toMatchObject({ yesPayout: 1_000n, noPayout: 9_000n, redeemAfter: 1_800_000_090n });
+  });
+
+  it("returns null for another market, other events, another program, or no logs", () => {
+    expect(marketSettlement(wrap(PROGRAM, settledLine(OTHER_ORDER)), PROGRAM, MARKET)).toBeNull();
+    expect(marketSettlement(wrap(PROGRAM, revokedLine(), filledLine(), cancelledLine()), PROGRAM, MARKET)).toBeNull();
+    expect(marketSettlement(wrap(OTHER_PROGRAM, settledLine()), PROGRAM, MARKET)).toBeNull();
+    expect(marketSettlement([], PROGRAM, MARKET)).toBeNull();
   });
 });

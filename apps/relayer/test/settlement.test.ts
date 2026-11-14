@@ -13,6 +13,7 @@ const EXPIRY = Date.parse("2026-11-14T03:00:00Z");
 const START = EXPIRY + 30_000;
 const CONFIRM = 20_000;
 const REVIEW_AFTER = 600_000;
+const PAYOUT_GRACE = 180_000;
 const SYMBOL = "TEST-BTC15M2611140300-UP";
 const OTHER = "TEST-ETH15M2611140300-UP";
 
@@ -56,6 +57,7 @@ function world() {
     journal,
     confirmMs: CONFIRM,
     reviewAfterMs: REVIEW_AFTER,
+    payoutGraceMs: PAYOUT_GRACE,
     now: () => clock.ms,
     alert: (event) => alerts.push(event),
   });
@@ -240,14 +242,22 @@ describe("settlement watcher", () => {
     expect(w.alerts).toHaveLength(1);
   });
 
-  it("does not settle on a payout mismatch: needs review, with both numbers", async () => {
+  it("waits out the payout grace when the venue paid less than expected, then asks for review with both numbers", async () => {
     const w = world();
     w.market(SYMBOL, 300n, 0n);
     await w.hold(SYMBOL, 200n);
     w.venue.resolve(SYMBOL, "yes"); // paid 200 units, 300 are outstanding
     await w.confirm();
+    expect(w.registry.get(SYMBOL)?.settleState).toBe("awaiting_result");
 
+    w.clock.ms = START + PAYOUT_GRACE - 1; // the resolution was first seen at START
+    await w.watcher.tick();
+    expect(w.registry.get(SYMBOL)?.settleState).toBe("awaiting_result");
+    expect(w.alerts).toEqual([]);
     expect(w.chain.settlements).toEqual([]);
+
+    w.clock.ms += 1;
+    await w.watcher.tick();
     const detail = "venue paid 2000000 micro-dollars, expected 3000000";
     expect(w.registry.get(SYMBOL)).toMatchObject({ settleState: "needs_review", detail });
     expect(w.alerts).toEqual([{ kind: "payout_mismatch", orderAddress: null, detail: `${SYMBOL}: ${detail}` }]);
@@ -257,13 +267,55 @@ describe("settlement watcher", () => {
     expect(w.chain.settlements).toEqual([]);
   });
 
-  it("treats a missing settled row as nothing paid", async () => {
+  it("treats a settled row that never shows up as nothing paid once the grace has passed", async () => {
     const w = world();
     w.market(SYMBOL, 300n, 0n);
     w.venue.resolve(SYMBOL, "yes"); // the venue account was flat
     await w.confirm();
+    expect(w.registry.get(SYMBOL)?.settleState).toBe("awaiting_result");
+    w.clock.ms = START + PAYOUT_GRACE;
+    await w.watcher.tick();
     expect(w.registry.get(SYMBOL)).toMatchObject({ settleState: "needs_review", detail: "venue paid 0 micro-dollars, expected 3000000" });
     expect(w.chain.settlements).toEqual([]);
+  });
+
+  it("settles when the settled row is published late, within the grace", async () => {
+    const w = world();
+    w.market(SYMBOL, 300n, 0n);
+    await w.hold(SYMBOL, 300n);
+    w.venue.resolve(SYMBOL, "yes");
+    const payout = vi.spyOn(w.venue, "settledPayoutMicros").mockResolvedValue(null); // resolved, row not there yet
+    await w.confirm();
+    w.clock.ms += 30_000;
+    await w.watcher.tick();
+    expect(payout).toHaveBeenCalledTimes(2);
+    expect(w.chain.settlements).toEqual([]);
+    expect(w.alerts).toEqual([]);
+
+    payout.mockRestore();
+    w.clock.ms += 5_000;
+    await w.watcher.tick();
+    expect(w.chain.settlements).toMatchObject([{ symbol: SYMBOL, yesPayout: 10_000n, noPayout: 0n }]);
+    expect(w.registry.get(SYMBOL)?.settleState).toBe("settled");
+    expect(w.alerts).toEqual([]);
+  });
+
+  it("asks for review at once when the venue paid more than expected", async () => {
+    const w = world();
+    w.market(SYMBOL, 300n, 0n);
+    await w.hold(SYMBOL, 500n);
+    w.venue.resolve(SYMBOL, "yes"); // paid 500 units, 300 are outstanding
+    w.market(OTHER, 200n, 0n);
+    await w.hold(OTHER, 200n);
+    w.venue.resolve(OTHER, "yes");
+    vi.spyOn(w.venue, "settledPayoutMicros").mockImplementation(async (symbol) => (symbol === OTHER ? 2_000_000n : 5_000_000n));
+    w.chain.setSupply(OTHER, 0n, 200n); // nothing is due for OTHER, yet the venue paid
+    await w.confirm();
+
+    expect(w.chain.settlements).toEqual([]);
+    expect(w.registry.get(SYMBOL)).toMatchObject({ settleState: "needs_review", detail: "venue paid 5000000 micro-dollars, expected 3000000" });
+    expect(w.registry.get(OTHER)).toMatchObject({ settleState: "needs_review", detail: "venue paid 2000000 micro-dollars, expected 0" });
+    expect(w.alerts.map((alert) => alert.kind)).toEqual(["payout_mismatch", "payout_mismatch"]);
   });
 
   it("marks a market nobody traded as unused and settles nothing", async () => {

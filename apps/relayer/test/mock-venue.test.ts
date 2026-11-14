@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { takerFee } from "../src/money.ts";
 import { MockVenue } from "../src/venue/mock.ts";
+import { RollingMockVenue } from "../src/venue/mock-feed.ts";
 import type { VenueOrderRequest } from "../src/venue/types.ts";
 import type { ContractInfo } from "../src/venue/venue.ts";
 
@@ -371,6 +372,18 @@ describe("MockVenue.listContracts", () => {
   });
 });
 
+describe("MockVenue best prices", () => {
+  it("reports the best bid and ask of its book with every contract", async () => {
+    const venue = venueWith();
+    expect(await venue.contract(SYMBOL)).toMatchObject({ bestBidPx: null, bestAskPx: null });
+    venue.setBook(SYMBOL, { bids: [[300n, 200n], [200n, 900n]], asks: [[1_700n, 300n]] });
+    expect(await venue.contract(SYMBOL)).toMatchObject({ bestBidPx: 300n, bestAskPx: 1_700n });
+    expect((await venue.listContracts())[0]).toMatchObject({ symbol: SYMBOL, bestBidPx: 300n, bestAskPx: 1_700n });
+    venue.setBook(SYMBOL, { bids: [], asks: [[1_700n, 300n]] });
+    expect((await venue.listContracts())[0]).toMatchObject({ bestBidPx: null, bestAskPx: 1_700n });
+  });
+});
+
 describe("MockVenue market data", () => {
   it("returns null for an unknown contract and an empty top of book", async () => {
     const venue = venueWith();
@@ -378,5 +391,99 @@ describe("MockVenue market data", () => {
     expect(await venue.topOfBook(SYMBOL)).toEqual({ bidPx: null, bidUnits: 0n, askPx: null, askUnits: 0n });
     venue.setBook(SYMBOL, { bids: [[300n, 200n]], asks: [[1_700n, 300n]] });
     expect(await venue.topOfBook(SYMBOL)).toEqual({ bidPx: 300n, bidUnits: 200n, askPx: 1_700n, askUnits: 300n });
+  });
+});
+
+describe("RollingMockVenue", () => {
+  const NOW = Date.parse("2026-11-14T02:50:00Z");
+  const END = Date.parse("2026-11-14T03:00:00Z");
+  const BTC = "TEST-BTC15M2611140300-UP";
+
+  function rolling(options: Partial<ConstructorParameters<typeof RollingMockVenue>[0]> = {}) {
+    const clock = { ms: NOW };
+    const venue = new RollingMockVenue({ windowSecs: 900, resolve: "yes", now: () => clock.ms, random: () => 0.5, ...options });
+    return { venue, clock };
+  }
+
+  it("lists one contract per series for the current window, named after the window end, with a two-sided book", async () => {
+    const { venue } = rolling();
+    const listed = await venue.listContracts();
+    expect(listed.map((info) => [info.symbol, info.series, info.eventTicker])).toEqual([
+      [BTC, "BTC15M", "BTC15M2611140300"],
+      ["TEST-ETH15M2611140300-UP", "ETH15M", "ETH15M2611140300"],
+      ["TEST-SOL15M2611140300-UP", "SOL15M", "SOL15M2611140300"],
+    ]);
+    expect(listed[0]).toMatchObject({
+      status: "active",
+      marketState: "open",
+      effectiveAt: new Date(END - 900_000),
+      expiresAt: new Date(END),
+      tickPx: 100n,
+      unitIncrement: 1n,
+      minUnits: 1n,
+      label: "Up",
+      bestBidPx: 4_800n,
+      bestAskPx: 5_200n,
+    });
+    expect(listed[0]!.title).not.toMatch(/gemini/i);
+    expect(await venue.topOfBook(BTC)).toEqual({ bidPx: 4_800n, bidUnits: 20_000n, askPx: 5_200n, askUnits: 20_000n });
+  });
+
+  it("moves the price a little on each list and keeps it inside the book's range", async () => {
+    const steps = [0.99, 0.99, 0.0];
+    const { venue } = rolling({ random: () => steps.shift() ?? 0.99 });
+    const mid = async () => ((await venue.listContracts())[0]!.bestBidPx ?? 0n) + 200n;
+    expect(await mid()).toBe(5_200n); // BTC took the first step: up two ticks
+    for (let i = 0; i < 40; i++) await venue.listContracts();
+    expect(await mid()).toBe(9_000n);
+  });
+
+  it("closes a contract at expiry, resolves it a few seconds later and lists the next window", async () => {
+    const { venue, clock } = rolling({ resolve: "no" });
+    await venue.listContracts();
+    const filled = await venue.placeOrder({ clientOrderId: "a", symbol: BTC, outcome: "NO", units: 300n, limitPx: 5_200n, timeInForce: "FOK" });
+    expect(filled.kind).toBe("filled");
+
+    clock.ms = END;
+    expect(await venue.contract(BTC)).toMatchObject({ status: "active", marketState: "closed", resolutionSide: null });
+    const late = await venue.placeOrder({ clientOrderId: "b", symbol: BTC, outcome: "YES", units: 100n, limitPx: 9_000n, timeInForce: "FOK" });
+    expect(late.kind).toBe("rejected");
+    const next = "TEST-BTC15M2611140315-UP";
+    expect((await venue.listContracts()).map((info) => info.symbol)).toContain(next);
+
+    clock.ms = END + 4_999;
+    expect((await venue.contract(BTC))?.status).toBe("active");
+    clock.ms = END + 5_000;
+    expect(await venue.contract(BTC)).toMatchObject({ status: "settled", resolutionSide: "no" });
+    expect((await venue.contract(BTC))?.settlementValue).toMatch(/^\d+\.\d{2}$/);
+    expect(await venue.settledPayoutMicros(BTC)).toBe(3_000_000n);
+    expect((await venue.listContracts()).map((info) => info.symbol)).toEqual([next, "TEST-ETH15M2611140315-UP", "TEST-SOL15M2611140315-UP"]);
+  });
+
+  it("resolves at random when asked to, and honours the window length", async () => {
+    const draws = [0.9, 0.1];
+    const { venue, clock } = rolling({ windowSecs: 180, resolve: "random", random: () => draws.shift() ?? 0.5 });
+    const symbols = (await venue.listContracts()).map((info) => info.symbol); // spends no draw on resolution
+    expect(symbols[0]).toBe("TEST-BTC15M2611140251-UP");
+    draws.length = 0;
+    draws.push(0.9, 0.1, 0.9);
+    clock.ms = Date.parse("2026-11-14T02:51:05Z");
+    const sides = [];
+    for (const symbol of symbols) sides.push((await venue.contract(symbol))?.resolutionSide);
+    expect(sides).toEqual(["no", "yes", "no"]);
+  });
+
+  it("adopts a contract from an earlier run with its position and resolves it like its own", async () => {
+    const { venue, clock } = rolling({ resolve: "yes" });
+    const old = contract({ symbol: "TEST-BTC15M2611140245-UP", eventTicker: "BTC15M2611140245", expiresAt: new Date(NOW - 60_000), unitIncrement: 1n, minUnits: 1n });
+    venue.adopt(old, 250n);
+    expect(await venue.netPosition(old.symbol)).toBe(250n);
+    clock.ms += 1;
+    expect(await venue.contract(old.symbol)).toMatchObject({ status: "settled", resolutionSide: "yes" });
+    expect(await venue.settledPayoutMicros(old.symbol)).toBe(2_500_000n);
+
+    const decided = contract({ symbol: "TEST-ETH15M2611140245-UP", eventTicker: "ETH15M2611140245", expiresAt: new Date(NOW - 60_000) });
+    venue.adopt(decided, -100n, "no");
+    expect(await venue.contract(decided.symbol)).toMatchObject({ status: "settled", resolutionSide: "no" });
   });
 });

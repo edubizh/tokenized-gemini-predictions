@@ -117,17 +117,61 @@ describe("refresh", () => {
 
     await manager.refresh();
     expect(asked()).toEqual([BTC, ETH]);
-    expect(manager.view(SOL)?.book).toBeNull();
+    // Listed without quotes, and its book has not had a turn: no prices, sizes unknown.
+    expect(manager.view(SOL)?.book).toEqual({ bidPx: null, bidUnits: "0", askPx: null, askUnits: "0", at: NOW });
 
     venue.setBook(SOL, BOOK);
     clock.ms = NOW + 4_000;
     await manager.refresh();
     expect(asked()).toEqual([BTC, ETH, SOL, BTC]);
     expect(manager.view(SOL)?.book).toEqual({ bidPx: "4000", bidUnits: "500", askPx: "4500", askUnits: "700", at: NOW + 4_000 });
-    expect(manager.view(ETH)?.book?.at).toBe(NOW);
+    expect(manager.view(ETH)?.book?.at).toBe(NOW + 4_000); // prices come with every list
 
     await manager.refresh();
     expect(asked()).toEqual([BTC, ETH, SOL, BTC, ETH, SOL]);
+  });
+
+  it("takes book prices from the contract list on every refresh; sizes stay from the last book read", async () => {
+    const { venue, manager, clock } = world({ booksPerRefresh: 1 });
+    venue.addContract(info(BTC));
+    venue.addContract(info(ETH, { expiresAt: new Date(EXPIRY + 60_000) }));
+    venue.setBook(BTC, BOOK);
+    venue.setBook(ETH, { bids: [[2_000n, 50n]], asks: [[2_300n, 60n]] });
+
+    await manager.refresh(); // book read: BTC
+    expect(manager.view(BTC)?.book).toEqual({ bidPx: "4000", bidUnits: "500", askPx: "4500", askUnits: "700", at: NOW });
+    expect(manager.view(ETH)?.book).toEqual({ bidPx: "2000", bidUnits: "0", askPx: "2300", askUnits: "0", at: NOW });
+    expect(manager.view(ETH)).toMatchObject({ tradable: true, notTradableReason: null });
+
+    venue.setBook(BTC, { bids: [[4_100n, 10n]], asks: [] });
+    clock.ms = NOW + 4_000;
+    await manager.refresh(); // book read: ETH
+    expect(manager.view(BTC)?.book).toEqual({ bidPx: "4100", bidUnits: "500", askPx: null, askUnits: "700", at: NOW + 4_000 });
+    expect(manager.view(ETH)?.book).toEqual({ bidPx: "2000", bidUnits: "50", askPx: "2300", askUnits: "60", at: NOW + 4_000 });
+
+    // The list decides whether there are offers, whatever the last book read showed.
+    venue.setBook(BTC, { bids: [], asks: [] });
+    await manager.refresh(); // book read: BTC again
+    expect(manager.view(BTC)).toMatchObject({ tradable: false, notTradableReason: "no_offers", book: { bidPx: null, askPx: null } });
+  });
+
+  it("keeps the last listed prices when the venue list fails", async () => {
+    const { venue, manager, clock } = await listed();
+    vi.spyOn(venue, "listContracts").mockRejectedValueOnce(new Error("venue down"));
+    clock.ms = NOW + 4_000;
+    await manager.refresh().catch(() => {});
+    expect(manager.view(BTC)?.book).toMatchObject({ bidPx: "4000", askPx: "4500", at: NOW });
+  });
+
+  it("falls back to the prices of the last book read for a venue that lists none", async () => {
+    const { venue, manager } = world();
+    venue.addContract(info(BTC));
+    venue.setBook(BTC, BOOK);
+    const bare = (await venue.listContracts()).map(({ bestBidPx: _bid, bestAskPx: _ask, ...rest }) => rest);
+    vi.spyOn(venue, "listContracts").mockResolvedValue(bare);
+    await manager.refresh();
+    expect(manager.view(BTC)?.book).toEqual({ bidPx: "4000", bidUnits: "500", askPx: "4500", askUnits: "700", at: NOW });
+    expect(manager.view(BTC)?.tradable).toBe(true);
   });
 
   it("a book that cannot be read takes its turn like any other and is reported after the rest ran", async () => {

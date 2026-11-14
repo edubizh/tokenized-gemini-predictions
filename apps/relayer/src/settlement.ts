@@ -16,12 +16,17 @@ export interface SettlementOptions {
   confirmMs: number;
   /** A market still unresolved this long after expiry is handed to a person. */
   reviewAfterMs: number;
+  /**
+   * How long after a resolution was first seen the venue may still be short of the expected
+   * payout: the row of a settled position can be published some time after the resolution.
+   */
+  payoutGraceMs: number;
   /** Unix milliseconds. */
   now(): number;
   alert(event: { kind: string; orderAddress: string | null; detail: string }): void;
 }
 
-export const DEFAULT_SETTLEMENT_OPTIONS = { confirmMs: 20_000, reviewAfterMs: 600_000 } as const;
+export const DEFAULT_SETTLEMENT_OPTIONS = { confirmMs: 20_000, reviewAfterMs: 600_000, payoutGraceMs: 180_000 } as const;
 
 export type SettlementInput = Omit<SettlementOptions, keyof typeof DEFAULT_SETTLEMENT_OPTIONS> &
   Partial<Pick<SettlementOptions, keyof typeof DEFAULT_SETTLEMENT_OPTIONS>>;
@@ -30,6 +35,7 @@ export function createSettlementWatcher(input: SettlementInput): { tick(): Promi
   const { venue, chain, registry, journal, now, alert } = input;
   const confirmMs = input.confirmMs ?? DEFAULT_SETTLEMENT_OPTIONS.confirmMs;
   const reviewAfterMs = input.reviewAfterMs ?? DEFAULT_SETTLEMENT_OPTIONS.reviewAfterMs;
+  const payoutGraceMs = input.payoutGraceMs ?? DEFAULT_SETTLEMENT_OPTIONS.payoutGraceMs;
   /** The resolution last seen per symbol and when it was first seen. Lost on restart, by design. */
   const sightings = new Map<string, { side: "yes" | "no"; at: number }>();
 
@@ -81,7 +87,8 @@ export function createSettlementWatcher(input: SettlementInput): { tick(): Promi
       sightings.set(symbol, { side, at: now() });
       if (seen !== undefined) raise("resolution_changed", symbol, `${seen.side} -> ${side}`);
     }
-    if (now() - (sightings.get(symbol)?.at ?? now()) < confirmMs) return;
+    const firstSeenAt = sightings.get(symbol)?.at ?? now();
+    if (now() - firstSeenAt < confirmMs) return;
 
     // Confirmed. The supplies are final only when no order was in flight before they are read,
     // so check the journal again and then read the market afresh.
@@ -98,7 +105,11 @@ export function createSettlementWatcher(input: SettlementInput): { tick(): Promi
     const net = final.yesSupply - final.noSupply + journal.houseInventoryUnits(symbol);
     const winningUnits = side === "yes" ? net : -net;
     const expected = winningUnits > 0n ? winningUnits * PAYOUT_PER_UNIT : 0n;
+    // No settled row counts as nothing paid, which is right when nothing is expected.
     const paid = (await venue.settledPayoutMicros(symbol)) ?? 0n;
+    // A shortfall can be a row that is not published yet: look again on later ticks. Too much is
+    // never a matter of waiting.
+    if (paid < expected && now() - firstSeenAt < payoutGraceMs) return;
     if (paid !== expected) {
       const detail = `venue paid ${paid} micro-dollars, expected ${expected}`;
       sightings.delete(symbol);

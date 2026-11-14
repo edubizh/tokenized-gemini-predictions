@@ -66,6 +66,12 @@ export class MockVenue implements Venue {
     this.cash = micros;
   }
 
+  /** Sets the net position directly (YES positive), as if earlier orders had built it. */
+  setPosition(symbol: string, signedUnits: bigint): void {
+    if (signedUnits === 0n) this.positions.delete(symbol);
+    else this.positions.set(symbol, signedUnits);
+  }
+
   /** Makes the next `placeOrder` misbehave. Faults queue up and each applies to one order. */
   failNext(mode: FaultMode): void {
     this.faults.push(mode);
@@ -131,11 +137,11 @@ export class MockVenue implements Venue {
 
   async contract(symbol: string): Promise<ContractInfo | null> {
     const contract = this.contracts.get(symbol);
-    return contract === undefined ? null : { ...contract };
+    return contract === undefined ? null : this.quoted(contract);
   }
 
   async listContracts(): Promise<ContractInfo[]> {
-    return [...this.contracts.values()].filter((contract) => contract.status === "active").map((contract) => ({ ...contract }));
+    return [...this.contracts.values()].filter((contract) => contract.status === "active").map((contract) => this.quoted(contract));
   }
 
   async settledPayoutMicros(symbol: string): Promise<bigint | null> {
@@ -146,6 +152,12 @@ export class MockVenue implements Venue {
     const bid = this.books.get(symbol)?.bids[0];
     const ask = this.books.get(symbol)?.asks[0];
     return { bidPx: bid?.[0] ?? null, bidUnits: bid?.[1] ?? 0n, askPx: ask?.[0] ?? null, askUnits: ask?.[1] ?? 0n };
+  }
+
+  /** A copy of the contract with the best bid and ask of its book. */
+  private quoted(contract: ContractInfo): ContractInfo {
+    const book = this.books.get(contract.symbol);
+    return { ...contract, bestBidPx: book?.bids[0]?.[0] ?? null, bestAskPx: book?.asks[0]?.[0] ?? null };
   }
 
   private execute(request: VenueOrderRequest): VenueOrderResult {
