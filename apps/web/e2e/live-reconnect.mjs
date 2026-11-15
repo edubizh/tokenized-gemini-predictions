@@ -2,7 +2,8 @@
 // A reload leaves the user logged in but the wallet no longer connected in the tab, so the app
 // offers Reconnect wallet wherever a signature is needed. This logs in with the injected test
 // wallet, reloads, reconnects on the portfolio and redeems or clears a settled position when there
-// is one, then reloads again, reconnects on a market's ticket and places one order.
+// is one, then reloads again, reconnects on a market's ticket, switches account inside the wallet
+// and back, and places one order.
 //
 //   pnpm dev                                   (relayer and web app)
 //   node e2e/live-reconnect.mjs [underlying] [YES|NO] [contracts]
@@ -40,8 +41,6 @@ const text = async (locator) => (await locator.innerText()).replace(/\s+/g, " ")
 const reconnectButtons = page.getByRole("button", { name: /^Reconnect wallet/ });
 const reconnect = async () => {
   await reconnectButtons.first().click();
-  await page.waitForTimeout(1_500);
-  await page.getByText(TEST_WALLET_NAME, { exact: false }).first().click();
 };
 
 let exitCode = 1;
@@ -50,9 +49,7 @@ try {
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   console.log("wallet address:", await page.evaluate(() => window.__testWalletAddress));
   await page.click('[data-testid="login"]:not([disabled])');
-  await page.getByText("Continue with a wallet").click();
-  await page.waitForTimeout(1_500);
-  await page.getByText(TEST_WALLET_NAME, { exact: false }).first().click();
+  await page.click(`[data-testid="login-wallet"][data-wallet="${TEST_WALLET_NAME}"]`);
   await page.waitForURL(/\/markets/, { timeout: 90_000 });
 
   // Reload on the portfolio: still logged in, wallet not connected.
@@ -98,11 +95,19 @@ try {
     await shoot("reconnect-live-ticket");
     console.log("after a reload the ticket offers:", await text(ticket.locator('[data-testid="reconnect"]')));
     await ticket.locator('[data-testid="reconnect"]').click();
-    await page.waitForTimeout(1_500);
-    await page.getByText(TEST_WALLET_NAME, { exact: false }).first().click();
     const placeButton = ticket.getByRole("button", { name: /Place order/ });
     await placeButton.waitFor({ timeout: 60_000 });
     console.log("after reconnecting the ticket offers:", await text(placeButton));
+    // The user switches account inside the wallet: the ticket says which account to go back to and
+    // offers nothing to sign, and offers the order again once the wallet is back on it.
+    await page.evaluate(() => window.__testWalletSwitch(true));
+    const switchBack = ticket.getByText(/Switch back to .+ in the wallet, or log out and log in with the new account\./);
+    await switchBack.waitFor({ timeout: 30_000 });
+    console.log("with the wallet on another account the ticket says:", await text(switchBack));
+    if ((await placeButton.count()) > 0) throw new Error("the ticket offers Place order while the wallet is on another account");
+    await page.evaluate(() => window.__testWalletSwitch(false));
+    await placeButton.waitFor({ timeout: 30_000 });
+    console.log("back on the trading account the ticket offers:", await text(placeButton));
     const quantityField = ticket.getByLabel("Quantity", { exact: true });
     if (await quantityField.isDisabled()) throw new Error("this market no longer takes orders: run again earlier in a market's window");
     await quantityField.fill(quantity);

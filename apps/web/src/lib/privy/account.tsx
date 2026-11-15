@@ -1,7 +1,7 @@
 "use client";
 
 import { usePrivy } from "@privy-io/react-auth";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getReads, type Balances } from "@/lib/chain/reads";
 import { useConfig } from "@/lib/config";
 import { usePolling } from "@/lib/polling";
@@ -25,7 +25,11 @@ export interface Account {
   /** True when the last balance read failed; the previous value is kept. */
   stale: boolean;
   refresh(): void;
+  /** Opens the login dialog. */
   login(): void;
+  /** True while the login dialog is asked for. */
+  loginOpen: boolean;
+  closeLogin(): void;
   logout(): Promise<void>;
   getAccessToken(): Promise<string | null>;
 }
@@ -34,7 +38,10 @@ const AccountContext = createContext<Account | null>(null);
 
 export function AccountProvider({ children }: { children: ReactNode }) {
   const config = useConfig();
-  const { ready, authenticated, login, logout, getAccessToken } = usePrivy();
+  const { ready, authenticated, logout, getAccessToken } = usePrivy();
+  const [loginOpen, setLoginOpen] = useState(false);
+  const login = useCallback(() => setLoginOpen(true), []);
+  const closeLogin = useCallback(() => setLoginOpen(false), []);
   const { wallet } = useTradingWallet();
   const address = wallet?.address ?? null;
   const registeredFor = useRef<string | null>(null);
@@ -78,11 +85,13 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       balances: current?.balances ?? null,
       stale: active && polled.error !== null,
       refresh,
-      login: () => login(),
+      login,
+      loginOpen,
+      closeLogin,
       logout: signOut,
       getAccessToken,
     }),
-    [ready, authenticated, wallet, current, active, polled.error, refresh, login, signOut, getAccessToken],
+    [ready, authenticated, wallet, current, active, polled.error, refresh, login, loginOpen, closeLogin, signOut, getAccessToken],
   );
 
   return <AccountContext.Provider value={account}>{children}</AccountContext.Provider>;

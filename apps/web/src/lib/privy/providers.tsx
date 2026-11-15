@@ -6,6 +6,7 @@ import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
 import { useMemo, type ReactNode } from "react";
 import { ConfigContext, type PublicConfig } from "@/lib/config";
 import { AccountProvider } from "./account";
+import { WalletDeskProvider } from "./wallet-desk";
 
 /** The login provider is always given the devnet chain id; the wallet only signs. */
 export const SIGNING_CHAIN = "solana:devnet" as const;
@@ -29,7 +30,9 @@ export function Providers({ config, children }: { config: PublicConfig; children
       appearance: {
         theme: "light",
         walletChainType: "solana-only",
-        walletList: ["phantom", "solflare", "backpack", "detected_solana_wallets", "wallet_connect_qr_solana"],
+        // The provider's own window is used for email and for the WalletConnect code only: wallet
+        // extensions log in through the app's dialog (use-wallet-login.ts).
+        walletList: ["wallet_connect_qr_solana"],
       },
       embeddedWallets: {
         solana: { createOnLogin: "users-without-wallets" },
@@ -51,7 +54,9 @@ export function Providers({ config, children }: { config: PublicConfig; children
   return (
     <ConfigContext.Provider value={config}>
       <PrivyProvider appId={config.privyAppId} config={privyConfig}>
-        <AccountProvider>{children}</AccountProvider>
+        <WalletDeskProvider>
+          <AccountProvider>{children}</AccountProvider>
+        </WalletDeskProvider>
       </PrivyProvider>
     </ConfigContext.Provider>
   );

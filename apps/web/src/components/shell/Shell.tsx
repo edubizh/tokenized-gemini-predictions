@@ -8,7 +8,9 @@ import { formatDollars, formatSol } from "@/lib/format";
 import { useAccount } from "@/lib/privy/account";
 import { AccountMenu, type FaucetStatus } from "./AccountMenu";
 import { Footer } from "./Footer";
+import { LoginDialog } from "./LoginDialog";
 import { TopBar } from "./TopBar";
+import { WalletWaiting } from "./WalletWaiting";
 import styles from "./Shell.module.css";
 
 /** Asks the faucet for a top-up and turns the answer into one plain sentence. */
@@ -104,8 +106,12 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <>
       <ConnectedTopBar />
-      <main className={styles.main}>{children}</main>
+      <main className={styles.main}>
+        <WalletWaiting pinned />
+        {children}
+      </main>
       <Footer />
+      <LoginDialog />
     </>
   );
 }

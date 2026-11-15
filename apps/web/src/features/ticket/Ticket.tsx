@@ -308,12 +308,14 @@ export function Ticket({
         </Notice>
       )}
 
+      {/* Two buttons with keys of their own: a wallet can reconnect within the click that asked it
+          to, and that click must not go on to submit the form through a reused button. */}
       {reconnect ? (
-        <Button variant="primary" block onClick={reconnect.onReconnect} data-testid="reconnect">
+        <Button key="reconnect" variant="primary" block onClick={reconnect.onReconnect} data-testid="reconnect">
           Reconnect wallet
         </Button>
       ) : (
-        <Button type="submit" variant="primary" block disabled={errors.length > 0} busy={progress === "wallet" ? "Check your wallet" : progress === "sending" ? "Sending" : false}>
+        <Button key="place" type="submit" variant="primary" block disabled={errors.length > 0} busy={progress === "wallet" ? "Check your wallet" : progress === "sending" ? "Sending" : false}>
           {fieldsValid && !closed && !errorFor("fee") ? `Place order · hold ${holdWords}` : "Place order"}
         </Button>
       )}

@@ -26,8 +26,13 @@ export function needsReconnect({ ready, wallet }: WalletState): boolean {
   return ready && wallet !== null && !wallet.embedded && wallet.signer === null;
 }
 
-/** What to say after a wallet other than the trading wallet was connected; null for the right one. */
-export function wrongWalletMessage(expected: string, connected: string): string | null {
-  if (expected === connected) return null;
-  return `That was a different wallet, ${shortAddress(connected)}. This account trades with ${shortAddress(expected)}. Switch to it in your wallet, then reconnect.`;
+/**
+ * What to say when the wallet is connected with another account than the one this login trades
+ * with (the user switched account inside the wallet); null otherwise. `connected` holds the
+ * addresses the wallet is connected with now.
+ */
+export function otherAccountMessage(expected: string, connected: readonly string[]): string | null {
+  const other = connected[0];
+  if (other === undefined || connected.includes(expected)) return null;
+  return `Your wallet is on another account, ${shortAddress(other)}. Switch back to ${shortAddress(expected)} in the wallet, or log out and log in with the new account.`;
 }

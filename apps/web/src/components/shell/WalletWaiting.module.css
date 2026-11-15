@@ -1,0 +1,11 @@
+.pinned {
+  position: sticky;
+  z-index: 10;
+  top: calc(var(--strip-height) + var(--space-2));
+  margin-bottom: var(--space-4);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+}

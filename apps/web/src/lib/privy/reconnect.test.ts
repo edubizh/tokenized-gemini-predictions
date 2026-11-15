@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { needsReconnect, wrongWalletMessage } from "./reconnect";
+import { needsReconnect, otherAccountMessage } from "./reconnect";
 
 const TRADING = "8rj8sEKjMCkBxMhAKYEz3ZVfGJDqZ6SVSMQBKKmKDK8p";
 const OTHER = "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T";
@@ -21,11 +21,16 @@ describe("needsReconnect", () => {
   });
 });
 
-describe("wrongWalletMessage", () => {
-  it("names the wallet this account trades with when a different one was connected", () => {
-    expect(wrongWalletMessage(TRADING, OTHER)).toBe("That was a different wallet, 4Nd1…DB4T. This account trades with 8rj8…DK8p. Switch to it in your wallet, then reconnect.");
+describe("otherAccountMessage", () => {
+  it("says which account to switch back to when the wallet is on another one", () => {
+    expect(otherAccountMessage(TRADING, [OTHER])).toBe(
+      "Your wallet is on another account, 4Nd1…DB4T. Switch back to 8rj8…DK8p in the wallet, or log out and log in with the new account.",
+    );
   });
-  it("has nothing to say about the right wallet", () => {
-    expect(wrongWalletMessage(TRADING, TRADING)).toBeNull();
+  it("has nothing to say while the trading account is connected", () => {
+    expect(otherAccountMessage(TRADING, [OTHER, TRADING])).toBeNull();
+  });
+  it("has nothing to say when the wallet is not connected at all", () => {
+    expect(otherAccountMessage(TRADING, [])).toBeNull();
   });
 });

@@ -23,6 +23,7 @@ const first = await context.newPage();
 
 await first.goto(`${BASE}/`, { waitUntil: "networkidle" });
 await first.click('[data-testid="login"]:not([disabled])');
+await first.click('[data-testid="login-email"]');
 const emailInput = first.locator('input[type="email"]').first();
 await emailInput.waitFor({ timeout: 30_000 });
 await emailInput.fill(email);

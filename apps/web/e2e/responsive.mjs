@@ -142,6 +142,7 @@ await tabThrough("landing, keyboard");
 
 // Log in.
 await page.click('[data-testid="login"]:not([disabled])');
+await page.click('[data-testid="login-email"]');
 const emailInput = page.locator('input[type="email"]').first();
 await emailInput.waitFor({ timeout: 30_000 });
 await emailInput.fill(email);

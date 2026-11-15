@@ -107,6 +107,7 @@ await shoot("focus-1280");
 // 3. Log in with the test account. The gate sends a new account to /welcome.
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page.click('[data-testid="login"]:not([disabled])');
+await page.click('[data-testid="login-email"]');
 const emailInput = page.locator('input[type="email"]').first();
 await emailInput.waitFor({ timeout: 30_000 });
 await emailInput.fill(email);
@@ -380,9 +381,7 @@ if (!fixtures || !existsSync(KEY_FILE)) {
   try {
     await walletPage.goto(`${BASE}/`, { waitUntil: "networkidle" });
     await walletPage.click('[data-testid="login"]:not([disabled])');
-    await walletPage.getByText("Continue with a wallet").click();
-    await walletPage.waitForTimeout(1_500);
-    await walletPage.getByText(TEST_WALLET_NAME, { exact: false }).first().click();
+    await walletPage.click(`[data-testid="login-wallet"][data-wallet="${TEST_WALLET_NAME}"]`);
     await walletPage.waitForURL(/\/(welcome|markets)/, { timeout: 90_000 });
     await walletPage.goto(`${BASE}/markets`, { waitUntil: "networkidle" });
     await walletPage.getByRole("row").filter({ hasText: "BTC Up" }).first().getByRole("link", { name: "BTC Up", exact: true }).click();
@@ -400,10 +399,8 @@ if (!fixtures || !existsSync(KEY_FILE)) {
     await walletPage.getByRole("table", { name: "Redeemable positions" }).getByRole("button", { name: /^Reconnect wallet to/ }).first().waitFor({ timeout: 30_000 });
     await walletPage.getByRole("table", { name: "Redeemable positions" }).scrollIntoViewIfNeeded();
     await capture("reconnect-portfolio-1280");
-    // Reconnecting through the login provider's wallet dialog brings the action back.
+    // Reconnecting asks the wallet to connect again, which brings the action back.
     await walletPage.getByRole("button", { name: /^Reconnect wallet to/ }).first().click();
-    await walletPage.waitForTimeout(1_500);
-    await walletPage.getByText(TEST_WALLET_NAME, { exact: false }).first().click();
     await walletPage.getByRole("button", { name: /^Redeem / }).first().waitFor({ timeout: 30_000 });
     console.log("after reconnecting, Redeem is back in place of Reconnect:", (await walletPage.getByRole("button", { name: /^Reconnect wallet to/ }).count()) === 0);
   } catch (error) {

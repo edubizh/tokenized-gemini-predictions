@@ -1,0 +1,57 @@
+.dialog {
+  width: min(26rem, calc(100vw - 2 * var(--gutter)));
+  padding: var(--space-5);
+  background: var(--paper-raised);
+  color: var(--ink);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--rounded-md);
+  box-shadow: var(--menu-shadow);
+}
+
+.dialog[open] {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.dialog::backdrop {
+  background: oklch(0.24 0.02 265 / 0.35);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.title {
+  font-size: var(--text-lg);
+  line-height: var(--leading-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.ways {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.wallet {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.wallet img {
+  border-radius: var(--rounded-sm);
+}
+
+.small {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+}

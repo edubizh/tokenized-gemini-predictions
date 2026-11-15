@@ -69,8 +69,15 @@ export function installTestWallet({ keypair, name }) {
   };
 
   const account = { address, publicKey, chains: CHAINS, features: FEATURES };
+  // A second account of the same wallet, for the user switching account inside it. It signs nothing.
+  const otherKey = crypto.getRandomValues(new Uint8Array(32));
+  const other = { address: base58(otherKey), publicKey: otherKey, chains: CHAINS, features: FEATURES };
   const listeners = new Set();
   let accounts = [];
+  const mine = (input) => {
+    if (input.account?.address !== address) throw new Error("invalid account");
+    return input;
+  };
   const wallet = {
     version: "1.0.0",
     name,
@@ -106,12 +113,12 @@ export function installTestWallet({ keypair, name }) {
       "solana:signMessage": {
         version: "1.1.0",
         signMessage: async (...inputs) =>
-          Promise.all(inputs.map(async ({ message }) => ({ signedMessage: message, signature: await sign(message), signatureType: "ed25519" }))),
+          Promise.all(inputs.map(mine).map(async ({ message }) => ({ signedMessage: message, signature: await sign(message), signatureType: "ed25519" }))),
       },
       "solana:signTransaction": {
         version: "1.0.0",
         supportedTransactionVersions: ["legacy", 0],
-        signTransaction: async (...inputs) => Promise.all(inputs.map(async ({ transaction }) => ({ signedTransaction: await signTransaction(transaction) }))),
+        signTransaction: async (...inputs) => Promise.all(inputs.map(mine).map(async ({ transaction }) => ({ signedTransaction: await signTransaction(transaction) }))),
       },
     },
   };
@@ -124,4 +131,9 @@ export function installTestWallet({ keypair, name }) {
   }
   window.addEventListener("wallet-standard:app-ready", (event) => register(event.detail));
   window.__testWalletAddress = address;
+  /** Stands for the user switching account inside the connected wallet: to the other account, or back. */
+  window.__testWalletSwitch = (toOther) => {
+    accounts = [toOther ? other : account];
+    for (const listener of listeners) listener({ accounts });
+  };
 }

@@ -51,10 +51,9 @@ try {
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   await page.click('[data-testid="login"]:not([disabled])');
   if (withWallet) {
-    await page.getByText("Continue with a wallet").click();
-    await page.waitForTimeout(1_500);
-    await page.getByText(TEST_WALLET_NAME, { exact: false }).first().click();
+    await page.click(`[data-testid="login-wallet"][data-wallet="${TEST_WALLET_NAME}"]`);
   } else {
+    await page.click('[data-testid="login-email"]');
     const emailInput = page.locator('input[type="email"]').first();
     await emailInput.waitFor({ timeout: 30_000 });
     await emailInput.fill(email);

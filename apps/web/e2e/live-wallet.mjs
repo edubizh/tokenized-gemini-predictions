@@ -41,10 +41,8 @@ try {
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   console.log("wallet address:", await page.evaluate(() => window.__testWalletAddress));
   await page.click('[data-testid="login"]:not([disabled])');
-  await page.getByText("Continue with a wallet").click();
-  await page.waitForTimeout(1_500);
   await shoot("wallet-list");
-  await page.getByText(TEST_WALLET_NAME, { exact: false }).first().click();
+  await page.click(`[data-testid="login-wallet"][data-wallet="${TEST_WALLET_NAME}"]`);
   await page.waitForURL(/\/(welcome|markets)/, { timeout: 90_000 });
   console.log("logged in with the wallet:", new URL(page.url()).pathname);
 

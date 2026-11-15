@@ -9,7 +9,7 @@ import { RelayerNoticeView } from "@/features/markets/RelayerNotice";
 import { OrderTimelineView } from "@/features/ticket/OrderTimeline";
 import { Ticket, type TicketProps } from "@/features/ticket/Ticket";
 import { deriveTimeline, type ChainOrderView, type LocalOrder, type TimelineInput } from "@/features/ticket/timeline";
-import { wrongWalletMessage, type ReconnectView } from "@/lib/privy/reconnect";
+import { otherAccountMessage, type ReconnectView } from "@/lib/privy/reconnect";
 import { buildFixtures, FIXTURE_USER, fixtureAddress, fixtureSignature } from "@/lib/relayer/fixtures";
 import styles from "./Gallery.module.css";
 
@@ -58,7 +58,7 @@ export function TradingGallery({ anchorMs, Section, Specimen }: { anchorMs: numb
   const sellTicket = (props: Partial<TicketProps>) => ticket({ held: holding, initialAction: "sell", initialQuantity: undefined, ...props });
   // The wallet of a wallet login is not connected in the tab after a reload: nothing can sign.
   const reconnect: ReconnectView = { onReconnect: () => {}, problem: null };
-  const wrongWallet: ReconnectView = { onReconnect: () => {}, problem: wrongWalletMessage(FIXTURE_USER, fixtureAddress("another-wallet")) };
+  const wrongWallet: ReconnectView = { onReconnect: () => {}, problem: otherAccountMessage(FIXTURE_USER, [fixtureAddress("another-wallet")]) };
 
   // 2.00 YES at a limit of $0.57 on the first market: cost $1.14, fee cap $0.07, hold $1.21.
   const address = fixtureAddress("gallery-order");
