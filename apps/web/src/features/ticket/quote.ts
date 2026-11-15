@@ -83,11 +83,6 @@ export function parseCents(text: string): bigint | null {
   return lenient(text, 2);
 }
 
-/** Dollars as typed (`0.57`, `.5`) to px. Null when it is not a price; the range is the quote's business. */
-export function parsePrice(text: string): bigint | null {
-  return lenient(text, 4);
-}
-
 function quantityError(units: bigint | null, limits: OrderLimits): QuoteError | null {
   if (units === null) return { field: "quantity", code: "not_a_number", message: "Enter a quantity in contracts, such as 1.00." };
   if (units < limits.minUnits) return { field: "quantity", code: "below_min", message: `Minimum is ${formatContracts(limits.minUnits)} contracts.` };

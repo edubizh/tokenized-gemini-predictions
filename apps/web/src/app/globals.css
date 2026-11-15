@@ -217,27 +217,3 @@ button {
     scroll-behavior: auto !important;
   }
 }
-
-/*
- * Names from the previous design, pointed at the new palette so that pages not yet rebuilt stay
- * readable. Delete this block, and the old components that need it, when the last page is rebuilt.
- */
-:root {
-  --ink: var(--forest);
-  --ink-2: var(--forest-soft);
-  --ink-3: var(--forest-soft);
-  --paper: var(--peach);
-  --paper-raised: var(--white);
-  --rule: var(--line);
-  --rule-strong: var(--edge);
-  --yes: var(--jade);
-  --no: var(--forest);
-  --positive: var(--jade);
-  --caution: var(--forest);
-  --negative: var(--clay);
-  --focus: var(--jade);
-  --font-mono: var(--font-sans);
-  --tracking-caps: 0;
-  --ticket-column: var(--aside);
-  --strip-height: var(--nav-height);
-}

@@ -4,8 +4,6 @@ import styles from "./ExternalLink.module.css";
 export interface ExternalLinkProps {
   href: string;
   children: ReactNode;
-  /** Accepted from pages of the previous design; it no longer changes anything. */
-  mono?: boolean;
 }
 
 /** A transaction or an address on the explorer. Opens in a new tab and says so. */

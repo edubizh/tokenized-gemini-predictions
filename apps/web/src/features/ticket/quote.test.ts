@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ApiHealth, ApiMarket } from "@outcome/relayer/api-types";
 import { fixtureHealth, fixtureMarket } from "@/lib/relayer/fixtures";
 import { availableAt, askPx, bidPx, wantedAt } from "@/features/markets/book";
-import { MIN_LAMPORTS, parseCents, parseContracts, parsePrice, quoteBuy, quoteSell, type QuoteInput, type SellQuoteInput } from "./quote";
+import { MIN_LAMPORTS, parseCents, parseContracts, quoteBuy, quoteSell, type QuoteInput, type SellQuoteInput } from "./quote";
 
 const NOW = Date.UTC(2026, 10, 15, 3, 2, 0);
 const market = fixtureMarket("GEMI-BTC15M2611150306-UP", NOW) as ApiMarket; // bid 0.55, ask 0.57, 250.00 bid, 180.00 offered
@@ -172,14 +172,6 @@ describe("parsing what was typed", () => {
     expect(parseContracts("1.005")).toBeNull();
     expect(parseContracts("")).toBeNull();
     expect(parseContracts("abc")).toBeNull();
-  });
-  it("reads a price in dollars, keeping an off-tick price for the quote to refuse", () => {
-    expect(parsePrice("0.57")).toBe(5_700n);
-    expect(parsePrice(".5")).toBe(5_000n);
-    expect(parsePrice("0.455")).toBe(4_550n);
-    expect(parsePrice("1")).toBe(10_000n);
-    expect(parsePrice("0.12345")).toBeNull();
-    expect(parsePrice("")).toBeNull();
   });
   it("reads a price in cents, as the trade panel takes it", () => {
     expect(parseCents("57")).toBe(5_700n);

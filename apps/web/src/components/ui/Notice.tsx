@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
 import styles from "./Notice.module.css";
 
-/** `caution` is kept for pages of the previous design and is drawn as `neutral`. */
-export type NoticeTone = "neutral" | "positive" | "negative" | "caution";
+export type NoticeTone = "neutral" | "positive" | "negative";
 
 export interface NoticeProps {
   tone?: NoticeTone;

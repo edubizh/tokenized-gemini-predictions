@@ -5,7 +5,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { getReads, type Balances } from "@/lib/chain/reads";
 import { useConfig } from "@/lib/config";
 import { usePolling } from "@/lib/polling";
-import { setSessionHint } from "./session-hint";
 import { useTradingWallet, type TradingWallet } from "./wallet";
 
 /** Balances change only when an order of the wallet finishes or a redemption lands, and both ask for a read at once. */
@@ -46,10 +45,6 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   const address = wallet?.address ?? null;
   const registeredFor = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (ready) setSessionHint(authenticated);
-  }, [ready, authenticated]);
-
   const active = config.bootstrapped && address !== null;
   const read = useCallback(async () => {
     if (!address) throw new Error("no wallet");
@@ -72,7 +67,6 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   }, [address, refresh]);
 
   const signOut = useCallback(async () => {
-    setSessionHint(false);
     await logout();
   }, [logout]);
 

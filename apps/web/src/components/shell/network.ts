@@ -17,8 +17,3 @@ export function networkMark(cluster: Cluster): { full: string; short: string } {
 export function venueLine(venue: Venue): string {
   return venue === "mock" ? "Orders are placed on a simulated venue." : "Orders are placed on the exchange sandbox.";
 }
-
-/** The sentences of the previous design's notice, still shown on the system page until it is rebuilt. */
-export function networkNotice(venue: Venue): [string, string] {
-  return [venue === "mock" ? "Devnet demo with a simulated venue." : "Devnet and sandbox demo.", "Test tokens with no value."];
-}

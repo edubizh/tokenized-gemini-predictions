@@ -25,8 +25,6 @@ export interface RowListProps {
   /** Accessible name of the list: "Markets", "Your orders". */
   label: string;
   columns: readonly Column[];
-  /** Accepted from pages of the previous design; it no longer changes anything. A list stacks by its own width. */
-  dense?: boolean;
   children: ReactNode;
 }
 
