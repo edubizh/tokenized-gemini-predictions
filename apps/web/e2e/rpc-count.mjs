@@ -22,23 +22,33 @@ const context = await browser.newContext({ viewport: { width: 1280, height: 800 
 const first = await context.newPage();
 
 await first.goto(`${BASE}/`, { waitUntil: "networkidle" });
-await first.click('[data-testid="login"]:not([disabled])');
-await first.click('[data-testid="login-email"]');
-const emailInput = first.locator('input[type="email"]').first();
-await emailInput.waitFor({ timeout: 30_000 });
-await emailInput.fill(email);
-await emailInput.press("Enter");
-await first.locator('input[name="code-0"]').waitFor({ timeout: 30_000 });
-for (let i = 0; i < 6; i++) await first.locator(`input[name="code-${i}"]`).fill(otp[i]);
-await first.waitForURL(/\/(welcome|markets)/, { timeout: 90_000 });
+// The login service sometimes refuses or answers slowly, so it is tried once more.
+for (let attempt = 1; ; attempt++) {
+  try {
+    await first.locator('[data-testid="login-top"]:not([disabled])').click({ timeout: 30_000 });
+    await first.click('[data-testid="login-email"]');
+    const emailInput = first.locator('input[type="email"]').first();
+    await emailInput.waitFor({ timeout: 30_000 });
+    await emailInput.fill(email);
+    await emailInput.press("Enter");
+    await first.locator('input[name="code-0"]').waitFor({ timeout: 30_000 });
+    for (let i = 0; i < 6; i++) await first.locator(`input[name="code-${i}"]`).fill(otp[i]);
+    await first.locator('[data-testid="account"]').waitFor({ timeout: 90_000 });
+    break;
+  } catch (error) {
+    if (attempt >= 2) throw error;
+    console.log("the login did not finish; trying once more");
+    await first.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  }
+}
 
-await first.goto(`${BASE}/markets`, { waitUntil: "networkidle" });
-const marketLink = first.getByRole("row").filter({ hasText: "BTC Up" }).filter({ hasText: "YES" }).first().getByRole("link", { name: "BTC Up", exact: true });
-await marketLink.waitFor({ timeout: 30_000 });
-const marketPath = await marketLink.getAttribute("href");
+// An event page with a contract that takes orders: the first Yes price link on the index.
+const priceLink = first.locator('[data-testid="event-card"]').getByRole("link", { name: /^Yes\b/ }).first();
+await priceLink.waitFor({ timeout: 30_000 });
+const marketPath = await priceLink.getAttribute("href");
 await first.close();
 
-const routes = ["/markets", marketPath, "/portfolio", "/activity", "/system", "/welcome"];
+const routes = ["/", marketPath, "/portfolio", "/activity", "/system", "/vaults"];
 const results = await Promise.all(
   routes.map(async (route) => {
     const page = await context.newPage();
@@ -61,7 +71,7 @@ const results = await Promise.all(
     counting = true;
     await page.waitForTimeout(WINDOW_MS);
     counting = false;
-    return { route: route.startsWith("/markets/") ? "/markets/[symbol]" : route, ...counts };
+    return { route: route.startsWith("/markets/") ? "/markets/[event]" : route, ...counts };
   }),
 );
 

@@ -2,12 +2,13 @@
 // A reload leaves the user logged in but the wallet no longer connected in the tab, so the app
 // offers Reconnect wallet wherever a signature is needed. This logs in with the injected test
 // wallet, reloads, reconnects on the portfolio and redeems or clears a settled position when there
-// is one, then reloads again, reconnects on a market's ticket, switches account inside the wallet
-// and back, and places one order.
+// is one, then opens a contract from the markets index, reloads its event page, reconnects in the
+// trade panel, switches account inside the wallet and back, and places one order.
 //
 //   pnpm dev                                   (relayer and web app)
-//   node e2e/live-reconnect.mjs [underlying] [YES|NO] [contracts]
+//   node e2e/live-reconnect.mjs [search] [YES|NO] [contracts]
 //
+// The optional search is typed into the index's search field.
 // LIVE_BASE_URL overrides http://localhost:3200. The wallet's throwaway devnet key is kept in
 // <repo>/.keys/e2e-wallet-keypair.json (git-ignored); run live-wallet.mjs once first so that the
 // wallet is registered and funded.
@@ -19,8 +20,9 @@ import { installTestWallet, loadTestWalletKey, TEST_WALLET_NAME } from "./lib/te
 const BASE = process.env.LIVE_BASE_URL ?? "http://localhost:3200";
 const OUT = path.join(import.meta.dirname, "out");
 const KEY_FILE = process.env.E2E_WALLET_KEYPAIR ?? path.resolve(import.meta.dirname, "../../../.keys/e2e-wallet-keypair.json");
-const [underlyingArg, sideArg = "YES", quantity = "1.00"] = process.argv.slice(2);
+const [searchArg, sideArg = "YES", quantity = "1.00"] = process.argv.slice(2);
 const side = sideArg.toUpperCase();
+const sideWord = side === "NO" ? "No" : "Yes";
 
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch();
@@ -48,9 +50,19 @@ try {
   // Log in with the wallet.
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   console.log("wallet address:", await page.evaluate(() => window.__testWalletAddress));
-  await page.click('[data-testid="login"]:not([disabled])');
-  await page.click(`[data-testid="login-wallet"][data-wallet="${TEST_WALLET_NAME}"]`);
-  await page.waitForURL(/\/markets/, { timeout: 90_000 });
+  // The login service sometimes refuses or answers slowly, so it is tried once more.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.locator('[data-testid="login-top"]:not([disabled])').click({ timeout: 30_000 });
+      await page.click(`[data-testid="login-wallet"][data-wallet="${TEST_WALLET_NAME}"]`);
+      await page.locator('[data-testid="account"]').waitFor({ timeout: 90_000 });
+      break;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      console.log("the login did not finish; trying once more");
+      await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    }
+  }
 
   // Reload on the portfolio: still logged in, wallet not connected.
   await page.goto(`${BASE}/portfolio`, { waitUntil: "networkidle" });
@@ -62,31 +74,42 @@ try {
     await shoot("reconnect-live-portfolio");
     const before = await text(balance);
     await reconnect();
-    const action = page.getByRole("button", { name: /^(Redeem|Clear)\b/ }).first();
+    const action = page.locator('[data-testid="position-redeem"], [data-testid="position-clear"], [data-testid="order-reclaim"]').first();
     await action.waitFor({ timeout: 60_000 });
     console.log("after reconnecting the action is back:", await text(action));
-    const started = Date.now();
-    await action.click();
-    const receipt = page.locator('[data-testid="redemption-receipt"]').first();
-    await receipt.waitFor({ timeout: 120_000 });
-    console.log(`receipt after ${((Date.now() - started) / 1000).toFixed(1)} s:`, (await text(receipt)).slice(0, 300));
+    if ((await action.getAttribute("data-testid")) === "order-reclaim") {
+      console.log("the action is a reclaim of an expired order; it is left for live-offline.mjs");
+    } else {
+      // A redemption shows up as a new row under Settled with its transaction.
+      const receipts = page.locator('[data-testid="redemption-tx"]');
+      const receiptsBefore = await receipts.count();
+      const started = Date.now();
+      await action.click();
+      await receipts.nth(receiptsBefore).waitFor({ timeout: 120_000 });
+      console.log(`transaction after ${((Date.now() - started) / 1000).toFixed(1)} s:`, (await text(receipts.nth(receiptsBefore))).slice(0, 120));
+    }
     await page.waitForTimeout(8_000);
     console.log("balance before and after:", before, "->", await text(balance));
   } else {
     console.log("the portfolio has nothing that needs a signature right now");
   }
 
-  // Reload again on the markets, then place an order from a ticket after reconnecting there.
-  await page.goto(`${BASE}/markets`, { waitUntil: "networkidle" });
-  await page.getByRole("table", { name: "Markets", exact: true }).waitFor({ timeout: 60_000 });
-  const rows = page.getByRole("row").filter({ has: page.getByRole("link", { name: new RegExp(`^Buy ${side}`) }) });
-  const row = underlyingArg ? rows.filter({ hasText: `${underlyingArg} Up` }).first() : rows.first();
-  if ((await row.count()) === 0) {
+  // Reload on the markets index, open a contract, and place an order from the trade panel after
+  // reloading the event page and reconnecting there.
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  const cards = page.locator('[data-testid="event-card"]');
+  await cards.first().waitFor({ timeout: 60_000 });
+  if (searchArg) {
+    await page.locator('[data-testid="filter-search"]').fill(searchArg);
+    await page.waitForTimeout(800);
+  }
+  const buyLink = cards.getByRole("link", { name: new RegExp(`^${sideWord}\\b`) }).first();
+  if ((await buyLink.count()) === 0) {
     console.log("no market takes orders on that side right now: the order after a reload was not tried");
   } else {
-    await row.getByRole("link", { name: new RegExp(`^Buy ${side}`) }).click();
+    await buyLink.click();
     await page.waitForURL(/\/markets\/.+/);
-    console.log("market page:", new URL(page.url()).pathname);
+    console.log("event page:", new URL(page.url()).pathname + new URL(page.url()).search);
     const ticket = page.locator('[data-testid="ticket"]');
     await ticket.waitFor({ timeout: 120_000 });
     await page.reload({ waitUntil: "networkidle" });
@@ -95,7 +118,7 @@ try {
     await shoot("reconnect-live-ticket");
     console.log("after a reload the ticket offers:", await text(ticket.locator('[data-testid="reconnect"]')));
     await ticket.locator('[data-testid="reconnect"]').click();
-    const placeButton = ticket.getByRole("button", { name: /Place order/ });
+    const placeButton = ticket.locator('[data-testid="place"]');
     await placeButton.waitFor({ timeout: 60_000 });
     console.log("after reconnecting the ticket offers:", await text(placeButton));
     // The user switches account inside the wallet: the ticket says which account to go back to and
@@ -104,11 +127,11 @@ try {
     const switchBack = ticket.getByText(/Switch back to .+ in the wallet, or log out and log in with the new account\./);
     await switchBack.waitFor({ timeout: 30_000 });
     console.log("with the wallet on another account the ticket says:", await text(switchBack));
-    if ((await placeButton.count()) > 0) throw new Error("the ticket offers Place order while the wallet is on another account");
+    if ((await placeButton.count()) > 0) throw new Error("the ticket offers the order button while the wallet is on another account");
     await page.evaluate(() => window.__testWalletSwitch(false));
     await placeButton.waitFor({ timeout: 30_000 });
     console.log("back on the trading account the ticket offers:", await text(placeButton));
-    const quantityField = ticket.getByLabel("Quantity", { exact: true });
+    const quantityField = ticket.locator('[data-testid="ticket-quantity"]');
     if (await quantityField.isDisabled()) throw new Error("this market no longer takes orders: run again earlier in a market's window");
     await quantityField.fill(quantity);
     if (await placeButton.isDisabled()) throw new Error("the ticket does not allow an order right now");

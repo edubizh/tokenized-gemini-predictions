@@ -1,10 +1,13 @@
 // Live check of the wallet login: a test wallet is injected the way a browser extension would
-// register itself (Wallet Standard), the user logs in with it, gets test funds, and places one
-// order that the wallet signs.
+// register itself (Wallet Standard), the user logs in with it, opens a contract from the markets
+// index, gets test funds in the trade panel when the wallet is new, and places one order that the
+// wallet signs.
 //
 //   pnpm dev                                   (relayer and web app)
-//   node e2e/live-wallet.mjs [underlying] [YES|NO] [contracts] [limit]
+//   node e2e/live-wallet.mjs [search] [YES|NO] [contracts] [limit in cents]
 //
+// The optional search is typed into the index's search field. A dollar limit below 1 ("0.61") is
+// turned into cents.
 // LIVE_BASE_URL overrides http://localhost:3200. The wallet's throwaway devnet key is kept in
 // <repo>/.keys/e2e-wallet-keypair.json (git-ignored) so every run is the same account.
 import { chromium } from "@playwright/test";
@@ -15,8 +18,10 @@ import { installTestWallet, loadTestWalletKey, TEST_WALLET_NAME } from "./lib/te
 const BASE = process.env.LIVE_BASE_URL ?? "http://localhost:3200";
 const OUT = path.join(import.meta.dirname, "out");
 const KEY_FILE = process.env.E2E_WALLET_KEYPAIR ?? path.resolve(import.meta.dirname, "../../../.keys/e2e-wallet-keypair.json");
-const [underlyingArg, sideArg = "YES", quantity = "1.00", price] = process.argv.slice(2);
+const [searchArg, sideArg = "YES", quantity = "1.00", priceArg] = process.argv.slice(2);
 const side = sideArg.toUpperCase();
+const sideWord = side === "NO" ? "No" : "Yes";
+const price = priceArg && Number(priceArg) < 1 ? String(Math.round(Number(priceArg) * 100)) : priceArg;
 
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch();
@@ -40,45 +45,55 @@ try {
   // Log in with the wallet.
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   console.log("wallet address:", await page.evaluate(() => window.__testWalletAddress));
-  await page.click('[data-testid="login"]:not([disabled])');
-  await shoot("wallet-list");
-  await page.click(`[data-testid="login-wallet"][data-wallet="${TEST_WALLET_NAME}"]`);
-  await page.waitForURL(/\/(welcome|markets)/, { timeout: 90_000 });
+  // The login service sometimes refuses or answers slowly, so it is tried once more.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.locator('[data-testid="login-top"]:not([disabled])').click({ timeout: 30_000 });
+      if (attempt === 1) await shoot("wallet-list");
+      await page.click(`[data-testid="login-wallet"][data-wallet="${TEST_WALLET_NAME}"]`);
+      await page.locator('[data-testid="account"]').waitFor({ timeout: 90_000 });
+      break;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      console.log("the login did not finish; trying once more");
+      await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    }
+  }
   console.log("logged in with the wallet:", new URL(page.url()).pathname);
 
   // No page reloads from here on: a reload drops the connection to an external wallet, and this
-  // check is about the first session after logging in. A new wallet is sent to the welcome screen
-  // by the app itself; a registered one lands on the markets.
-  const welcome = '[data-testid="welcome"]';
-  const marketsTable = page.getByRole("table", { name: "Markets", exact: true });
-  await Promise.race([
-    page.waitForSelector(`${welcome}:not([data-state="loading"])`, { timeout: 90_000 }),
-    marketsTable.waitFor({ timeout: 90_000 }),
-  ]);
-  if (new URL(page.url()).pathname === "/welcome") {
-    console.log("welcome state:", await page.getAttribute(welcome, "data-state"));
-    if ((await page.getAttribute(welcome, "data-state")) === "ready") {
-      await page.click('[data-testid="get-test-funds"]');
-      await page.waitForSelector(`${welcome}[data-state="done"], ${welcome}[data-state="error"], ${welcome}[data-state="already"]`, { timeout: 120_000 });
-      console.log("after Get test funds:", await page.getAttribute(welcome, "data-state"));
-      await shoot("wallet-welcome");
-    }
-    await page.getByRole("link", { name: "Markets", exact: true }).first().click();
+  // check is about the first session after logging in. Pages are reached through the app's links.
+  const cards = page.locator('[data-testid="event-card"]');
+  await cards.first().waitFor({ timeout: 60_000 });
+  if (searchArg) {
+    await page.locator('[data-testid="filter-search"]').fill(searchArg);
+    await page.waitForTimeout(800);
+  }
+  const buyLink = cards.getByRole("link", { name: new RegExp(`^${sideWord}\\b`) }).first();
+  if ((await buyLink.count()) === 0) throw new Error("no market takes orders on that side right now");
+  console.log("buying:", await buyLink.getAttribute("aria-label"));
+  await buyLink.click();
+  await page.waitForURL(/\/markets\/.+/);
+  console.log("event page:", new URL(page.url()).pathname + new URL(page.url()).search);
+  const ticket = page.locator('[data-testid="ticket"]');
+  await ticket.waitFor({ timeout: 120_000 });
+
+  // A new wallet is offered Get test funds in the trade panel in place of the order button.
+  const placeButton = ticket.locator('[data-testid="place"]');
+  const funds = ticket.locator('[data-testid="get-test-funds"]');
+  await Promise.race([placeButton.waitFor({ timeout: 90_000 }), funds.waitFor({ timeout: 90_000 })]);
+  if ((await funds.count()) > 0) {
+    console.log("new wallet: Get test funds is offered");
+    await funds.click();
+    await Promise.race([placeButton.waitFor({ timeout: 120_000 }), ticket.getByText("Test funds were not sent", { exact: true }).waitFor({ timeout: 120_000 })]);
+    await shoot("wallet-test-funds");
+    if ((await placeButton.count()) === 0) throw new Error("test funds were not sent");
+    console.log("test funds sent");
   }
 
   // One order, signed by the wallet.
-  await marketsTable.waitFor({ timeout: 60_000 });
-  const rows = page.getByRole("row").filter({ has: page.getByRole("link", { name: new RegExp(`^Buy ${side}`) }) });
-  const row = underlyingArg ? rows.filter({ hasText: `${underlyingArg} Up` }).first() : rows.first();
-  if ((await row.count()) === 0) throw new Error("no market takes orders on that side right now");
-  await row.getByRole("link", { name: new RegExp(`^Buy ${side}`) }).click();
-  await page.waitForURL(/\/markets\/.+/);
-  console.log("market page:", new URL(page.url()).pathname);
-  const ticket = page.locator('[data-testid="ticket"]');
-  await ticket.waitFor({ timeout: 120_000 });
-  await ticket.getByLabel("Quantity", { exact: true }).fill(quantity);
-  if (price) await ticket.getByLabel("Limit price", { exact: true }).fill(price);
-  const placeButton = ticket.getByRole("button", { name: /Place order/ });
+  await ticket.locator('[data-testid="ticket-quantity"]').fill(quantity);
+  if (price) await ticket.locator('[data-testid="ticket-price"]').fill(price);
   if (await placeButton.isDisabled()) {
     console.log("ticket:", (await text(ticket)).slice(0, 400));
     throw new Error("the ticket does not allow an order right now");

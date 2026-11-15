@@ -1,11 +1,11 @@
 // Live check of the app with the relayer stopped, against a real cluster: log in with the injected
-// test wallet, see the offline notice on the markets, read the portfolio from Solana (redeeming or
+// test wallet, see the offline notice on the markets index, read the portfolio from Solana (redeeming or
 // clearing a settled position when there is one), then reclaim an expired open order from the
 // activity page. Nothing here needs the relayer; that is the point.
 //
 // Before running it: stop the relayer and place an order that nobody will fill, as the same wallet:
 //
-//   DEMO_USER_KEYPAIR=.keys/e2e-wallet-keypair.json pnpm demo buy <symbol> yes 1 0.50
+//   DEMO_USER_KEYPAIR=.keys/e2e-wallet-keypair.json pnpm demo buy <symbol> yes 1 0.50   (limit in dollars)
 //   pnpm web                                   (the web app alone)
 //   node e2e/live-offline.mjs
 //
@@ -44,9 +44,19 @@ try {
   // Log in with the wallet. The login provider is separate from the relayer.
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   console.log("wallet address:", await page.evaluate(() => window.__testWalletAddress));
-  await page.click('[data-testid="login"]:not([disabled])');
-  await page.click(`[data-testid="login-wallet"][data-wallet="${TEST_WALLET_NAME}"]`);
-  await page.waitForURL(/\/markets/, { timeout: 90_000 });
+  // The login service sometimes refuses or answers slowly, so it is tried once more.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.locator('[data-testid="login-top"]:not([disabled])').click({ timeout: 30_000 });
+      await page.click(`[data-testid="login-wallet"][data-wallet="${TEST_WALLET_NAME}"]`);
+      await page.locator('[data-testid="account"]').waitFor({ timeout: 90_000 });
+      break;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      console.log("the login did not finish; trying once more");
+      await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    }
+  }
   await page.waitForTimeout(8_000);
   await shoot("offline-live-markets");
   console.log("markets:", (await text(page.locator("main").first())).slice(0, 400));
@@ -58,15 +68,17 @@ try {
   await page.waitForTimeout(12_000);
   await shoot("offline-live-portfolio");
   console.log("portfolio:", (await text(page.locator("main").first())).slice(0, 1500));
-  const action = page.getByRole("button", { name: /^(Redeem|Clear)\b/ }).first();
+  const action = page.locator('[data-testid="position-redeem"], [data-testid="position-clear"]').first();
   if ((await action.count()) > 0) {
     const label = await text(action);
     const before = await text(balance);
+    // A redemption shows up as a new row under Settled with its transaction.
+    const receipts = page.locator('[data-testid="redemption-tx"]');
+    const receiptsBefore = await receipts.count();
     const started = Date.now();
     await action.click();
-    const receipt = page.locator('[data-testid="redemption-receipt"]').first();
-    await receipt.waitFor({ timeout: 120_000 });
-    console.log(`${label} with the relayer stopped: receipt after ${((Date.now() - started) / 1000).toFixed(1)} s:`, (await text(receipt)).slice(0, 300));
+    await receipts.nth(receiptsBefore).waitFor({ timeout: 120_000 });
+    console.log(`${label} with the relayer stopped: transaction after ${((Date.now() - started) / 1000).toFixed(1)} s:`, (await text(receipts.nth(receiptsBefore))).slice(0, 120));
     await page.waitForTimeout(12_000);
     console.log("balance before and after:", before, "->", await text(balance));
   } else {
@@ -79,15 +91,16 @@ try {
   await orders.first().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(3_000);
   console.log("activity rows:", await orders.count());
-  console.log("newest order:", (await text(orders.first())).slice(0, 600));
+  console.log("newest order:", await orders.first().getAttribute("data-stamp"), (await text(orders.first())).slice(0, 300));
   await shoot("offline-live-activity");
   // The newest order is the one placed just before this run. It is reclaimed the moment the page
-  // shows it as expired: that click only goes through when the page counts the expiry on the
-  // cluster's clock. Orders that expired earlier are reclaimed after it, so nothing stays held.
-  await orders.first().getByText(/Expired/).first().waitFor({ timeout: 180_000 });
-  const expiredRows = orders.filter({ hasText: /Expired/ });
-  const buttons = page.getByRole("button", { name: /^Reclaim/ });
-  const refused = page.getByText(/was not reclaimed/i).first();
+  // stamps it EXPIRED: that only happens when the page counts the expiry on the cluster's clock.
+  // Orders that expired earlier are reclaimed after it, so nothing stays held. A row that can be
+  // reclaimed shows its steps open, with Reclaim among them.
+  await page.locator('[data-testid="activity-order"]').first().and(page.locator('[data-stamp="EXPIRED"]')).waitFor({ timeout: 180_000 });
+  const expiredRows = page.locator('[data-testid="activity-order"][data-stamp="EXPIRED"]');
+  const buttons = page.locator('[data-testid="activity-steps"]').getByRole("button", { name: /^Reclaim/ });
+  const refused = page.getByText(/was not reclaimed|Nothing was reclaimed/i).first();
   const before = await text(page.locator("header").first());
   for (let left = await expiredRows.count(); left > 0; left = await expiredRows.count()) {
     await buttons.first().waitFor({ timeout: 60_000 });
@@ -95,11 +108,7 @@ try {
     const started = Date.now();
     await buttons.first().click();
     await Promise.race([
-      page.waitForFunction(
-        (count) => [...document.querySelectorAll('[data-testid="activity-order"]')].filter((row) => /Expired/.test(row.textContent ?? "")).length < count,
-        left,
-        { timeout: 120_000 },
-      ),
+      page.waitForFunction((count) => document.querySelectorAll('[data-testid="activity-order"][data-stamp="EXPIRED"]').length < count, left, { timeout: 120_000 }),
       refused.waitFor({ timeout: 120_000 }),
     ]);
     if ((await refused.count()) > 0) throw new Error(`the reclaim was refused: ${(await text(refused.locator("xpath=..")).catch(() => "")).slice(0, 300)}`);
@@ -107,7 +116,7 @@ try {
   }
   await page.waitForTimeout(12_000);
   await shoot("offline-live-reclaimed");
-  console.log("newest order now:", (await orders.count()) > 0 ? (await text(orders.first())).slice(0, 600) : "(no rows)");
+  console.log("newest order now:", (await orders.count()) > 0 ? `${await orders.first().getAttribute("data-stamp")} ${(await text(orders.first())).slice(0, 300)}` : "(no rows)");
   console.log("top bar before:", before.slice(0, 120));
   console.log("top bar after: ", (await text(page.locator("header").first())).slice(0, 120));
   exitCode = 0;

@@ -1,6 +1,6 @@
 // Live check of the account pages in a browser against a real cluster and a running relayer:
 // log in, read the portfolio, redeem the first winning position (or clear a lost one) when there
-// is one, open the newest order on the activity page, and read the system page.
+// is one, open the newest order's steps on the activity page, and read the system page.
 //
 //   pnpm dev                                   (relayer and web app; or the two started separately)
 //   node --env-file=../../.env e2e/live-account.mjs [--wallet] [--no-redeem]
@@ -47,22 +47,31 @@ const open = async (name, pathname) => {
 
 let exitCode = 1;
 try {
-  // Log in.
+  // Log in. The login service sometimes refuses or answers slowly, so it is tried once more.
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
-  await page.click('[data-testid="login"]:not([disabled])');
-  if (withWallet) {
-    await page.click(`[data-testid="login-wallet"][data-wallet="${TEST_WALLET_NAME}"]`);
-  } else {
-    await page.click('[data-testid="login-email"]');
-    const emailInput = page.locator('input[type="email"]').first();
-    await emailInput.waitFor({ timeout: 30_000 });
-    await emailInput.fill(email);
-    await emailInput.press("Enter");
-    await page.locator('input[name="code-0"]').waitFor({ timeout: 30_000 });
-    for (let i = 0; i < 6; i++) await page.locator(`input[name="code-${i}"]`).fill(otp[i]);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.locator('[data-testid="login-top"]:not([disabled])').click({ timeout: 30_000 });
+      if (withWallet) {
+        await page.click(`[data-testid="login-wallet"][data-wallet="${TEST_WALLET_NAME}"]`);
+      } else {
+        await page.click('[data-testid="login-email"]');
+        const emailInput = page.locator('input[type="email"]').first();
+        await emailInput.waitFor({ timeout: 30_000 });
+        await emailInput.fill(email);
+        await emailInput.press("Enter");
+        await page.locator('input[name="code-0"]').waitFor({ timeout: 30_000 });
+        for (let i = 0; i < 6; i++) await page.locator(`input[name="code-${i}"]`).fill(otp[i]);
+      }
+      await page.locator('[data-testid="account"]').waitFor({ timeout: 90_000 });
+      await page.locator('input[name="code-0"]').waitFor({ state: "detached", timeout: 30_000 }).catch(() => {});
+      break;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      console.log("the login did not finish; trying once more");
+      await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    }
   }
-  await page.waitForURL(/\/markets/, { timeout: 90_000 });
-  await page.locator('input[name="code-0"]').waitFor({ state: "detached", timeout: 30_000 }).catch(() => {});
 
   // Portfolio.
   await open("Portfolio", "/portfolio");
@@ -73,17 +82,19 @@ try {
   console.log("portfolio:", (await text(page.locator("main").first())).slice(0, 1800));
   const before = await text(balance);
 
-  const winning = page.getByRole("button", { name: /^Redeem\b/ }).first();
-  const lost = page.getByRole("button", { name: /^Clear\b/ }).first();
+  const winning = page.locator('[data-testid="position-redeem"]').first();
+  const lost = page.locator('[data-testid="position-clear"]').first();
   const action = (await winning.count()) > 0 ? winning : lost;
   if (redeem && (await action.count()) > 0) {
     const label = await text(action);
+    // A redemption shows up as a new row under Settled with its transaction.
+    const receipts = page.locator('[data-testid="redemption-tx"]');
+    const receiptsBefore = await receipts.count();
     const started = Date.now();
     await action.click();
-    const receipt = page.locator('[data-testid="redemption-receipt"]').first();
-    await receipt.waitFor({ timeout: 120_000 });
-    console.log(`${label}: receipt after ${((Date.now() - started) / 1000).toFixed(1)} s`);
-    console.log("receipt:", (await text(receipt)).slice(0, 500));
+    await receipts.nth(receiptsBefore).waitFor({ timeout: 120_000 });
+    console.log(`${label}: transaction after ${((Date.now() - started) / 1000).toFixed(1)} s`);
+    console.log("settled:", (await text(page.locator('[data-testid="portfolio-settled"]'))).slice(0, 500));
     await page.waitForTimeout(12_000);
     await shoot(`${tag}-portfolio-redeemed`);
     console.log("balance before and after:", before, "->", await text(balance));
@@ -97,10 +108,13 @@ try {
   const orders = page.locator('[data-testid="activity-order"]');
   console.log("activity rows:", await orders.count());
   if ((await orders.count()) > 0) {
-    const toggle = orders.first().getByRole("button", { expanded: false }).first();
-    if ((await toggle.count()) > 0) await toggle.click();
-    await page.waitForTimeout(1_500);
-    console.log("first order:", (await text(orders.first())).slice(0, 900));
+    console.log("first order:", await orders.first().getAttribute("data-stamp"), (await text(orders.first())).slice(0, 200));
+    // The first row's steps: opened unless the row already shows them.
+    const toggle = page.locator('[data-testid="activity-details"]').first();
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    const steps = page.locator('[data-testid="activity-steps"]').first();
+    await steps.waitFor({ timeout: 10_000 });
+    console.log("its steps:", (await text(steps)).slice(0, 900));
   } else {
     console.log("activity:", (await text(page.locator("main").first())).slice(0, 400));
   }
@@ -108,6 +122,7 @@ try {
 
   // System.
   await open("How it works", "/system");
+  await page.locator('[data-testid="system-mechanism"]').waitFor({ timeout: 60_000 });
   await page.waitForTimeout(4_000);
   await shoot(`${tag}-system`);
   console.log("system:", (await text(page.locator("main").first())).slice(0, 300));

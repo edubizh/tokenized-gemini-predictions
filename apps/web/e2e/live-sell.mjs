@@ -1,12 +1,13 @@
 // Live check of selling back in a browser against a real cluster and a running relayer: log in
-// with the test account, buy on one market, then sell part of the position from the Sell tab of
-// the same ticket and follow the sale's timeline to its stamp.
+// with the test account, buy one contract from the event page's trade panel, then switch the same
+// panel to Sell and sell part of the position, following the sale's timeline to its stamp.
 //
 //   pnpm dev                                   (relayer and web app; or the two started separately)
-//   node --env-file=../../.env e2e/live-sell.mjs [underlying] [YES|NO] [contracts to buy] [contracts to sell] [minimum price]
+//   node --env-file=../../.env e2e/live-sell.mjs [search] [YES|NO] [contracts to buy] [contracts to sell] [minimum price in cents]
 //
-// With 0 contracts to buy the purchase is skipped and tokens already in the wallet are sold. Without
-// a minimum price the ticket's default is used: the best bid at that moment.
+// The optional search is typed into the index's search field. With 0 contracts to buy the purchase
+// is skipped and tokens already in the wallet are sold. Without a minimum price the panel's default
+// is used: the best bid at that moment. A dollar value below 1 ("0.55") is turned into cents.
 // LIVE_BASE_URL overrides http://localhost:3200. The test login is read from PRIVY_TEST_EMAIL and
 // PRIVY_TEST_OTP and is never printed. The account must already have test funds.
 import { chromium } from "@playwright/test";
@@ -15,8 +16,10 @@ import path from "node:path";
 
 const BASE = process.env.LIVE_BASE_URL ?? "http://localhost:3200";
 const OUT = path.join(import.meta.dirname, "out");
-const [underlyingArg, sideArg = "YES", buyQuantity = "2.00", sellQuantity = "1.00", minimumPrice] = process.argv.slice(2);
+const [searchArg, sideArg = "YES", buyQuantity = "2.00", sellQuantity = "1.00", minimumArg] = process.argv.slice(2);
 const side = sideArg.toUpperCase();
+const sideWord = side === "NO" ? "No" : "Yes";
+const minimumPrice = minimumArg && Number(minimumArg) < 1 ? String(Math.round(Number(minimumArg) * 100)) : minimumArg;
 const email = process.env.PRIVY_TEST_EMAIL;
 const otp = process.env.PRIVY_TEST_OTP;
 if (!email || !otp) throw new Error("PRIVY_TEST_EMAIL and PRIVY_TEST_OTP must be set (node --env-file=../../.env).");
@@ -38,31 +41,52 @@ const shoot = async (name) => {
 const text = async (locator) => (await locator.innerText()).replace(/\s+/g, " ").trim();
 const DONE = '[data-testid="order-slip"][data-stamp="FILLED"], [data-testid="order-slip"][data-stamp="REFUNDED"]';
 
+// The login service sometimes refuses or answers slowly, so a failed login is tried once more.
+const logIn = async () => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.locator('[data-testid="login-top"]:not([disabled])').click({ timeout: 30_000 });
+      await page.click('[data-testid="login-email"]');
+      const emailInput = page.locator('input[type="email"]').first();
+      await emailInput.waitFor({ timeout: 30_000 });
+      await emailInput.fill(email);
+      await emailInput.press("Enter");
+      await page.locator('input[name="code-0"]').waitFor({ timeout: 30_000 });
+      for (let i = 0; i < 6; i++) await page.locator(`input[name="code-${i}"]`).fill(otp[i]);
+      await page.locator('[data-testid="account"]').waitFor({ timeout: 90_000 });
+      await page.locator('input[name="code-0"]').waitFor({ state: "detached", timeout: 30_000 }).catch(() => {});
+      return;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      console.log("the login did not finish; trying once more");
+      await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    }
+  }
+};
+
 let exitCode = 1;
 try {
   // Log in.
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
-  await page.click('[data-testid="login"]:not([disabled])');
-  await page.click('[data-testid="login-email"]');
-  const emailInput = page.locator('input[type="email"]').first();
-  await emailInput.waitFor({ timeout: 30_000 });
-  await emailInput.fill(email);
-  await emailInput.press("Enter");
-  await page.locator('input[name="code-0"]').waitFor({ timeout: 30_000 });
-  for (let i = 0; i < 6; i++) await page.locator(`input[name="code-${i}"]`).fill(otp[i]);
-  await page.waitForURL(/\/(welcome|markets)/, { timeout: 90_000 });
-  await page.locator('input[name="code-0"]').waitFor({ state: "detached", timeout: 30_000 }).catch(() => {});
+  await logIn();
 
-  // The market.
-  await page.goto(`${BASE}/markets`, { waitUntil: "networkidle" });
-  await page.getByRole("table", { name: "Markets", exact: true }).waitFor({ timeout: 60_000 });
-  const rows = page.getByRole("row").filter({ has: page.getByRole("link", { name: new RegExp(`^Buy ${side}`) }) });
-  const row = underlyingArg ? rows.filter({ hasText: `${underlyingArg} Up` }).first() : rows.first();
-  if ((await row.count()) === 0) throw new Error("no market takes orders on that side right now");
-  console.log("market row:", (await text(row)).slice(0, 200));
-  await row.getByRole("link", { name: new RegExp(`^Buy ${side}`) }).click();
+  // Markets index: the first contract that offers the chosen side.
+  const cards = page.locator('[data-testid="event-card"]');
+  await cards.first().waitFor({ timeout: 60_000 });
+  if (searchArg) {
+    await page.locator('[data-testid="filter-search"]').fill(searchArg);
+    await page.waitForTimeout(800);
+  }
+  const buyLink = cards.getByRole("link", { name: new RegExp(`^${sideWord}\\b`) }).first();
+  if ((await buyLink.count()) === 0) {
+    throw new Error("no market takes orders on that side right now");
+  }
+  const card = cards.filter({ has: page.getByRole("link", { name: new RegExp(`^${sideWord}\\b`) }) }).first();
+  console.log("event card:", (await text(card)).slice(0, 200));
+  console.log("buying:", await buyLink.getAttribute("aria-label"));
+  await buyLink.click();
   await page.waitForURL(/\/markets\/.+/);
-  console.log("market page:", new URL(page.url()).pathname);
+  console.log("event page:", new URL(page.url()).pathname + new URL(page.url()).search);
 
   // Buy.
   const ticket = page.locator('[data-testid="ticket"]');
@@ -70,8 +94,9 @@ try {
   await ticket.waitFor({ timeout: 120_000 });
   let started = Date.now();
   if (Number(buyQuantity) > 0) {
-    await ticket.getByLabel("Quantity", { exact: true }).fill(buyQuantity);
-    const buyButton = ticket.getByRole("button", { name: /Place order/ });
+    await ticket.locator('[data-testid="ticket-quantity"]').fill(buyQuantity);
+    const buyButton = ticket.locator('[data-testid="place"]');
+    await buyButton.waitFor({ timeout: 60_000 });
     if (await buyButton.isDisabled()) throw new Error("the ticket does not allow a buy right now");
     await buyButton.click();
     await slip.waitFor({ timeout: 90_000 });
@@ -79,20 +104,22 @@ try {
     const bought = await slip.getAttribute("data-stamp");
     console.log(`buy ${bought} after ${((Date.now() - started) / 1000).toFixed(1)} s:`, (await text(slip)).slice(0, 260));
     if (bought !== "FILLED") throw new Error("the buy did not fill, so there is nothing to sell");
-    await page.getByRole("button", { name: "Place another order" }).click();
+    await page.locator('[data-testid="place-another"]').click();
     await ticket.waitFor({ timeout: 30_000 });
   }
 
-  // Sell from the same ticket.
-  const sellTab = ticket.getByRole("tab", { name: /sell/i });
-  await sellTab.waitFor({ timeout: 60_000 });
-  await sellTab.click();
-  await ticket.getByLabel("Quantity", { exact: true }).fill(sellQuantity);
-  if (minimumPrice) await ticket.getByLabel("Minimum price", { exact: true }).fill(minimumPrice);
+  // Sell from the same panel: Buy or sell is a radio group in the panel.
+  const sellChoice = ticket.locator('[data-testid="ticket-action"] label').filter({ hasText: /^Sell$/ });
+  await sellChoice.waitFor({ timeout: 60_000 });
+  await sellChoice.click();
+  await page.locator('[data-testid="ticket"][data-action="sell"]').waitFor({ timeout: 30_000 });
+  await page.waitForTimeout(1_500);
+  await ticket.locator('[data-testid="ticket-quantity"]').fill(sellQuantity);
+  if (minimumPrice) await ticket.locator('[data-testid="ticket-price"]').fill(minimumPrice);
   await page.waitForTimeout(800);
   await shoot("live-sell-ticket");
   console.log("sell ticket:", (await text(ticket)).slice(0, 500));
-  const sellButton = ticket.getByRole("button", { name: /Place order/ });
+  const sellButton = ticket.locator('[data-testid="place"]');
   if (await sellButton.isDisabled()) throw new Error("the ticket does not allow this sale right now");
   started = Date.now();
   await sellButton.click();
