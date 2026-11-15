@@ -36,9 +36,16 @@ describe("priceSeries", () => {
   const trade = (at: number, px: number) => ({ at, px: String(px) });
   const history = [point(60_000, 300), point(120_000, 300)];
 
-  it("ends with the newest trade when it is later than the last history point, and takes its price as the last", () => {
-    // Trades come newest first.
-    expect(priceSeries(history, [trade(150_000, 900), trade(130_000, 700)], "300")).toEqual({ points: [...history, point(150_000, 900)], lastPx: "900" });
+  it("ends with every trade later than the last history point, in time order", () => {
+    // Trades come newest first; the one at 110 000 is already inside the history.
+    expect(priceSeries(history, [trade(150_000, 900), trade(130_000, 700), trade(110_000, 100)], "300")).toEqual({
+      points: [...history, point(130_000, 700), point(150_000, 900)],
+      lastPx: "900",
+    });
+  });
+
+  it("leaves out a trade older than the last history point", () => {
+    expect(priceSeries(history, [trade(90_000, 100)], "600")).toEqual({ points: history, lastPx: "300" });
   });
 
   it("keeps the history alone when no trade is later than it", () => {
@@ -47,6 +54,12 @@ describe("priceSeries", () => {
 
   it("draws a lone trade when there is no history yet", () => {
     expect(priceSeries([], [trade(5_000, 400)], null)).toEqual({ points: [point(5_000, 400)], lastPx: "400" });
+  });
+
+  it("draws every listed trade when there is no history yet, so low and high include them all", () => {
+    const series = priceSeries([], [trade(20_000, 5_500), trade(10_000, 8_700)], "8700");
+    expect(series).toEqual({ points: [point(10_000, 8_700), point(20_000, 5_500)], lastPx: "5500" });
+    expect(chartSummary(series.points)).toEqual({ last: 5_500n, low: 5_500n, high: 8_700n });
   });
 
   it("falls back to the listed last price without history or trades", () => {

@@ -32,12 +32,16 @@ export function chartSummary(points: Points): { last: bigint; low: bigint; high:
 }
 
 /**
- * The prices the chart draws and the last price the page shows, so the two agree with the
- * newest trade listed: the history (in 60-second steps) ends with the newest trade when that is
- * later, and the last price is the end of that series, or the listed one when there is none.
+ * The prices the chart draws and the last price the page shows, so the two agree with the trades
+ * listed: the history (in 60-second steps) followed by every trade later than its last point, in
+ * time order. The last price is the end of that series, or the listed one when there is none.
  */
 export function priceSeries(history: Points, trades: readonly Pick<ApiTrade, "at" | "px">[], listedLastPx: string | null): { points: Points; lastPx: string | null } {
-  const newest = trades.reduce<Pick<ApiTrade, "at" | "px"> | null>((kept, trade) => (kept === null || trade.at > kept.at ? trade : kept), null);
-  const points = newest && newest.at > (history.at(-1)?.at ?? -Infinity) ? [...history, { at: newest.at, px: newest.px }] : history;
+  const after = history.at(-1)?.at ?? -Infinity;
+  const later = trades
+    .filter((trade) => trade.at > after)
+    .sort((a, b) => a.at - b.at)
+    .map(({ at, px }) => ({ at, px }));
+  const points = [...history, ...later];
   return { points, lastPx: points.at(-1)?.px ?? listedLastPx };
 }

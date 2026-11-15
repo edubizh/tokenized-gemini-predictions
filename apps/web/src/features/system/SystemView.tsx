@@ -119,7 +119,7 @@ export function SystemView({ venue, cluster, health, offline, status, markets, a
           {status && status.markets.length > 0 && (
             <Badge tone={unbalanced === 0 ? "positive" : "negative"}>{unbalanced === 0 ? "Balanced" : `${unbalanced} not balanced`}</Badge>
           )}
-          <p className={styles.note}>For each market not yet settled, the venue position must equal Yes supply less No supply, plus fills in flight and operator inventory. In contracts.</p>
+          <p className={styles.note}>For each market that has not expired, the venue position must equal Yes supply less No supply, plus fills in flight and operator inventory. In contracts.</p>
         </div>
         {status === null ? (
           offline ? (
@@ -128,7 +128,7 @@ export function SystemView({ venue, cluster, health, offline, status, markets, a
             <Skeleton width="100%" height="8rem" />
           )
         ) : status.markets.length === 0 ? (
-          <Notice title="Nothing to reconcile">A market is listed here from its creation on Solana until it is settled.</Notice>
+          <Notice title="Nothing to reconcile">A market is listed here from its creation on Solana until its contract expires.</Notice>
         ) : (
           <div data-testid="reconciliation">
             <RowList label="Reconciliation by market" columns={RECONCILE}>
