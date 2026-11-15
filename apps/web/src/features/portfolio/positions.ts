@@ -2,8 +2,8 @@
 // relayer's markets, and grouped by where each market is in its life. Pure.
 
 import type { ApiMarket, SideName } from "@outcome/relayer/api-types";
-import { bidPx } from "@/features/markets/book";
-import { formatClock, formatStrike, payoutStatement, venueKnown, type TimeOptions } from "@/features/markets/wording";
+import { chancePx } from "@/features/markets/derive";
+import { formatClock, formatStrike, type TimeOptions } from "@/features/markets/wording";
 import { formatPrice } from "@/lib/format";
 
 /** What one winning unit pays, in micro-dollars: one test dollar per contract. */
@@ -23,8 +23,8 @@ export interface PositionRow {
   side: SideName;
   market: ApiMarket;
   group: PositionGroup;
-  /** Live only: what the tokens would sell for at the best bid for their side. Null when nobody bids. */
-  worthMicros: bigint | null;
+  /** Live and awaiting: what the tokens are worth at the current chance of their side. Null when no chance is known. */
+  valueMicros: bigint | null;
   /** What the tokens pay if their side wins. */
   fullPayoutMicros: bigint;
   /** Settled only: what the tokens pay. Zero for the side that lost. */
@@ -53,6 +53,21 @@ export interface PortfolioClock {
   wallMs: number;
   /** The cluster clock, unix seconds: redemption opens on it. */
   chainSecs: number;
+  /** False while the relayer is not answering: the last prices it gave are not prices any more. */
+  pricesKnown?: boolean;
+}
+
+const CENT_MICROS = 10_000n;
+
+/**
+ * What the tokens are worth at the current chance of their side (Yes at the chance, No at 100
+ * cents less), an estimate rounded half up to whole cents.
+ */
+function valueAtChance(market: ApiMarket, side: SideName, units: bigint): bigint | null {
+  const chance = chancePx(market);
+  if (chance === null) return null;
+  const exact = units * (side === "YES" ? chance : PAYOUT_PER_UNIT - chance);
+  return ((exact + CENT_MICROS / 2n) / CENT_MICROS) * CENT_MICROS;
 }
 
 function rowFor(balance: TokenBalance, market: ApiMarket, side: SideName, clock: PortfolioClock): PositionRow {
@@ -64,16 +79,14 @@ function rowFor(balance: TokenBalance, market: ApiMarket, side: SideName, clock:
     return {
       ...base,
       group: clock.chainSecs >= onchain.redeemAfter ? "redeemable" : "opening",
-      worthMicros: null,
+      valueMicros: null,
       payoutMicros: balance.units * payout,
       redeemAfter: onchain.redeemAfter,
     };
   }
-  if (market.settleState === "open" && clock.wallMs < market.expiresAt) {
-    const bid = bidPx(market, side);
-    return { ...base, group: "live", worthMicros: bid === null ? null : balance.units * bid, payoutMicros: null, redeemAfter: null };
-  }
-  return { ...base, group: "awaiting", worthMicros: null, payoutMicros: null, redeemAfter: null };
+  const valueMicros = clock.pricesKnown === false ? null : valueAtChance(market, side, balance.units);
+  const group = market.settleState === "open" && clock.wallMs < market.expiresAt ? "live" : "awaiting";
+  return { ...base, group, valueMicros, payoutMicros: null, redeemAfter: null };
 }
 
 const yesFirst = (a: PositionRow, b: PositionRow) => (a.side === b.side ? 0 : a.side === "YES" ? -1 : 1);
@@ -109,29 +122,43 @@ export function buildPortfolio(balances: readonly TokenBalance[], markets: reado
   return portfolio;
 }
 
-type Described = Pick<ApiMarket, "label" | "strike" | "startsAt" | "expiresAt"> & { venueStatus?: string };
-
-/** What one side of a market pays for, in one sentence. YES wins at or above the strike, NO below it. */
-export function sideStatement(market: Described, side: SideName, options: TimeOptions = {}): string {
-  const condition = side === "YES" ? "at or above" : "below";
-  const close = formatClock(market.expiresAt, { ...options, zone: true });
-  if (market.strike !== null) return `${side} pays $1.00 if the price is ${condition} ${formatStrike(market.strike)} at ${close}.`;
-  if (market.label !== "Up") return side === "YES" ? `YES pays $1.00 if: ${market.label}.` : `NO pays $1.00 if not: ${market.label}.`;
-  if (!venueKnown(market)) return `${side} pays $1.00 if the price is ${condition} its price to beat at ${close}.`;
-  return payoutStatement(market, options);
-}
+const SIDE_WORD: Record<SideName, string> = { YES: "Yes", NO: "No" };
 
 /** How a settled market came out: the side that won, and the final price where the venue gave one. */
 export function resultWords(market: Pick<ApiMarket, "strike" | "expiresAt" | "settlementValue" | "resolution" | "onchain">, options: TimeOptions = {}): string {
   const yesPayout = market.onchain?.yesPayout == null ? null : BigInt(market.onchain.yesPayout);
   const noPayout = market.onchain?.noPayout == null ? null : BigInt(market.onchain.noPayout);
   if (yesPayout !== null && noPayout !== null && yesPayout > 0n && noPayout > 0n) {
-    return `Settled as a split: YES pays ${formatPrice(yesPayout)} and NO pays ${formatPrice(noPayout)} per contract.`;
+    return `Settled as a split: Yes pays ${formatPrice(yesPayout)} and No pays ${formatPrice(noPayout)} per contract.`;
   }
-  const winner = yesPayout !== null ? (yesPayout > 0n ? "YES" : "NO") : market.resolution === null ? null : market.resolution === "yes" ? "YES" : "NO";
+  const winner: SideName | null = yesPayout !== null ? (yesPayout > 0n ? "YES" : "NO") : market.resolution === null ? null : market.resolution === "yes" ? "YES" : "NO";
   if (winner === null) return "The result is not in yet.";
-  if (market.settlementValue === null || market.strike === null) return `Result: ${winner}.`;
+  if (market.settlementValue === null || market.strike === null) return `Result: ${SIDE_WORD[winner]}.`;
   const relation = winner === "YES" ? "at or above" : "below";
   const close = formatClock(market.expiresAt, { ...options, zone: true });
-  return `Result: ${winner}. The price was ${formatStrike(market.settlementValue)} at ${close}, ${relation} ${formatStrike(market.strike)}.`;
+  return `Result: ${SIDE_WORD[winner]}. The price was ${formatStrike(market.settlementValue)} at ${close}, ${relation} ${formatStrike(market.strike)}.`;
+}
+
+export interface PortfolioSummary {
+  /** Live and awaiting positions at the current chance; the ones with no chance are left out. */
+  valueMicros: bigint;
+  /** False when some position could not be valued, so the value is a lower bound. */
+  priced: boolean;
+  /** What the winning positions whose redemption is open pay. */
+  redeemableMicros: bigint;
+  openOrders: number;
+  /** Test dollars held by the program for the open orders. */
+  heldMicros: bigint;
+}
+
+/** The figures at the top of the portfolio. */
+export function summarize(portfolio: Portfolio, openOrders: ReadonlyArray<{ holdMicros: bigint }>): PortfolioSummary {
+  const held = [...portfolio.live, ...portfolio.awaiting];
+  return {
+    valueMicros: held.reduce((sum, row) => sum + (row.valueMicros ?? 0n), 0n),
+    priced: held.every((row) => row.valueMicros !== null),
+    redeemableMicros: portfolio.redeemable.reduce((sum, row) => sum + (row.payoutMicros ?? 0n), 0n),
+    openOrders: openOrders.length,
+    heldMicros: openOrders.reduce((sum, order) => sum + order.holdMicros, 0n),
+  };
 }

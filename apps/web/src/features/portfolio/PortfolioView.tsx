@@ -2,449 +2,361 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import type { SideName } from "@outcome/relayer/api-types";
-import type { FaucetStatus } from "@/components/shell/AccountMenu";
+import type { ApiMarket, SideName } from "@outcome/relayer/api-types";
+import { Badge } from "@/components/ui/Badge";
 import { Button, ButtonLink } from "@/components/ui/Button";
-import { Countdown, CountdownView } from "@/components/ui/Countdown";
-import { EmptyState } from "@/components/ui/EmptyState";
+import { Countdown } from "@/components/ui/Countdown";
 import { ExternalLink } from "@/components/ui/ExternalLink";
 import { Notice } from "@/components/ui/Notice";
-import { Receipt, ReceiptLine } from "@/components/ui/Receipt";
+import { Panel } from "@/components/ui/Panel";
 import { Row, RowList, type Column } from "@/components/ui/RowList";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { Stamp } from "@/components/ui/Stamp";
-import { marketHref } from "@/lib/routes";
-import { formatClock, marketTitle, type TimeOptions } from "@/features/markets/wording";
+import type { ActivityRow } from "@/features/activity/rows";
+import type { Reclaiming } from "@/features/activity/useOrderRows";
+import { NO_VALUE } from "@/features/markets/derive";
+import { marketTitle } from "@/features/markets/wording";
 import type { Balances } from "@/lib/chain/reads";
-import { formatContracts, formatDollars, formatSol, shortAddress } from "@/lib/format";
+import { formatCents, formatContracts, formatDollars, shortAddress } from "@/lib/format";
 import type { ReconnectView } from "@/lib/privy/reconnect";
 import { ReconnectWords } from "@/lib/privy/ReconnectWords";
+import { marketHref } from "@/lib/routes";
 import type { RedeemState } from "./actions";
-import { resultWords, sideStatement, type Portfolio, type PositionRow } from "./positions";
+import { summarize, type Portfolio, type PositionRow } from "./positions";
 import styles from "./Portfolio.module.css";
 
-/** Below these the faucet tops a wallet up, so that is when the page offers it. */
-const LOW_STABLE_MICROS = 100_000_000n;
-const LOW_LAMPORTS = 10_000_000n;
-
-/** What a finished redemption leaves on the page in the row's place. */
-export interface RedemptionReceipt {
+/** What a finished redemption leaves on the page, until the page is left. */
+export interface Redemption {
   mint: string;
-  /** The market's title, such as "ETH Up". */
-  title: string;
+  market: ApiMarket;
   side: SideName;
   /** Tokens burned, in units. */
   units: bigint;
   /** Test dollars received, in micro-dollars. Zero for tokens that lost. */
   payoutMicros: bigint;
   signature: string;
-  /** When it was confirmed, unix milliseconds. */
-  at: number;
 }
 
-export interface PortfolioViewProps extends TimeOptions {
+export interface PortfolioViewProps {
   /** Null until the wallet's balances have been read. */
   balances: Balances | null;
   /** Null until the wallet's tokens have been read. */
   portfolio: Portfolio | null;
-  /** True while the relayer is not answering: markets are read from Solana, and prices are not known. */
-  offline?: boolean;
-  /** True while the wallet's tokens cannot be read from Solana; what is shown is the last good read. */
-  chainFailing?: boolean;
-  faucet: { status: FaucetStatus; onRequest(): void };
-  receipts: readonly RedemptionReceipt[];
+  /** The orders whose hold is still with the program; null until they have been read. */
+  openOrders: readonly ActivityRow[] | null;
+  /** True while the relayer is not answering: prices are not known and nothing can be sold. */
+  offline: boolean;
+  /** True while Solana has not answered the first read of the wallet's tokens. */
+  chainFailing: boolean;
+  /** True for a wallet that has not been given test funds yet: that step stands in for the empty state. */
+  firstRun: boolean;
+  redemptions: readonly Redemption[];
   redeeming: RedeemState;
   onRedeem(row: PositionRow): void;
-  /** Set while the trading wallet is not connected in this tab: reconnecting takes Redeem's place. */
-  reconnect?: ReconnectView | null;
-  /** The wall clock the page is drawn for, unix milliseconds. */
-  nowMs: number;
-  /** The cluster clock, unix milliseconds: redemption opens on it. */
+  reclaiming: Reclaiming;
+  /** Set while the trading wallet is not connected in this tab: reconnecting takes the place of Redeem. */
+  reconnect: ReconnectView | null;
+  /** The cluster clock, unix milliseconds: redemption opens and orders expire on it. */
   chainNow(): number;
-  /** Freezes the countdowns, for the gallery. */
-  frozen?: boolean;
-  /** Called when a countdown reaches zero, so the caller can group the positions again. */
-  onDeadline?(): void;
+  /** Called when a countdown reaches zero, so the rows can be drawn again in their new state. */
+  onDeadline(): void;
   txUrl(signature: string): string;
   addressUrl(address: string): string;
 }
 
-const TOKENS: Column = { id: "tokens", header: "Tokens", align: "right", width: "5.5rem" };
-const ACTIONS: Column = { id: "actions", header: "Actions", actions: true, width: "6.5rem" };
-const columns = (value: string, time: string): Column[] => [
-  { id: "position", header: "Position", primary: true },
-  TOKENS,
-  { id: "value", header: value, align: "right", width: "9rem" },
-  { id: "time", header: time, align: "right", width: "9.5rem" },
-  ACTIONS,
-];
-const LIVE = columns("Worth now", "Closes in");
-const AWAITING = columns("Pays", "Closed");
-const REDEEMABLE = columns("Pays", "Result");
-const OPENING = columns("Pays", "Redeem in");
-const UNKNOWN: Column[] = [{ id: "mint", header: "Token mint", primary: true }, TOKENS];
+const POSITION: Column = { id: "position", header: "Market", primary: true, width: "minmax(12rem, 1fr)" };
+const SIDE: Column = { id: "side", header: "Side", width: "3rem" };
+const CONTRACTS: Column = { id: "contracts", header: "Contracts", align: "right", width: "5.5rem" };
+const STATUS: Column = { id: "status", header: "Status", width: "9rem" };
+const ACTION: Column = { id: "action", header: "Action", actions: true, width: "7.5rem" };
 
-function Group({ id, title, count, note, empty, children }: { id: string; title: string; count: number; note: string; empty: string; children: ReactNode }) {
+const POSITIONS: Column[] = [POSITION, SIDE, CONTRACTS, { id: "value", header: "Value", align: "right", width: "5.5rem" }, STATUS, ACTION];
+const SETTLED: Column[] = [POSITION, SIDE, CONTRACTS, { id: "pays", header: "Pays", align: "right", width: "5.5rem" }, STATUS, ACTION];
+const ORDERS: Column[] = [
+  POSITION,
+  { id: "order", header: "Order", width: "5.5rem" },
+  CONTRACTS,
+  { id: "limit", header: "Limit", align: "right", width: "4rem" },
+  { id: "held", header: "Held", align: "right", width: "6rem" },
+  STATUS,
+  ACTION,
+];
+const OTHER: Column[] = [{ id: "mint", header: "Token mint", primary: true }, CONTRACTS];
+
+const SIDE_WORD: Record<SideName, string> = { YES: "Yes", NO: "No" };
+
+function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
-    <section className={styles.group} aria-labelledby={`${id}-title`} data-testid={`group-${id}`}>
-      <div className={styles.groupHead}>
-        <h2 id={`${id}-title`}>{title}</h2>
-        {count > 0 && (
-          <span className={styles.count}>
-            {count}
-            <span className="sr-only">{count === 1 ? " position" : " positions"}</span>
-          </span>
-        )}
-      </div>
-      {children ? (
-        <>
-          <p className={styles.groupNote}>{note}</p>
-          <div className={styles.groupBody}>{children}</div>
-        </>
-      ) : (
-        <div className={styles.groupBody}>
-          <p className={styles.emptyLine}>{empty}</p>
-        </div>
-      )}
+    <section className={styles.section} aria-labelledby={`${id}-title`} data-testid={`portfolio-${id}`}>
+      <h2 id={`${id}-title`}>{title}</h2>
+      {children}
     </section>
   );
 }
 
-function PositionCell({ row, words }: { row: PositionRow; words: string }) {
+function Figure({ label, testId, children }: { label: string; testId: string; children: ReactNode }) {
   return (
-    <div className={styles.position}>
-      <p className={styles.name}>
-        <span className={`${styles.side} ${row.side === "YES" ? styles.yes : styles.no}`}>{row.side}</span>
-        <Link href={marketHref(row.market)} className={styles.title}>
-          {marketTitle(row.market)}
-        </Link>
-      </p>
-      <p className={styles.statement}>{words}</p>
+    <div className={styles.figure}>
+      <dt className={styles.figureLabel}>{label}</dt>
+      <dd className={styles.figureValue} data-testid={testId}>
+        {children}
+      </dd>
     </div>
   );
 }
 
-const tokens = (row: { units: bigint }) => (
-  <span key="tokens" className={styles.figure}>
-    {formatContracts(row.units)}
-  </span>
-);
-
-function pays(row: PositionRow) {
-  const amount = row.payoutMicros ?? 0n;
+function MarketLink({ market, testId }: { market: ApiMarket; testId: string }) {
   return (
-    <span key="value" className={`${styles.figure} ${amount === 0n ? styles.nothing : ""}`}>
-      {formatDollars(amount)}
-    </span>
+    <Link href={marketHref(market)} className={styles.rowTitle} data-testid={testId}>
+      {marketTitle(market)}
+    </Link>
   );
 }
 
-function RedemptionReceiptView({ receipt, txUrl, timeZone }: { receipt: RedemptionReceipt; txUrl(signature: string): string; timeZone?: string }) {
-  const paid = receipt.payoutMicros > 0n;
-  return (
-    <div data-testid="redemption-receipt">
-      <Receipt
-        title={`${paid ? "Redeemed" : "Cleared"} · ${receipt.title}`}
-        mark={<Stamp value={paid ? "REDEEMED" : "LOST"} />}
-        note={paid ? "The tokens were burned and the test dollars are in your wallet." : "These tokens lost, so burning them paid nothing."}
-      >
-        <ReceiptLine label="Tokens burned">{`${formatContracts(receipt.units)} ${receipt.side}`}</ReceiptLine>
-        <ReceiptLine label="Confirmed">{formatClock(receipt.at, { seconds: true, zone: true, timeZone })}</ReceiptLine>
-        <ReceiptLine label="Transaction">
-          <ExternalLink href={txUrl(receipt.signature)} mono>
-            {shortAddress(receipt.signature)}
-          </ExternalLink>
-        </ReceiptLine>
-        <ReceiptLine label="Test dollars received" total>
-          {formatDollars(receipt.payoutMicros)}
-        </ReceiptLine>
-      </Receipt>
-    </div>
-  );
-}
+const money = (micros: bigint | null) => (micros === null ? NO_VALUE : formatDollars(micros));
+const named = (row: { units: bigint; side: SideName; market: ApiMarket }) => `${formatContracts(row.units)} ${SIDE_WORD[row.side]} of ${marketTitle(row.market)}`;
 
-/** The wallet's test dollars and outcome tokens, grouped by where each market is in its life. */
-export function PortfolioView({ balances, portfolio, offline = false, chainFailing = false, faucet, receipts, redeeming, onRedeem, reconnect = null, nowMs, chainNow, frozen, onDeadline, txUrl, addressUrl, timeZone }: PortfolioViewProps) {
-  const redeemed = new Set(receipts.map((receipt) => receipt.mint));
-  const redeemable = (portfolio?.redeemable ?? []).filter((row) => !redeemed.has(row.mint));
-  const winning = redeemable.filter((row) => (row.payoutMicros ?? 0n) > 0n);
-  const redeemableMicros = winning.reduce((sum, row) => sum + (row.payoutMicros ?? 0n), 0n);
-  const low = balances !== null && (balances.stableMicros < LOW_STABLE_MICROS || balances.lamports < LOW_LAMPORTS);
-  const faucetWords = faucet.status.kind === "working" ? "Asking the faucet for test funds." : faucet.status.kind === "idle" ? null : faucet.status.text;
-  const chainMs = chainNow();
+/** The wallet's test dollars, its outcome tokens and its open orders, as they stand on Solana. */
+export function PortfolioView({
+  balances,
+  portfolio,
+  openOrders,
+  offline,
+  chainFailing,
+  firstRun,
+  redemptions,
+  redeeming,
+  onRedeem,
+  reclaiming,
+  reconnect,
+  chainNow,
+  onDeadline,
+  txUrl,
+  addressUrl,
+}: PortfolioViewProps) {
+  const done = new Set(redemptions.map((redemption) => redemption.mint));
+  const held = portfolio ? [...portfolio.live, ...portfolio.awaiting] : [];
+  const settled = portfolio ? [...portfolio.redeemable, ...portfolio.opening].filter((row) => !done.has(row.mint)) : [];
+  const orders = openOrders ?? [];
+  const summary = portfolio && openOrders ? summarize({ ...portfolio, redeemable: settled.filter((row) => row.group === "redeemable") }, orders.map((row) => row.timeline)) : null;
+  const empty = portfolio !== null && openOrders !== null && portfolio.empty && orders.length === 0 && redemptions.length === 0;
 
-  const closes = (row: PositionRow) => (
-    <div key="time" className={styles.stack}>
-      {frozen ? <CountdownView remainingMs={row.market.expiresAt - nowMs} label="" /> : <Countdown to={row.market.expiresAt} label="" onClosed={onDeadline} />}
-      <span className={styles.sub}>{`closes ${formatClock(row.market.expiresAt, { timeZone })}`}</span>
-    </div>
+  const redeemBusy = (row: PositionRow) => (redeeming.mint === row.mint ? (redeeming.progress === "wallet" ? "Check your wallet" : redeeming.progress === "sending" ? "Sending" : false) : false);
+  const reclaimBusy = (row: ActivityRow) => (reclaiming.address === row.address ? (reclaiming.progress === "wallet" ? "Check your wallet" : reclaiming.progress === "sending" ? "Sending" : false) : false);
+
+  const summaryPanel = (
+    <Panel>
+      <h2 className="sr-only">Summary</h2>
+      <dl className={styles.summary}>
+        <Figure label="Test dollars" testId="portfolio-balance">
+          {balances === null ? <Skeleton width="6rem" /> : formatDollars(balances.stableMicros)}
+        </Figure>
+        <Figure label="Value of positions" testId="portfolio-value">
+          {summary === null ? <Skeleton width="5rem" /> : summary.valueMicros === 0n && !summary.priced ? NO_VALUE : formatDollars(summary.valueMicros)}
+        </Figure>
+        <Figure label="Open orders" testId="portfolio-open-orders">
+          {summary === null ? <Skeleton width="3rem" /> : summary.openOrders}
+        </Figure>
+        <Figure label="Redeemable now" testId="portfolio-redeemable">
+          {summary === null ? <Skeleton width="5rem" /> : formatDollars(summary.redeemableMicros)}
+        </Figure>
+      </dl>
+    </Panel>
   );
-  const opens = (row: PositionRow) => {
-    const openAtMs = (row.redeemAfter ?? 0) * 1000;
+
+  if (portfolio === null || openOrders === null) {
     return (
-      <div key="time" className={styles.stack}>
-        {frozen ? (
-          <CountdownView remainingMs={openAtMs - chainMs} label="" closedText="opening" calm />
+      <div className={styles.page}>
+        {summaryPanel}
+        {chainFailing ? (
+          <Notice title="Solana devnet is not answering">Your tokens could not be read yet. The page keeps trying; nothing is lost.</Notice>
         ) : (
-          <Countdown to={openAtMs} now={chainNow} label="" closedText="opening" calm onClosed={onDeadline} />
+          <Section id="loading" title="Positions">
+            <div aria-busy="true">
+              <span className="sr-only">Reading your tokens from Solana</span>
+              <RowList label="Positions, loading" columns={POSITIONS}>
+                {[0, 1].map((index) => (
+                  <Row key={index} cells={[<Skeleton key="p" width="14rem" />, <Skeleton key="s" width="2rem" />, <Skeleton key="c" width="3rem" />, <Skeleton key="v" width="3.5rem" />, <Skeleton key="t" width="6rem" />, null]} />
+                ))}
+              </RowList>
+            </div>
+          </Section>
         )}
-        <span className={styles.sub}>{`opens ${formatClock(openAtMs, { seconds: true, timeZone })}`}</span>
       </div>
-    );
-  };
-  const busy = (row: PositionRow) => (redeeming.mint === row.mint ? (redeeming.progress === "wallet" ? "Check your wallet" : redeeming.progress === "sending" ? "Sending" : false) : false);
-  const title = (row: PositionRow) => `${formatContracts(row.units)} ${row.side} of ${marketTitle(row.market)}`;
-
-  let body: ReactNode;
-  if (portfolio === null) {
-    body = (
-      <div aria-busy="true" style={{ display: "grid", gap: "var(--space-3)" }}>
-        <span className="sr-only">Reading your tokens from Solana</span>
-        <Skeleton width="6rem" height="1.6rem" />
-        <Skeleton width="100%" height="56px" />
-        <Skeleton width="100%" height="56px" />
-      </div>
-    );
-  } else if (portfolio.empty && receipts.length === 0) {
-    body = <EmptyState action={<ButtonLink href="/">See all markets</ButtonLink>}>No positions yet. Pick a market to buy your first outcome tokens.</EmptyState>;
-  } else {
-    body = (
-      <>
-        <Group
-          id="live"
-          title="Live"
-          count={portfolio.live.length}
-          note={
-            offline
-              ? "Markets that are still open, read from Solana. What the tokens are worth now is not known, and they cannot be sold, until the relayer answers again."
-              : "Markets that are still open. Worth is what the tokens would fetch at the best bid right now; it moves until the market closes."
-          }
-          empty="No tokens in a market that is still open."
-        >
-          {portfolio.live.length > 0 && (
-            <RowList label="Live positions" columns={LIVE} dense>
-              {portfolio.live.map((row) => (
-                <Row
-                  key={row.mint}
-                  cells={[
-                    <PositionCell key="position" row={row} words={sideStatement(row.market, row.side, { timeZone })} />,
-                    tokens(row),
-                    <div key="value" className={styles.stack}>
-                      {row.worthMicros === null ? (
-                        <span className={styles.words}>{offline ? "not known" : "no bid right now"}</span>
-                      ) : (
-                        <span className={styles.figure}>
-                          <span className={styles.about}>about </span>
-                          {formatDollars(row.worthMicros)}
-                        </span>
-                      )}
-                      <span className={styles.sub}>{`pays ${formatDollars(row.fullPayoutMicros)} if ${row.side}`}</span>
-                    </div>,
-                    closes(row),
-                    // A sale goes through the relayer, so it is not offered while the relayer is away.
-                    offline ? null : (
-                      <ButtonLink key="action" size="row" href={marketHref(row.market, row.side, "sell")}>
-                        Sell<span className="sr-only">{` ${title(row)}`}</span>
-                      </ButtonLink>
-                    ),
-                  ]}
-                />
-              ))}
-            </RowList>
-          )}
-        </Group>
-
-        <Group
-          id="awaiting"
-          title="Awaiting result"
-          count={portfolio.awaiting.length}
-          note="These markets have closed. The venue reports the result, then the market is settled on Solana, usually within a minute."
-          empty="Nothing is waiting for a result."
-        >
-          {portfolio.awaiting.length > 0 && (
-            <RowList label="Positions awaiting a result" columns={AWAITING} dense>
-              {portfolio.awaiting.map((row) => (
-                <Row
-                  key={row.mint}
-                  cells={[
-                    <PositionCell key="position" row={row} words={sideStatement(row.market, row.side, { timeZone })} />,
-                    tokens(row),
-                    <span key="value" className={styles.figure}>{`${formatDollars(row.fullPayoutMicros)} if ${row.side}`}</span>,
-                    <div key="time" className={styles.stack}>
-                      <span className={styles.figure}>{formatClock(row.market.expiresAt, { timeZone })}</span>
-                      <span className={styles.sub}>
-                        {offline ? "not settled on Solana yet" : row.market.settleState === "needs_review" ? "result under review" : row.market.resolution ? "result in, settling" : "result not in yet"}
-                      </span>
-                    </div>,
-                    null,
-                  ]}
-                />
-              ))}
-            </RowList>
-          )}
-        </Group>
-
-        <Group
-          id="redeemable"
-          title="Redeemable"
-          count={redeemable.length}
-          note="Settled markets. Each winning token pays $1.00 in test dollars. Tokens of the side that lost pay nothing; Clear burns them."
-          empty="Nothing to redeem right now. Winning tokens appear here once their market is settled."
-        >
-          {(redeemable.length > 0 || receipts.length > 0) && (
-            <>
-              {redeemable.length > 0 && (
-                <RowList label="Redeemable positions" columns={REDEEMABLE} dense>
-                  {redeemable.map((row) => {
-                    const won = (row.payoutMicros ?? 0n) > 0n;
-                    return (
-                      <Row
-                        key={row.mint}
-                        cells={[
-                          <PositionCell key="position" row={row} words={resultWords(row.market, { timeZone })} />,
-                          tokens(row),
-                          pays(row),
-                          <Stamp key="time" value={won ? "REDEEMABLE" : "LOST"} />,
-                          reconnect ? (
-                            <Button key="action" size="row" onClick={reconnect.onReconnect} aria-label={`Reconnect wallet to ${won ? "redeem" : "clear"} ${title(row)}`}>
-                              Reconnect
-                            </Button>
-                          ) : won ? (
-                            <Button key="action" size="row" onClick={() => onRedeem(row)} busy={busy(row)} aria-label={`Redeem ${title(row)}`}>
-                              Redeem
-                            </Button>
-                          ) : (
-                            <Button key="action" size="row" variant="quiet" onClick={() => onRedeem(row)} busy={busy(row)} aria-label={`Clear ${title(row)}`}>
-                              Clear
-                            </Button>
-                          ),
-                        ]}
-                      />
-                    );
-                  })}
-                </RowList>
-              )}
-              {receipts.length > 0 && (
-                <div className={styles.receipts}>
-                  {receipts.map((receipt) => (
-                    <RedemptionReceiptView key={receipt.signature} receipt={receipt} txUrl={txUrl} timeZone={timeZone} />
-                  ))}
-                </div>
-              )}
-              {reconnect && redeemable.length > 0 && (
-                <p className={styles.reconnect} role="status">
-                  <ReconnectWords reconnect={reconnect} />
-                </p>
-              )}
-              {redeeming.error && (
-                <div className={styles.problem}>
-                  <Notice tone="negative" title="The tokens were not redeemed">
-                    {redeeming.error}
-                  </Notice>
-                </div>
-              )}
-            </>
-          )}
-        </Group>
-
-        <Group
-          id="opening"
-          title="Redemption opening soon"
-          count={portfolio.opening.length}
-          note="Settled moments ago. Redemption opens a short, fixed time after settlement, on the Solana clock."
-          empty="No settled market is waiting for redemption to open."
-        >
-          {portfolio.opening.length > 0 && (
-            <RowList label="Positions whose redemption opens soon" columns={OPENING} dense>
-              {portfolio.opening.map((row) => (
-                <Row key={row.mint} cells={[<PositionCell key="position" row={row} words={resultWords(row.market, { timeZone })} />, tokens(row), pays(row), opens(row), null]} />
-              ))}
-            </RowList>
-          )}
-        </Group>
-
-        {portfolio.unknown.length > 0 && (
-          <Group
-            id="unknown"
-            title="Unknown market"
-            count={portfolio.unknown.length}
-            note={
-              offline
-                ? "Nothing on Solana says which market these tokens belong to, and the relayer is not answering. They are safe in your wallet."
-                : "Tokens in your wallet that neither the relayer nor their accounts on Solana match to a market. They cannot be valued or redeemed from here."
-            }
-            empty=""
-          >
-            <RowList label="Tokens of unknown markets" columns={UNKNOWN}>
-              {portfolio.unknown.map((balance) => (
-                <Row
-                  key={balance.mint}
-                  cells={[
-                    <div key="mint" className={styles.position}>
-                      <p className={styles.title}>Unknown market</p>
-                      <p className={styles.mint}>
-                        <ExternalLink href={addressUrl(balance.mint)} mono>
-                          <span className={styles.full}>{balance.mint}</span>
-                          <span className={styles.short}>{shortAddress(balance.mint)}</span>
-                        </ExternalLink>
-                      </p>
-                    </div>,
-                    tokens(balance),
-                  ]}
-                />
-              ))}
-            </RowList>
-          </Group>
-        )}
-      </>
     );
   }
 
   return (
-    <>
-      <dl className={styles.facts} aria-label="Your balances">
-        <div className={styles.fact}>
-          <dt className={styles.factLabel}>Test dollars</dt>
-          <dd className={`${styles.factValue} ${styles.balance}`} data-testid="portfolio-balance">
-            {balances === null ? <Skeleton width="9rem" height="1em" /> : formatDollars(balances.stableMicros)}
-          </dd>
-          <dd className={styles.factNote}>in your wallet on Solana devnet, no value</dd>
-        </div>
-        <div className={styles.fact}>
-          <dt className={styles.factLabel}>Redeemable now</dt>
-          <dd className={styles.factValue}>{portfolio === null ? <Skeleton width="5rem" height="1em" /> : formatDollars(redeemableMicros)}</dd>
-          <dd className={styles.factNote}>{winning.length === 0 ? "nothing to redeem" : `from ${winning.length} winning ${winning.length === 1 ? "position" : "positions"}`}</dd>
-        </div>
-        <div className={styles.fact}>
-          <dt className={styles.factLabel}>Devnet SOL</dt>
-          <dd className={styles.factValue}>{balances === null ? <Skeleton width="4rem" height="1em" /> : formatSol(balances.lamports)}</dd>
-          <dd className={styles.factNote}>pays network fees</dd>
-        </div>
-      </dl>
+    <div className={styles.page}>
+      {summaryPanel}
 
-      {(low || faucetWords) && (
-        <div className={styles.low}>
-          {low && (
-            <>
-              <span>{balances !== null && balances.stableMicros < LOW_STABLE_MICROS ? "Running low on test dollars." : "Running low on SOL for network fees."}</span>
-              <Button size="row" onClick={faucet.onRequest} busy={faucet.status.kind === "working" ? "Asking" : false}>
-                Get test funds
-              </Button>
-            </>
+      {empty && !firstRun && (
+        <Notice title="No positions yet" action={<ButtonLink href="/" size="row">See markets</ButtonLink>}>
+          Buy Yes or No in any market and your tokens are listed here.
+        </Notice>
+      )}
+
+      {held.length > 0 && (
+        <Section id="positions" title="Positions">
+          <RowList label="Positions" columns={POSITIONS}>
+            {held.map((row) => (
+              <Row
+                key={row.mint}
+                cells={[
+                  <MarketLink key="position" market={row.market} testId="position-row" />,
+                  SIDE_WORD[row.side],
+                  formatContracts(row.units),
+                  money(row.valueMicros),
+                  row.group === "live" ? (
+                    <Countdown key="status" to={row.market.expiresAt} label="closes in" closedText="closed" onClosed={onDeadline} />
+                  ) : (
+                    <Badge key="status">Awaiting result</Badge>
+                  ),
+                  // A sale goes through the relayer, so it is not offered while the relayer is away.
+                  row.group === "live" && !offline ? (
+                    <span key="action" className={styles.action} data-testid="position-sell">
+                      <ButtonLink size="row" href={marketHref(row.market, row.side, "sell")}>
+                        Sell<span className="sr-only">{` ${named(row)}`}</span>
+                      </ButtonLink>
+                    </span>
+                  ) : null,
+                ]}
+              />
+            ))}
+          </RowList>
+          {offline && <p className={styles.note}>Values and selling come back when the relayer answers. Your tokens are read from Solana and are safe.</p>}
+        </Section>
+      )}
+
+      {orders.length > 0 && (
+        <Section id="orders" title="Open orders">
+          <RowList label="Open orders" columns={ORDERS}>
+            {orders.map((row) => {
+              const { timeline } = row;
+              return (
+                <Row
+                  key={row.address}
+                  cells={[
+                    row.market ? <MarketLink key="position" market={row.market} testId="open-order" /> : <span key="position" data-testid="open-order">Market not known</span>,
+                    `${timeline.kind === "sell" ? "Sell" : "Buy"} ${SIDE_WORD[timeline.side]}`,
+                    formatContracts(timeline.units),
+                    formatCents(timeline.limitPx),
+                    timeline.kind === "sell" ? `${formatContracts(timeline.units)} tokens` : formatDollars(timeline.holdMicros),
+                    timeline.canReclaim ? (
+                      <Badge key="status">Expired</Badge>
+                    ) : (
+                      <Countdown key="status" to={timeline.expiresAt * 1000} now={chainNow} label="expires in" closedText="expired" calm onClosed={onDeadline} />
+                    ),
+                    timeline.canReclaim ? (
+                      reclaiming.reconnect ? (
+                        <Button key="action" size="row" onClick={reclaiming.reconnect.onReconnect}>
+                          Reconnect wallet
+                        </Button>
+                      ) : (
+                        <Button key="action" size="row" onClick={() => reclaiming.onReclaim(row)} busy={reclaimBusy(row)} data-testid="order-reclaim">
+                          Reclaim<span className="sr-only">{` the ${timeline.kind === "sell" ? "tokens" : "hold"} of ${row.title ?? "this order"}`}</span>
+                        </Button>
+                      )
+                    ) : null,
+                  ]}
+                />
+              );
+            })}
+          </RowList>
+          {reclaiming.error && (
+            <Notice tone="negative" title="Nothing was reclaimed">
+              {reclaiming.error}
+            </Notice>
           )}
-          {faucetWords && <span role="status">{faucetWords}</span>}
-        </div>
+        </Section>
       )}
 
-      {chainFailing && (
-        <div className={styles.problem}>
-          <Notice tone="caution" title="Solana devnet is not answering">
-            {portfolio === null ? "Your tokens could not be read yet. The page keeps trying; nothing is lost." : "Your tokens are shown as they were last read. The page keeps trying; nothing is lost."}
-          </Notice>
-        </div>
+      {(settled.length > 0 || redemptions.length > 0) && (
+        <Section id="settled" title="Settled">
+          <RowList label="Settled positions" columns={SETTLED}>
+            {settled.map((row) => {
+              const won = (row.payoutMicros ?? 0n) > 0n;
+              let action: ReactNode = null;
+              if (row.group === "redeemable") {
+                action = reconnect ? (
+                  <Button key="action" size="row" onClick={reconnect.onReconnect}>
+                    Reconnect wallet
+                  </Button>
+                ) : (
+                  <Button key="action" size="row" variant={won ? "secondary" : "quiet"} onClick={() => onRedeem(row)} busy={redeemBusy(row)} data-testid={won ? "position-redeem" : "position-clear"}>
+                    {won ? "Redeem" : "Clear"}
+                    <span className="sr-only">{` ${named(row)}`}</span>
+                  </Button>
+                );
+              }
+              return (
+                <Row
+                  key={row.mint}
+                  cells={[
+                    <MarketLink key="position" market={row.market} testId="position-row" />,
+                    SIDE_WORD[row.side],
+                    formatContracts(row.units),
+                    money(row.payoutMicros),
+                    row.group === "opening" ? (
+                      <Countdown key="status" to={(row.redeemAfter ?? 0) * 1000} now={chainNow} label="redeem in" closedText="opening" calm onClosed={onDeadline} />
+                    ) : won ? (
+                      <Badge key="status" tone="positive">
+                        Won
+                      </Badge>
+                    ) : (
+                      <Badge key="status">Lost</Badge>
+                    ),
+                    action,
+                  ]}
+                />
+              );
+            })}
+            {redemptions.map((redemption) => (
+              <Row
+                key={redemption.signature}
+                cells={[
+                  <MarketLink key="position" market={redemption.market} testId="position-row" />,
+                  SIDE_WORD[redemption.side],
+                  formatContracts(redemption.units),
+                  formatDollars(redemption.payoutMicros),
+                  <Badge key="status">{redemption.payoutMicros > 0n ? "Redeemed" : "Cleared"}</Badge>,
+                  <span key="action" data-testid="redemption-tx">
+                    <ExternalLink href={txUrl(redemption.signature)}>{shortAddress(redemption.signature)}</ExternalLink>
+                  </span>,
+                ]}
+              />
+            ))}
+          </RowList>
+          {reconnect && settled.some((row) => row.group === "redeemable") && (
+            <p className={styles.note} role="status">
+              <ReconnectWords reconnect={reconnect} />
+            </p>
+          )}
+          {redeeming.error && (
+            <Notice tone="negative" title="The tokens were not redeemed">
+              {redeeming.error}
+            </Notice>
+          )}
+        </Section>
       )}
 
-      <div className={styles.groups}>{body}</div>
-    </>
+      {portfolio.unknown.length > 0 && (
+        <Section id="other" title="Other tokens">
+          <RowList label="Tokens of markets that are not known" columns={OTHER}>
+            {portfolio.unknown.map((balance) => (
+              <Row
+                key={balance.mint}
+                cells={[
+                  <ExternalLink key="mint" href={addressUrl(balance.mint)}>
+                    {shortAddress(balance.mint)}
+                  </ExternalLink>,
+                  formatContracts(balance.units),
+                ]}
+              />
+            ))}
+          </RowList>
+          <p className={styles.note}>Nothing names the market of these tokens, so they cannot be valued or redeemed here. They are safe in your wallet.</p>
+        </Section>
+      )}
+    </div>
   );
 }

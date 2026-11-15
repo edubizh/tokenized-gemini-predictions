@@ -3,7 +3,7 @@ import type { ApiMarket } from "@outcome/relayer/api-types";
 import { knownMarkets } from "@/features/markets/known";
 import type { ChainMarket } from "@/lib/chain/reads";
 import { fixtureAddress, fixtureMarket } from "@/lib/relayer/fixtures";
-import { buildPortfolio, resultWords, sideStatement } from "./positions";
+import { buildPortfolio, resultWords, summarize } from "./positions";
 
 const NOW = Date.UTC(2026, 10, 14, 22, 14, 0);
 const CHAIN = Math.floor(NOW / 1000);
@@ -22,7 +22,7 @@ const yes = (market: ApiMarket) => market.onchain!.yesMint;
 const no = (market: ApiMarket) => market.onchain!.noMint;
 
 describe("buildPortfolio", () => {
-  it("joins balances to markets by mint and values a live position at the book", () => {
+  it("joins balances to markets by mint and values a live position at the current chance", () => {
     const portfolio = buildPortfolio(
       [
         { mint: no(btc), units: 125n },
@@ -31,28 +31,36 @@ describe("buildPortfolio", () => {
       markets,
       at,
     );
-    // The fixture book of the first market: bid $0.55, ask $0.57.
-    expect(portfolio.live.map((row) => [row.side, row.units, row.worthMicros, row.fullPayoutMicros])).toEqual([
-      ["YES", 300n, 300n * 5_500n, 3_000_000n],
-      ["NO", 125n, 125n * 4_300n, 1_250_000n],
+    // The fixture book of the first market: bid 55¢, ask 57¢, so the chance of Yes is 56%.
+    expect(portfolio.live.map((row) => [row.side, row.units, row.valueMicros, row.fullPayoutMicros])).toEqual([
+      ["YES", 300n, 300n * 5_600n, 3_000_000n],
+      ["NO", 125n, 125n * 4_400n, 1_250_000n],
     ]);
     expect(portfolio.live[0]?.market.symbol).toBe(btc.symbol);
     expect(portfolio.live[0]?.payoutMicros).toBeNull();
     expect(portfolio.empty).toBe(false);
   });
 
-  it("has no worth for a side nobody bids for", () => {
-    const oneSided: ApiMarket = { ...btc, book: { bidPx: null, bidUnits: "0", askPx: "5700", askUnits: "100", at: NOW } };
-    const portfolio = buildPortfolio(
-      [
-        { mint: yes(btc), units: 300n },
-        { mint: no(btc), units: 100n },
-      ],
-      [oneSided],
-      at,
-    );
-    expect(portfolio.live.map((row) => row.worthMicros)).toEqual([null, 100n * 4_300n]);
-    expect(buildPortfolio([{ mint: yes(btc), units: 300n }], [{ ...btc, book: null }], at).live[0]?.worthMicros).toBeNull();
+  it("values at the last trade without both sides of the book, and has no value without either", () => {
+    const oneSided: ApiMarket = { ...btc, book: { bidPx: null, bidUnits: "0", askPx: "5700", askUnits: "100", at: NOW }, lastPx: "6000" };
+    const held = [
+      { mint: yes(btc), units: 300n },
+      { mint: no(btc), units: 100n },
+    ];
+    expect(buildPortfolio(held, [oneSided], at).live.map((row) => row.valueMicros)).toEqual([300n * 6_000n, 100n * 4_000n]);
+    expect(buildPortfolio(held, [{ ...btc, book: null, lastPx: null }], at).live.map((row) => row.valueMicros)).toEqual([null, null]);
+  });
+
+  it("rounds a value at the chance to whole cents", () => {
+    // 0.05 contracts at a chance of 56.01¢ is 2.8005¢: 3¢. At 56.00¢ it is 2.8¢: still 3¢.
+    const odd: ApiMarket = { ...btc, book: { bidPx: "5501", bidUnits: "100", askPx: "5700", askUnits: "100", at: NOW } };
+    expect(buildPortfolio([{ mint: yes(btc), units: 5n }], [odd], at).live[0]?.valueMicros).toBe(30_000n);
+    expect(buildPortfolio([{ mint: yes(btc), units: 1n }], [btc], at).live[0]?.valueMicros).toBe(10_000n);
+  });
+
+  it("has no value while prices are not known, such as while the relayer is not answering", () => {
+    const portfolio = buildPortfolio([{ mint: yes(btc), units: 300n }], markets, { ...at, pricesKnown: false });
+    expect(portfolio.live[0]?.valueMicros).toBeNull();
   });
 
   it("drops zero balances", () => {
@@ -82,7 +90,7 @@ describe("buildPortfolio", () => {
         ["X-STALE", "NO", 50n],
       ].sort(),
     );
-    expect(portfolio.awaiting.every((row) => row.payoutMicros === null && row.worthMicros === null)).toBe(true);
+    expect(portfolio.awaiting.every((row) => row.payoutMicros === null)).toBe(true);
   });
 
   it("lists settled positions as redeemable once redemption has opened, winners first", () => {
@@ -140,35 +148,15 @@ describe("buildPortfolio", () => {
   });
 });
 
-describe("sideStatement", () => {
-  const options = { timeZone: "UTC" };
-
-  it("says what each side of an Up market pays for", () => {
-    expect(sideStatement(btc, "YES", options)).toBe("YES pays $1.00 if the price is at or above $104,212.50 at 10:16 PM UTC.");
-    expect(sideStatement(btc, "NO", options)).toBe("NO pays $1.00 if the price is below $104,212.50 at 10:16 PM UTC.");
-  });
-
-  it("says what each side of a ladder contract pays for", () => {
-    expect(sideStatement(strike, "YES", options)).toBe("YES pays $1.00 if the price is at or above $104,100.00 at 10:18 PM UTC.");
-    expect(sideStatement(strike, "NO", options)).toBe("NO pays $1.00 if the price is below $104,100.00 at 10:18 PM UTC.");
-  });
-
-  it("falls back to the contract label, and to the opening time before the strike is known", () => {
-    expect(sideStatement({ ...btc, label: "Rain in Lisbon", strike: null }, "YES", options)).toBe("YES pays $1.00 if: Rain in Lisbon.");
-    expect(sideStatement({ ...btc, label: "Rain in Lisbon", strike: null }, "NO", options)).toBe("NO pays $1.00 if not: Rain in Lisbon.");
-    expect(sideStatement({ ...btc, strike: null }, "NO", options)).toBe("The reference price is set when the window opens at 10:01 PM.");
-  });
-});
-
 describe("resultWords", () => {
   it("names the side that won and the final price against the strike", () => {
-    expect(resultWords(settledYes, { timeZone: "UTC" })).toBe("Result: YES. The price was $104,243.90 at 10:11 PM UTC, at or above $104,212.50.");
-    expect(resultWords(settledNo, { timeZone: "UTC" })).toBe("Result: NO. The price was $104,180.02 at 10:06 PM UTC, below $104,212.50.");
+    expect(resultWords(settledYes, { timeZone: "UTC" })).toBe("Result: Yes. The price was $104,243.90 at 10:11 PM UTC, at or above $104,212.50.");
+    expect(resultWords(settledNo, { timeZone: "UTC" })).toBe("Result: No. The price was $104,180.02 at 10:06 PM UTC, below $104,212.50.");
   });
 
   it("says less when the venue gave no final price, and spells out a split settlement", () => {
-    expect(resultWords({ ...settledYes, settlementValue: null })).toBe("Result: YES.");
-    expect(resultWords({ ...settledYes, onchain: { ...settledYes.onchain!, yesPayout: "5000", noPayout: "5000" } })).toBe("Settled as a split: YES pays $0.50 and NO pays $0.50 per contract.");
+    expect(resultWords({ ...settledYes, settlementValue: null })).toBe("Result: Yes.");
+    expect(resultWords({ ...settledYes, onchain: { ...settledYes.onchain!, yesPayout: "5000", noPayout: "5000" } })).toBe("Settled as a split: Yes pays $0.50 and No pays $0.50 per contract.");
   });
 });
 
@@ -209,7 +197,7 @@ describe("positions without the relayer", () => {
 
   it("groups tokens from their market accounts alone", () => {
     const portfolio = buildPortfolio(held, markets, clock);
-    expect(portfolio.live.map((row) => [row.mint, row.worthMicros])).toEqual([["yes-BTC", null]]);
+    expect(portfolio.live.map((row) => [row.mint, row.valueMicros])).toEqual([["yes-BTC", null]]);
     expect(portfolio.awaiting.map((row) => row.mint)).toEqual(["no-ETH"]);
     expect(portfolio.redeemable.map((row) => [row.mint, row.side, row.payoutMicros])).toEqual([
       ["yes-SOL", "YES", 5_000_000n],
@@ -224,9 +212,33 @@ describe("positions without the relayer", () => {
     expect(buildPortfolio(held, markets, clock).unknown).toEqual([{ mint: "yes-DOGE", units: 700n }]);
   });
 
-  it("words a side without a price to beat", () => {
-    const btc = markets.find((market) => market.title === "BTC")!;
-    expect(sideStatement(btc, "NO", { timeZone: "UTC" })).toBe("NO pays $1.00 if the price is below its price to beat at 10:00 PM UTC.");
-    expect(resultWords(markets.find((market) => market.title === "SOL")!, { timeZone: "UTC" })).toBe("Result: YES.");
+  it("words a result without a final price", () => {
+    expect(resultWords(markets.find((market) => market.title === "SOL")!, { timeZone: "UTC" })).toBe("Result: Yes.");
+  });
+});
+
+describe("summarize", () => {
+  it("adds up the value at the current chance, what is redeemable now, and the open orders", () => {
+    const portfolio = buildPortfolio(
+      [
+        { mint: yes(btc), units: 300n },
+        { mint: yes(settledYes), units: 500n },
+        { mint: no(settledYes), units: 40n },
+      ],
+      markets,
+      at,
+    );
+    expect(summarize(portfolio, [{ holdMicros: 2_920_000n }, { holdMicros: 0n }])).toEqual({
+      valueMicros: 300n * 5_600n,
+      priced: true,
+      redeemableMicros: 5_000_000n,
+      openOrders: 2,
+      heldMicros: 2_920_000n,
+    });
+  });
+
+  it("says when a position has no value it could be counted at", () => {
+    const portfolio = buildPortfolio([{ mint: yes(btc), units: 300n }], [{ ...btc, book: null, lastPx: null }], at);
+    expect(summarize(portfolio, [])).toEqual({ valueMicros: 0n, priced: false, redeemableMicros: 0n, openOrders: 0, heldMicros: 0n });
   });
 });
