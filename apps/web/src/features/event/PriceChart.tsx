@@ -11,11 +11,11 @@ const GRID = [7_500, 5_000, 2_500] as const;
 
 /**
  * The Yes price of one contract over time, on a fixed 0 to 100 cent scale with three quiet
- * gridlines and the last price marked. The drawing is for the eye; the caption under it says
- * the last, lowest and highest price in words.
+ * gridlines and the last price marked. The points are the history and the newest trade (see
+ * `priceSeries`). The drawing is for the eye; the caption under it says the last, lowest and
+ * highest price in words.
  */
-export function PriceChart({ history }: { history: ApiHistory | null | undefined }) {
-  const points = history?.points ?? [];
+export function PriceChart({ points = [], loading }: { points?: ApiHistory["points"]; loading: boolean }) {
   const line = chartLine(points, WIDTH, HEIGHT);
   const summary = chartSummary(points);
   const first = points[0];
@@ -26,7 +26,7 @@ export function PriceChart({ history }: { history: ApiHistory | null | undefined
   if (!line || !summary || !first || !final) {
     return (
       <div className={styles.chartEmpty} data-testid="price-chart">
-        <p>{history === undefined ? "Loading the price history." : "No trades yet. The price of Yes is drawn here once the contract trades."}</p>
+        <p>{loading ? "Loading the price history." : "No trades yet. The price of Yes is drawn here once the contract trades."}</p>
       </div>
     );
   }

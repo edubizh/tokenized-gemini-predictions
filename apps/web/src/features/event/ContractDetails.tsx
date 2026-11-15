@@ -9,6 +9,7 @@ import { centsText, NO_VALUE } from "@/features/markets/derive";
 import { formatClock, priceToBeat } from "@/features/markets/wording";
 import { formatContracts } from "@/lib/format";
 import { useDepth, useHistory, useTrades } from "@/lib/relayer/hooks";
+import { priceSeries } from "./chart";
 import { PriceChart } from "./PriceChart";
 import styles from "./Event.module.css";
 
@@ -68,6 +69,8 @@ export function ContractDetails({ event, market }: { event: ApiEventDetail; mark
   const history = useHistory(market.symbol);
   const rule = event.rules[market.symbol];
   const toBeat = priceToBeat(market);
+  // The chart, its caption and "Last" agree with the newest trade listed below them.
+  const series = priceSeries(history.data?.points ?? [], trades.data ?? [], market.lastPx);
 
   return (
     <>
@@ -82,12 +85,12 @@ export function ContractDetails({ event, market }: { event: ApiEventDetail; mark
               Ask <strong>{px(market.book?.askPx)}</strong>
             </span>
             <span>
-              Last <strong>{px(market.lastPx)}</strong>
+              Last <strong>{px(series.lastPx)}</strong>
             </span>
           </p>
         </div>
         <Panel>
-          <PriceChart history={history.data} />
+          <PriceChart points={series.points} loading={history.data === undefined} />
         </Panel>
       </section>
 

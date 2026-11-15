@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chartLine, chartSummary } from "./chart";
+import { chartLine, chartSummary, priceSeries } from "./chart";
 
 const point = (at: number, px: number) => ({ at, px: String(px) });
 
@@ -29,5 +29,28 @@ describe("chartSummary", () => {
 
   it("is null without points", () => {
     expect(chartSummary([])).toBeNull();
+  });
+});
+
+describe("priceSeries", () => {
+  const trade = (at: number, px: number) => ({ at, px: String(px) });
+  const history = [point(60_000, 300), point(120_000, 300)];
+
+  it("ends with the newest trade when it is later than the last history point, and takes its price as the last", () => {
+    // Trades come newest first.
+    expect(priceSeries(history, [trade(150_000, 900), trade(130_000, 700)], "300")).toEqual({ points: [...history, point(150_000, 900)], lastPx: "900" });
+  });
+
+  it("keeps the history alone when no trade is later than it", () => {
+    expect(priceSeries(history, [trade(120_000, 900), trade(90_000, 700)], "600")).toEqual({ points: history, lastPx: "300" });
+  });
+
+  it("draws a lone trade when there is no history yet", () => {
+    expect(priceSeries([], [trade(5_000, 400)], null)).toEqual({ points: [point(5_000, 400)], lastPx: "400" });
+  });
+
+  it("falls back to the listed last price without history or trades", () => {
+    expect(priceSeries([], [], "600")).toEqual({ points: [], lastPx: "600" });
+    expect(priceSeries([], [], null)).toEqual({ points: [], lastPx: null });
   });
 });

@@ -1,6 +1,6 @@
 // The geometry of the price chart: the Yes price over time on a fixed 0 to 100 cent scale. Pure.
 
-import type { ApiHistory } from "@outcome/relayer/api-types";
+import type { ApiHistory, ApiTrade } from "@outcome/relayer/api-types";
 
 type Points = ApiHistory["points"];
 
@@ -29,4 +29,15 @@ export function chartSummary(points: Points): { last: bigint; low: bigint; high:
   const prices = points.map((p) => BigInt(p.px));
   const pick = (better: (a: bigint, b: bigint) => boolean) => prices.reduce((kept, px) => (better(px, kept) ? px : kept));
   return { last: prices.at(-1) as bigint, low: pick((a, b) => a < b), high: pick((a, b) => a > b) };
+}
+
+/**
+ * The prices the chart draws and the last price the page shows, so the two agree with the
+ * newest trade listed: the history (in 60-second steps) ends with the newest trade when that is
+ * later, and the last price is the end of that series, or the listed one when there is none.
+ */
+export function priceSeries(history: Points, trades: readonly Pick<ApiTrade, "at" | "px">[], listedLastPx: string | null): { points: Points; lastPx: string | null } {
+  const newest = trades.reduce<Pick<ApiTrade, "at" | "px"> | null>((kept, trade) => (kept === null || trade.at > kept.at ? trade : kept), null);
+  const points = newest && newest.at > (history.at(-1)?.at ?? -Infinity) ? [...history, { at: newest.at, px: newest.px }] : history;
+  return { points, lastPx: points.at(-1)?.px ?? listedLastPx };
 }
