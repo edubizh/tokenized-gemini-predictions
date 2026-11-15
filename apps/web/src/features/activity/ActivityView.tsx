@@ -16,7 +16,7 @@ import { OrderTimelineView } from "@/features/ticket/OrderTimeline";
 import type { OrderStamp } from "@/features/ticket/timeline";
 import { formatCents, formatContracts, formatDollars, shortAddress } from "@/lib/format";
 import { marketHref } from "@/lib/routes";
-import { orderAmount } from "./receipt";
+import { orderAmount } from "./figures";
 import type { ActivityRow } from "./rows";
 import type { Reclaiming } from "./useOrderRows";
 import styles from "./Activity.module.css";
@@ -60,19 +60,19 @@ const day = (atMs: number) => new Intl.DateTimeFormat("en-US", { month: "short",
 
 /** The figures of one order, where the steps above them say what happened. */
 function OrderFacts({ row, addressUrl }: { row: ActivityRow; addressUrl(address: string): string }) {
-  const { receipt, timeline } = row;
-  const sale = receipt.sale;
+  const { figures, timeline } = row;
+  const sale = figures.sale;
   const tokens = (units: bigint) => `${formatContracts(units)} ${SIDE_WORD[timeline.side]}`;
   const waiting = timeline.canReclaim ? "To reclaim" : "Still held";
   return (
     <>
       <h3 className="sr-only">Figures of the order</h3>
       <Facts>
-        {receipt.fills.length === 0 ? (
+        {figures.fills.length === 0 ? (
           <Fact label="Fill">None</Fact>
         ) : (
-          receipt.fills.map((fill, index) => (
-            <Fact key={fill.tradeId} label={receipt.fills.length > 1 ? `Fill ${index + 1} of ${receipt.fills.length}` : "Fill"}>
+          figures.fills.map((fill, index) => (
+            <Fact key={fill.tradeId} label={figures.fills.length > 1 ? `Fill ${index + 1} of ${figures.fills.length}` : "Fill"}>
               {`${formatContracts(fill.units)} at ${formatCents(fill.px)}`}
             </Fact>
           ))
@@ -84,7 +84,7 @@ function OrderFacts({ row, addressUrl }: { row: ActivityRow; addressUrl(address:
           <>
             <Fact label="Tokens held">{tokens(sale.heldUnits)}</Fact>
             <Fact label="Proceeds">{formatDollars(sale.proceedsMicros)}</Fact>
-            <Fact label="Fee">{formatDollars(receipt.feeMicros)}</Fact>
+            <Fact label="Fee">{formatDollars(figures.feeMicros)}</Fact>
             <Fact label="Tokens returned">{sale.returnedUnits === null ? waiting : tokens(sale.returnedUnits)}</Fact>
             <Fact label="Test dollars paid" total>
               {sale.paidMicros === null ? "Not yet" : formatDollars(sale.paidMicros)}
@@ -92,11 +92,11 @@ function OrderFacts({ row, addressUrl }: { row: ActivityRow; addressUrl(address:
           </>
         ) : (
           <>
-            <Fact label="Held">{formatDollars(receipt.heldMicros)}</Fact>
-            <Fact label="Cost">{formatDollars(receipt.costMicros)}</Fact>
-            <Fact label="Fee">{formatDollars(receipt.feeMicros)}</Fact>
+            <Fact label="Held">{formatDollars(figures.heldMicros)}</Fact>
+            <Fact label="Cost">{formatDollars(figures.costMicros)}</Fact>
+            <Fact label="Fee">{formatDollars(figures.feeMicros)}</Fact>
             <Fact label="Hold returned" total>
-              {receipt.returnedMicros === null ? waiting : formatDollars(receipt.returnedMicros)}
+              {figures.returnedMicros === null ? waiting : formatDollars(figures.returnedMicros)}
             </Fact>
           </>
         )}
@@ -161,7 +161,7 @@ export function ActivityView({ rows, offline, nowMs, chainNow, onExpired, reclai
           const detailId = `order-${row.address}`;
           const order = `${timeline.kind === "sell" ? "Sell" : "Buy"} ${SIDE_WORD[timeline.side]}`;
           const placed = row.entry.placedAt;
-          const amount = orderAmount(row.receipt);
+          const amount = orderAmount(row.figures);
           const status = STATUS[timeline.stamp];
           return (
             <Row

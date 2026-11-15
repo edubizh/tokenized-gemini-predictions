@@ -4,7 +4,7 @@
 import type { ApiMarket, SideName } from "@outcome/relayer/api-types";
 import { chancePx } from "@/features/markets/derive";
 import { formatClock, formatStrike, type TimeOptions } from "@/features/markets/wording";
-import { formatPrice } from "@/lib/format";
+import { formatCents } from "@/lib/format";
 
 /** What one winning unit pays, in micro-dollars: one test dollar per contract. */
 export const PAYOUT_PER_UNIT = 10_000n;
@@ -129,7 +129,7 @@ export function resultWords(market: Pick<ApiMarket, "strike" | "expiresAt" | "se
   const yesPayout = market.onchain?.yesPayout == null ? null : BigInt(market.onchain.yesPayout);
   const noPayout = market.onchain?.noPayout == null ? null : BigInt(market.onchain.noPayout);
   if (yesPayout !== null && noPayout !== null && yesPayout > 0n && noPayout > 0n) {
-    return `Settled as a split: Yes pays ${formatPrice(yesPayout)} and No pays ${formatPrice(noPayout)} per contract.`;
+    return `Settled as a split: Yes pays ${formatCents(yesPayout)} and No pays ${formatCents(noPayout)} per contract.`;
   }
   const winner: SideName | null = yesPayout !== null ? (yesPayout > 0n ? "YES" : "NO") : market.resolution === null ? null : market.resolution === "yes" ? "YES" : "NO";
   if (winner === null) return "The result is not in yet.";

@@ -156,7 +156,7 @@ describe("resultWords", () => {
 
   it("says less when the venue gave no final price, and spells out a split settlement", () => {
     expect(resultWords({ ...settledYes, settlementValue: null })).toBe("Result: Yes.");
-    expect(resultWords({ ...settledYes, onchain: { ...settledYes.onchain!, yesPayout: "5000", noPayout: "5000" } })).toBe("Settled as a split: Yes pays $0.50 and No pays $0.50 per contract.");
+    expect(resultWords({ ...settledYes, onchain: { ...settledYes.onchain!, yesPayout: "5000", noPayout: "5000" } })).toBe("Settled as a split: Yes pays 50¢ and No pays 50¢ per contract.");
   });
 });
 

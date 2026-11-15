@@ -24,17 +24,15 @@ export function SystemPage({ addresses }: { addresses: SystemAddresses }) {
 
   return (
     <>
-      <PageHeader title="How it works">
-        A program on Solana devnet holds each order&apos;s test dollars. A relayer places the matching order at a venue, and tokens are minted only after that order fills. This page says what is trusted, and shows the relayer&apos;s own books.
-      </PageHeader>
+      <PageHeader title="How it works">Outcome Tokens turns positions in prediction markets into tokens on Solana devnet. Test money only.</PageHeader>
       <SystemView
         venue={venue}
-        health={health}
+        cluster={config.cluster}
+        health={offline ? null : health}
         offline={offline}
         status={offline || status.error ? null : (status.data ?? null)}
         markets={markets.data ?? []}
         addresses={addresses}
-        nowMs={Date.now()}
         addressUrl={(address) => explorerAddressUrl(config, address)}
       />
     </>

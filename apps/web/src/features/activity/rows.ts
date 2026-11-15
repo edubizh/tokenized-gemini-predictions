@@ -5,7 +5,7 @@ import type { ApiMarket } from "@outcome/relayer/api-types";
 import { marketTitle } from "@/features/markets/wording";
 import type { OrderEntry } from "@/features/ticket/entries";
 import { deriveTimeline, type DerivedTimeline } from "@/features/ticket/timeline";
-import { orderReceipt, type OrderReceipt } from "./receipt";
+import { orderFigures, type OrderFigures } from "./figures";
 
 export interface ActivityRow {
   address: string;
@@ -15,7 +15,7 @@ export interface ActivityRow {
   title: string | null;
   kind: "buy" | "sell";
   timeline: DerivedTimeline;
-  receipt: OrderReceipt;
+  figures: OrderFigures;
 }
 
 export function buildActivityRows(entries: readonly OrderEntry[], markets: readonly ApiMarket[], chainNowSecs: number, relayerAway = false): ActivityRow[] {
@@ -30,7 +30,7 @@ export function buildActivityRows(entries: readonly OrderEntry[], markets: reado
       title: market ? marketTitle(market) : null,
       kind: timeline.kind,
       timeline,
-      receipt: orderReceipt(timeline, entry.api),
+      figures: orderFigures(timeline, entry.api),
     };
   });
 }
