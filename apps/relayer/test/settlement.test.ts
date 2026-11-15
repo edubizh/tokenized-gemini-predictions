@@ -4,6 +4,7 @@ import type { Journal, NewOrder } from "../src/journal.ts";
 import { openRegistry } from "../src/registry.ts";
 import type { Registry } from "../src/registry.ts";
 import { createSettlementWatcher } from "../src/settlement.ts";
+import type { SettlementInput } from "../src/settlement.ts";
 import { MockVenue } from "../src/venue/mock.ts";
 import type { ContractInfo } from "../src/venue/venue.ts";
 import { eventOf } from "./helpers/events.ts";
@@ -15,8 +16,12 @@ const START = EXPIRY + 30_000;
 const CONFIRM = 20_000;
 const REVIEW_AFTER = 600_000;
 const PAYOUT_GRACE = 180_000;
+const SWEEP = 60_000;
 const SYMBOL = "TEST-BTC15M2611140300-UP";
 const OTHER = "TEST-ETH15M2611140300-UP";
+/** The strike contracts of one ladder event, lowest strike first. */
+const LADDER = ["HI64000", "HI64500", "HI65000", "HI65500"].map((contract) => `TEST-BTC2611140300-${contract}`);
+const [LOW, MID, HIGH, TOP] = LADDER as [string, string, string, string];
 
 function info(symbol: string): ContractInfo {
   return {
@@ -41,7 +46,8 @@ afterEach(() => {
 
 let nextId = 0;
 
-function world() {
+/** The bounds are roomy unless a test is about them. */
+function world(bounds: Pick<SettlementInput, "marketsPerTick" | "venueReadsPerTick"> = {}) {
   const venue = new MockVenue();
   venue.setCash(1_000_000_000_000n);
   const chain = new FakeMarketChain();
@@ -58,6 +64,10 @@ function world() {
     confirmMs: CONFIRM,
     reviewAfterMs: REVIEW_AFTER,
     payoutGraceMs: PAYOUT_GRACE,
+    sweepMs: SWEEP,
+    marketsPerTick: 50,
+    venueReadsPerTick: 50,
+    ...bounds,
     now: () => clock.ms,
     alert: (event) => alerts.push(event),
   });
@@ -130,14 +140,51 @@ function world() {
 }
 
 describe("settlement watcher", () => {
-  it("leaves a market alone until it has expired", async () => {
+  it("looks at a market that has not expired once per sweep and leaves it open", async () => {
     const w = world();
     w.market(SYMBOL, 300n, 0n);
-    w.venue.resolve(SYMBOL, "yes");
-    w.clock.ms = EXPIRY - 1;
+    const contract = vi.spyOn(w.venue, "contract");
+    w.clock.ms = EXPIRY - 300_000;
     await w.watcher.tick();
+    w.clock.ms += SWEEP - 1;
+    await w.watcher.tick();
+    expect(w.chain.reads).toEqual([SYMBOL]);
+    expect(contract).toHaveBeenCalledTimes(1);
+
+    w.clock.ms += 1;
+    await w.watcher.tick();
+    expect(w.chain.reads).toEqual([SYMBOL, SYMBOL]);
+    expect(contract).toHaveBeenCalledTimes(2);
     expect(w.registry.get(SYMBOL)?.settleState).toBe("open");
-    expect(w.chain.reads).toEqual([]);
+    expect(w.alerts).toEqual([]);
+  });
+
+  it("settles a contract the venue resolves before its expiry", async () => {
+    const w = world();
+    w.market(SYMBOL, 300n, 0n);
+    await w.hold(SYMBOL, 300n);
+    w.clock.ms = EXPIRY - 300_000;
+    await w.watcher.tick();
+
+    w.venue.resolve(SYMBOL, "yes");
+    w.clock.ms += SWEEP - 1;
+    await w.watcher.tick(); // not its turn yet
+    expect(w.registry.get(SYMBOL)).toMatchObject({ settleState: "open", resolution: null });
+
+    w.clock.ms += 1;
+    await w.watcher.tick(); // the sweep sees the resolution
+    expect(w.registry.get(SYMBOL)).toMatchObject({ settleState: "awaiting_result", resolution: "yes" });
+
+    // From here on the market is looked at on every tick, like an expired one.
+    w.clock.ms += CONFIRM - 1;
+    await w.watcher.tick();
+    expect(w.chain.settlements).toEqual([]);
+    w.clock.ms += 1;
+    await w.watcher.tick();
+    expect(w.clock.ms).toBeLessThan(EXPIRY);
+    expect(w.chain.settlements).toMatchObject([{ symbol: SYMBOL, yesPayout: 10_000n, noPayout: 0n }]);
+    expect(w.registry.get(SYMBOL)?.settleState).toBe("settled");
+    expect(w.alerts).toEqual([]);
   });
 
   it("marks an expired market as awaiting its result and waits for the venue", async () => {
@@ -240,6 +287,32 @@ describe("settlement watcher", () => {
     await w.watcher.tick();
     expect(w.chain.settlements).toMatchObject([{ symbol: SYMBOL, yesPayout: 0n, noPayout: 10_000n }]);
     expect(w.alerts).toHaveLength(1);
+  });
+
+  it("restarts the clock, without an alert, when a resolution falls back to under review", async () => {
+    const w = world();
+    w.market(SYMBOL, 300n, 0n);
+    await w.hold(SYMBOL, 300n);
+    w.venue.resolve(SYMBOL, "yes");
+    await w.watcher.tick();
+
+    // A stale read: the contract is under review again. The registry keeps what it knew.
+    w.clock.ms += 15_000;
+    w.venue.addContract({ ...info(SYMBOL), status: "under_review", marketState: "closed" });
+    await w.watcher.tick();
+    expect(w.registry.get(SYMBOL)).toMatchObject({ settleState: "awaiting_result", venueStatus: "settled", resolution: "yes" });
+
+    w.clock.ms += 5_000; // the first sighting would be confirmed by now
+    w.venue.addContract({ ...info(SYMBOL), status: "settled", marketState: "closed", resolutionSide: "yes" });
+    await w.watcher.tick();
+    w.clock.ms += CONFIRM - 1;
+    await w.watcher.tick();
+    expect(w.chain.settlements).toEqual([]);
+
+    w.clock.ms += 1;
+    await w.watcher.tick();
+    expect(w.chain.settlements).toMatchObject([{ symbol: SYMBOL, yesPayout: 10_000n, noPayout: 0n }]);
+    expect(w.alerts).toEqual([]);
   });
 
   it("waits out the payout grace when the venue paid less than expected, then asks for review with both numbers", async () => {
@@ -408,6 +481,25 @@ describe("settlement watcher", () => {
     expect(w.alerts).toEqual([{ kind: "needs_review", orderAddress: null, detail: `${SYMBOL}: settled at the venue without a yes or no resolution` }]);
   });
 
+  it("asks for review at once when the venue reports a status it does not know, whatever else the contract says", async () => {
+    const w = world();
+    w.market(SYMBOL, 300n, 0n);
+    w.market(OTHER, 300n, 0n);
+    w.venue.addContract({ ...info(SYMBOL), status: "invalid", marketState: "closed" });
+    w.venue.addContract({ ...info(OTHER), status: "voided", marketState: "closed", resolutionSide: "yes" });
+    w.clock.ms = EXPIRY - 300_000; // before the expiry, and long before the review deadline
+    await w.watcher.tick();
+    expect(w.registry.get(SYMBOL)).toMatchObject({ settleState: "needs_review", venueStatus: "invalid", detail: "unknown venue status: invalid" });
+    expect(w.registry.get(OTHER)).toMatchObject({ settleState: "needs_review", venueStatus: "voided", detail: "unknown venue status: voided" });
+
+    await w.confirm();
+    expect(w.alerts).toEqual([
+      { kind: "needs_review", orderAddress: null, detail: `${SYMBOL}: unknown venue status: invalid` },
+      { kind: "needs_review", orderAddress: null, detail: `${OTHER}: unknown venue status: voided` },
+    ]);
+    expect(w.chain.settlements).toEqual([]);
+  });
+
   it("asks for review when the registry's market is not on the chain", async () => {
     const w = world();
     w.market(SYMBOL, 300n, 0n);
@@ -434,5 +526,144 @@ describe("settlement watcher", () => {
     ]);
     expect(w.registry.get(SYMBOL)?.settleState).toBe("awaiting_result");
     expect(w.registry.get(OTHER)?.settleState).toBe("unused");
+  });
+});
+
+describe("settlement watcher, a ladder", () => {
+  it("settles each contract on its own resolution, one by one, and more than one of them YES", async () => {
+    const w = world();
+    for (const symbol of LADDER) {
+      w.market(symbol, 100n, 0n);
+      await w.hold(symbol, 100n);
+    }
+    const states = (): Array<string | undefined> => LADDER.map((symbol) => w.registry.get(symbol)?.settleState);
+
+    w.venue.resolve(LOW, "yes");
+    await w.watcher.tick();
+    w.clock.ms += 10_000;
+    w.venue.resolve(MID, "yes");
+    w.venue.resolve(HIGH, "no");
+    await w.watcher.tick();
+    expect(w.chain.settlements).toEqual([]);
+
+    w.clock.ms += 10_000; // the lowest strike has been resolved for the confirmation time
+    await w.watcher.tick();
+    expect(w.chain.settlements).toMatchObject([{ symbol: LOW, yesPayout: 10_000n, noPayout: 0n }]);
+    expect(states()).toEqual(["settled", "awaiting_result", "awaiting_result", "awaiting_result"]);
+
+    w.clock.ms += 10_000;
+    await w.watcher.tick();
+    expect(w.chain.settlements.slice(1)).toMatchObject([
+      { symbol: MID, yesPayout: 10_000n, noPayout: 0n },
+      { symbol: HIGH, yesPayout: 0n, noPayout: 10_000n },
+    ]);
+    expect(states()).toEqual(["settled", "settled", "settled", "awaiting_result"]);
+
+    w.venue.resolve(TOP, "no");
+    await w.confirm();
+    expect(w.chain.settlements.slice(3)).toMatchObject([{ symbol: TOP, yesPayout: 0n, noPayout: 10_000n }]);
+    expect(states()).toEqual(["settled", "settled", "settled", "settled"]);
+    expect(w.alerts).toEqual([]);
+  });
+
+  it("hands a contract that stays under review to a person while its siblings settle", async () => {
+    const w = world();
+    for (const symbol of [LOW, MID, HIGH]) {
+      w.market(symbol, 100n, 0n);
+      await w.hold(symbol, 100n);
+    }
+    w.venue.resolve(LOW, "yes");
+    w.venue.resolve(HIGH, "no");
+    w.venue.addContract({ ...info(MID), status: "under_review", marketState: "closed" });
+    await w.confirm();
+    expect(w.chain.settlements).toMatchObject([
+      { symbol: LOW, yesPayout: 10_000n, noPayout: 0n },
+      { symbol: HIGH, yesPayout: 0n, noPayout: 10_000n },
+    ]);
+    expect(w.registry.get(MID)).toMatchObject({ settleState: "awaiting_result", venueStatus: "under_review" });
+
+    w.clock.ms = EXPIRY + REVIEW_AFTER - 1;
+    await w.watcher.tick();
+    expect(w.registry.get(MID)?.settleState).toBe("awaiting_result");
+    expect(w.alerts).toEqual([]);
+
+    w.clock.ms += 1;
+    await w.watcher.tick();
+    await w.watcher.tick();
+    expect(w.registry.get(MID)).toMatchObject({ settleState: "needs_review", detail: "no resolution 600 s after expiry" });
+    expect(w.alerts).toEqual([{ kind: "needs_review", orderAddress: null, detail: `${MID}: no resolution 600 s after expiry` }]);
+    expect(w.chain.settlements).toHaveLength(2);
+  });
+
+  it("asks the venue about the due contracts of one event together, after their chain reads", async () => {
+    const w = world();
+    for (const symbol of [...LADDER, OTHER]) w.market(symbol, 100n, 0n);
+    const log: string[] = [];
+    const market = w.chain.market.bind(w.chain);
+    vi.spyOn(w.chain, "market").mockImplementation((symbol) => {
+      log.push(`chain ${symbol}`);
+      return market(symbol);
+    });
+    const contract = w.venue.contract.bind(w.venue);
+    vi.spyOn(w.venue, "contract").mockImplementation((symbol) => {
+      log.push(`venue ${symbol}`);
+      return contract(symbol);
+    });
+    await w.watcher.tick();
+    expect(log).toEqual([
+      ...LADDER.map((symbol) => `chain ${symbol}`),
+      ...LADDER.map((symbol) => `venue ${symbol}`),
+      `chain ${OTHER}`,
+      `venue ${OTHER}`,
+    ]);
+  });
+});
+
+describe("settlement watcher, the bounds of one tick", () => {
+  const SINGLES = ["ETH", "SOL", "XRP"].map((asset) => `TEST-${asset}15M2611140300-UP`);
+  const [ETH, SOL, XRP] = SINGLES as [string, string, string];
+
+  it("takes up no more markets and events than it may read, and what is left over first in the next ticks", async () => {
+    const w = world({ marketsPerTick: 4, venueReadsPerTick: 2 });
+    for (const symbol of [...LADDER, ...SINGLES]) w.market(symbol, 100n, 0n);
+    const asked = vi.spyOn(w.venue, "contract");
+    /** One tick, five seconds after the last: the markets read from the chain and asked of the venue. */
+    const tick = async (): Promise<{ chain: string[]; venue: string[] }> => {
+      w.clock.ms += 5_000;
+      w.chain.reads.length = 0;
+      asked.mockClear();
+      await w.watcher.tick();
+      return { chain: [...w.chain.reads], venue: asked.mock.calls.map(([symbol]) => symbol) };
+    };
+
+    // Four markets: the ladder, which is one read of the venue.
+    expect(await tick()).toEqual({ chain: LADDER, venue: LADDER });
+    // The four that waited longest are ETH, SOL, XRP and the lowest strike; two reads of the venue reach two events.
+    expect(await tick()).toEqual({ chain: [ETH, SOL], venue: [ETH, SOL] });
+    expect(await tick()).toEqual({ chain: [XRP, LOW, MID, HIGH], venue: [XRP, LOW, MID, HIGH] });
+    // The highest strike has waited since the first tick, ETH and SOL since the second; the lowest strike fills
+    // the fourth place and shares its sibling's read of the venue, which leaves one read, for ETH.
+    expect(await tick()).toEqual({ chain: [TOP, LOW, ETH], venue: [TOP, LOW, ETH] });
+    expect(w.alerts).toEqual([]);
+  });
+
+  it("counts the read of a payout: a resolution it cannot check in this tick is settled in the next", async () => {
+    const w = world({ venueReadsPerTick: 2 });
+    for (const symbol of [LOW, MID, HIGH]) {
+      w.market(symbol, 100n, 0n);
+      await w.hold(symbol, 100n);
+      w.venue.resolve(symbol, "yes");
+    }
+    const payout = vi.spyOn(w.venue, "settledPayoutMicros");
+    await w.confirm(); // one read for the three contracts, one for a payout
+    expect(w.chain.settlements.map((settlement) => settlement.symbol)).toEqual([LOW]);
+    expect(payout).toHaveBeenCalledTimes(1);
+
+    await w.watcher.tick();
+    expect(w.chain.settlements.map((settlement) => settlement.symbol)).toEqual([LOW, MID]);
+    await w.watcher.tick();
+    expect(w.chain.settlements.map((settlement) => settlement.symbol)).toEqual([LOW, MID, HIGH]);
+    expect(payout).toHaveBeenCalledTimes(3);
+    expect(w.alerts).toEqual([]);
   });
 });

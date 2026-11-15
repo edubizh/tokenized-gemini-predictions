@@ -171,8 +171,8 @@ const MIGRATE_FIRST_RELEASE = `
 const SELECT_MARKETS = `SELECT m.*, COALESCE(e.title, m.event_ticker) AS title
   FROM markets m LEFT JOIN events e ON e.ticker = m.event_ticker`;
 
-/** The order a venue status moves in. */
-const STATUS_ORDER = ["approved", "active", "under_review", "settled"];
+/** The venue statuses the relayer knows, in the order a contract moves through them. */
+export const VENUE_STATUSES: readonly string[] = ["approved", "active", "under_review", "settled"];
 /** Contracts that never got an on-chain market are forgotten this long after they expired. */
 const PRUNE_AFTER_MS = 24 * 60 * 60 * 1_000;
 
@@ -185,8 +185,8 @@ function textOrNull(value: unknown): string | null {
 /** `read`, unless it would move a known status backwards: a read can be older than an earlier one. */
 function laterStatus(stored: string | undefined, read: string): string {
   if (stored === undefined) return read;
-  const from = STATUS_ORDER.indexOf(stored);
-  const to = STATUS_ORDER.indexOf(read);
+  const from = VENUE_STATUSES.indexOf(stored);
+  const to = VENUE_STATUSES.indexOf(read);
   return from >= 0 && to >= 0 && to < from ? stored : read;
 }
 
