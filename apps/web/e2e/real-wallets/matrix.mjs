@@ -324,12 +324,24 @@ async function reloadAndReconnect(s) {
   }
 }
 
-/** Row 12: a market the wallet holds both sides of settles; the winning side is redeemed on the portfolio. */
-async function redeem(s) {
+/** The relayer's view of the contract an event page at `url` shows (its `c` parameter). */
+async function contractAt(url) {
+  const { events } = await (await fetch(`${RELAYER}/events`)).json();
+  return events.flatMap((event) => event.markets).find((market) => market.symbol === new URL(url).searchParams.get("c"));
+}
+
+/**
+ * Row 12: a market the wallet holds both sides of settles; the winning side is redeemed on the
+ * portfolio. `marketUrl` is the market's event page: the wait follows its close.
+ */
+async function redeem(s, marketUrl) {
   const { page } = s;
+  const market = await contractAt(marketUrl);
+  log("step", `${market.symbol} closes at ${new Date(market.expiresAt).toISOString()}`);
   await page.goto(`${BASE}/portfolio`, { waitUntil: "domcontentloaded" });
   const action = page.locator('[data-testid="position-redeem"]').first();
-  if (!check(await until(() => action.isVisible(), 420_000), "once the market settles, the portfolio offers Redeem")) return;
+  const settles = Math.max(market.expiresAt + 150_000 - Date.now(), 60_000);
+  if (!check(await until(() => action.isVisible(), settles), "once the market settles, the portfolio offers Redeem")) return;
   const balance = () => page.locator('[data-testid="portfolio-balance"]').innerText();
   const before = await balance();
   // A redemption is listed under Settled with its transaction.
@@ -488,14 +500,15 @@ const CASES = {
     await reloadAndReconnect(s);
     // Row 12: both sides of one market, so that one of them wins.
     let both = false;
+    const simulated = (await (await fetch(`${RELAYER}/health`)).json()).venue === "mock";
     for (let round = 0; round < 3 && !both; round++) {
-      // Both orders have to fit into one market's window: start at the beginning of one.
+      // On the simulated venue both orders have to fit into one market's window: start at the beginning of one.
       const left = MARKET_WINDOW_SECS - ((Date.now() / 1000) % MARKET_WINDOW_SECS);
-      if (left < MARKET_WINDOW_SECS - 30) await sleep((left + 8) * 1000);
+      if (simulated && left < MARKET_WINDOW_SECS - 30) await sleep((left + 8) * 1000);
       if ((await placeOrder(s, "a YES order to hold")) !== "FILLED") continue;
       both = (await placeOrder(s, "a NO order in the same market", "NO", s.page.url())) === "FILLED";
     }
-    if (check(both, "the wallet holds both sides of one market")) await redeem(s);
+    if (check(both, "the wallet holds both sides of one market")) await redeem(s, s.page.url());
   },
 
   async reclaim() {
