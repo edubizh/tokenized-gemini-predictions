@@ -296,6 +296,18 @@ describe("updateContract", () => {
     expect(registry.get(SYMBOL)).toMatchObject({ ...known, updatedAt: 4 });
   });
 
+  it("settles the event once every one of its contracts is settled", () => {
+    const registry = memory();
+    const read = ladder([64_000, 64_500]);
+    registry.storeEvents([read], 1);
+    const [low, high] = read.contracts as [ContractInfo, ContractInfo];
+
+    registry.updateContract({ ...low, status: "settled", marketState: "closed", resolutionSide: "yes" }, 2);
+    expect(registry.event(LADDER)).toMatchObject({ venueStatus: "active", updatedAt: 1 });
+    registry.updateContract({ ...high, status: "settled", marketState: "closed", resolutionSide: "no" }, 3);
+    expect(registry.event(LADDER)).toMatchObject({ venueStatus: "settled", updatedAt: 3 });
+  });
+
   it("throws for a contract that is not in the registry or whose dates cannot be read", () => {
     const registry = memory();
     expect(() => registry.updateContract(info(), 1)).toThrow(`unknown market ${SYMBOL}`);

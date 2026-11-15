@@ -175,7 +175,7 @@ export function createDaemon(deps: DaemonDeps): Daemon {
   }
 
   async function refreshChainState(): Promise<void> {
-    const [config, secs] = await Promise.all([chain.config(), chain.now()]);
+    const [config, secs] = await Promise.all([named("chain config read", chain.config()), named("chain clock read", chain.now())]);
     if (chainConfig !== null && (chainConfig.pausePlace !== config.pausePlace || chainConfig.pauseFill !== config.pauseFill)) {
       log(`pause flags changed: place=${config.pausePlace} fill=${config.pauseFill}`);
     }
@@ -344,4 +344,11 @@ export function createDaemon(deps: DaemonDeps): Daemon {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** `read`, failing with `what` in front of the reason, so an alert says which read failed. */
+function named<T>(what: string, read: Promise<T>): Promise<T> {
+  return read.catch((error: unknown) => {
+    throw new Error(`${what}: ${messageOf(error)}`, { cause: error });
+  });
 }

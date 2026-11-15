@@ -71,12 +71,13 @@ export class MarketError extends Error {
 
 export type RefreshPart = "venue_list" | "registry" | "chain";
 
-/** What went wrong during a refresh. Every part ran before this was thrown. */
+/** What went wrong during a refresh, with the market a chain read was for. Every part ran before this was thrown. */
 export class RefreshError extends Error {
-  readonly parts: Array<{ part: RefreshPart; error: unknown }>;
+  readonly parts: Array<{ part: RefreshPart; symbol?: string; error: unknown }>;
 
-  constructor(parts: Array<{ part: RefreshPart; error: unknown }>) {
-    super(`market refresh failed: ${parts.map(({ part, error }) => `${part}: ${messageOf(error)}`).join("; ")}`);
+  constructor(parts: Array<{ part: RefreshPart; symbol?: string; error: unknown }>) {
+    const what = ({ part, symbol }: { part: RefreshPart; symbol?: string }): string => (symbol === undefined ? part : `${part} ${symbol}`);
+    super(`market refresh failed: ${parts.map((failure) => `${what(failure)}: ${messageOf(failure.error)}`).join("; ")}`);
     this.name = "RefreshError";
     this.parts = parts;
   }
@@ -88,6 +89,8 @@ const ONCHAIN_LIMIT = 500;
 const CATCH_UP_READS = 10;
 /** The contracts of an expired event are asked of the venue at most this often, however often its view is asked for. */
 const EXPIRED_READ_MS = 10_000;
+/** A contract missing from this many list reads in a row that show its event is taken as dropped by the venue. */
+const DROPPED_AFTER_READS = 2;
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -178,6 +181,13 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
   const chainReadAt = new Map<string, number>();
   /** The expired events whose contracts were asked of the venue within the last `EXPIRED_READ_MS`, and when. */
   const expiredReadAt = new Map<string, number>();
+  /**
+   * Per contract that has not expired: how many list reads in a row showed its event without it.
+   * One read can be a stale page; from the second one the venue has dropped the contract.
+   */
+  let absences = new Map<string, number>();
+  /** The last list answer counted; the adapter can serve the same answer again. */
+  let countedList: EventInfo[] | null = null;
   const flights = new Map<string, Promise<ApiMarket>>();
   let venueOnline = true;
   let paused = false;
@@ -208,7 +218,7 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
     let reason: NotTradableReason | null = null;
     if (!venueOnline) reason = "venue_offline";
     else if (paused) reason = "paused";
-    else if (market.venueStatus !== "active") reason = "not_active";
+    else if (market.venueStatus !== "active" || dropped(market.symbol)) reason = "not_active";
     else if (market.marketState !== "open" || (onchain !== null && onchain.status !== "open")) reason = "market_not_open";
     else if (!(market.effectiveAt <= now)) reason = "not_started";
     else if (!(now < lastOrderAt)) reason = "too_close_to_expiry";
@@ -257,6 +267,33 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
     };
   }
 
+  function dropped(symbol: string): boolean {
+    return (absences.get(symbol) ?? 0) >= DROPPED_AFTER_READS;
+  }
+
+  /**
+   * Counts, for each listed event the registry holds, the contracts this read left out, and starts
+   * again at zero for those it shows. A read without the whole event says nothing about its
+   * contracts: their counts stay. A contract that has expired is forgotten.
+   */
+  function countAbsences(events: EventInfo[], now: number): void {
+    const listed = new Map(events.map((event) => [event.ticker, new Set(event.contracts.map((contract) => contract.symbol))]));
+    const counted = new Map<string, number>();
+    for (const event of o.registry.liveEvents(now)) {
+      const symbols = listed.get(event.ticker);
+      for (const { symbol, expiresAt } of event.markets) {
+        if (!(now < expiresAt)) continue;
+        const count = absences.get(symbol);
+        if (symbols === undefined) {
+          if (count !== undefined) counted.set(symbol, count);
+        } else if (!symbols.has(symbol)) {
+          counted.set(symbol, (count ?? 0) + 1);
+        }
+      }
+    }
+    absences = counted;
+  }
+
   /** One list read, when it is due: every event and contract into the registry, the quotes into the cache. */
   async function refreshList(failures: RefreshError["parts"]): Promise<void> {
     const now = o.now();
@@ -280,6 +317,10 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
       unstored = [{ part: "registry", error }];
     }
     failures.push(...unstored);
+    if (events !== countedList) {
+      countAbsences(events, now);
+      countedList = events;
+    }
     // A contract that is missing from this read keeps its quote: one read can be a stale page.
     for (const [symbol, quote] of quotes) if (!(now < quote.expiresAt)) quotes.delete(symbol);
     for (const info of events.flatMap((event) => event.contracts)) {
@@ -322,13 +363,25 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
         catchUp += 1;
       }
     }
+    // Redemptions burn tokens after settlement. To follow the supplies at a fixed cost, one settled
+    // market that still has supply is read per refresh, the one with the oldest copy, once that
+    // copy has aged: each gets its turn, and one whose supplies are both zero is never read again.
+    let redeeming: { symbol: string; readAt: number } | null = null;
+    for (const market of onchain) {
+      const cached = chainMarkets.get(market.symbol);
+      if (cached?.status !== "settled" || (cached.yesSupply === 0n && cached.noSupply === 0n)) continue;
+      if (symbols.has(market.symbol) || !due(market.symbol)) continue;
+      const readAt = chainReadAt.get(market.symbol) ?? Number.NEGATIVE_INFINITY;
+      if (redeeming === null || readAt < redeeming.readAt) redeeming = { symbol: market.symbol, readAt };
+    }
+    if (redeeming !== null) symbols.add(redeeming.symbol);
     for (const symbol of symbols) {
       try {
         const market = await o.chain.market(symbol);
         if (market !== null) chainMarkets.set(symbol, market);
         chainReadAt.set(symbol, o.now());
       } catch (error) {
-        failures.push({ part: "chain", error });
+        failures.push({ part: "chain", symbol, error });
       }
     }
   }
@@ -362,6 +415,7 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
     const market = o.registry.get(symbol);
     if (market === undefined) throw new MarketError("unknown", `unknown market ${symbol}`);
     if (market.venueStatus !== "active") throw new MarketError("not_allowed", `market ${symbol} is not active at the venue`);
+    if (dropped(symbol)) throw new MarketError("not_allowed", `market ${symbol} is no longer listed by the venue`);
     if (!(o.now() < market.expiresAt)) throw new MarketError("expired", `market ${symbol} has expired`);
     if (market.unitIncrement !== 1n) {
       throw new MarketError("not_allowed", `market ${symbol} trades in steps of ${market.unitIncrement} units, not 1`);

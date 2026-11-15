@@ -70,7 +70,8 @@ export interface Registry {
   storeEvents(events: EventInfo[], nowMs: number): Error[];
   /**
    * Stores a single read of a contract the registry knows, under the same rules. What the read
-   * left out (label, rule, strike, resolution, settlement value, last price) keeps its value.
+   * left out (label, rule, strike, resolution, settlement value, last price) keeps its value. The
+   * event becomes settled once every one of its contracts is.
    */
   updateContract(info: ContractInfo, nowMs: number): RegistryMarket;
   setOnchain(symbol: string, a: { marketAddress: string; yesMint: string; noMint: string }): void;
@@ -295,6 +296,13 @@ export function openRegistry(path: string): Registry {
        terms_url = excluded.terms_url, listed_at = excluded.listed_at, expires_at = excluded.expires_at,
        venue_status = excluded.venue_status, volume_units = excluded.volume_units, updated_at = excluded.updated_at`,
   );
+  // An event is settled once all its contracts are: the venue lists only events that trade, so
+  // only single contract reads see an event end.
+  const settleEvent = db.prepare(
+    `UPDATE events SET venue_status = 'settled', updated_at = ?
+     WHERE ticker = ? AND venue_status <> 'settled'
+       AND NOT EXISTS (SELECT 1 FROM markets WHERE markets.event_ticker = events.ticker AND markets.venue_status <> 'settled')`,
+  );
   const updateOnchain = db.prepare("UPDATE markets SET market_address = ?, yes_mint = ?, no_mint = ?, updated_at = ? WHERE symbol = ?");
   const updateSettle = db.prepare(
     `UPDATE markets SET settle_state = ?, settle_signature = COALESCE(?, settle_signature), detail = COALESCE(?, detail),
@@ -412,7 +420,11 @@ export function openRegistry(path: string): Registry {
     updateContract(info, nowMs) {
       const stored = selectStored.get(info.symbol) as Row | undefined;
       if (stored === undefined) throw new Error(`unknown market ${info.symbol}`);
-      writeContract(String(stored.event_ticker), info, stored, nowMs);
+      const eventTicker = String(stored.event_ticker);
+      transaction(() => {
+        writeContract(eventTicker, info, stored, nowMs);
+        settleEvent.run(nowMs, eventTicker);
+      });
       return get(info.symbol)!;
     },
 

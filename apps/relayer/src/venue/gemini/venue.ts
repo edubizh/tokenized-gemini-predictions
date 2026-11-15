@@ -32,6 +32,14 @@ const LIST_QUERY = "status=active&status=approved&limit=500";
 const LIST_CACHE_MS = 10_000;
 /** A list page older than the one held is not taken while the held one is younger than this. */
 const LIST_HOLD_MS = 300_000;
+/**
+ * The venue lists a new five-minute event every five minutes, so a current page always holds an
+ * event listed within the last few minutes. Ten minutes leaves room for a late listing; a page
+ * without one is behind.
+ */
+const FRESH_LIST_MS = 600_000;
+/** Reads of the list, at most, before the first one is held. */
+const FIRST_LIST_READS = 3;
 /** A single-event read is shared for this long, so the contracts of one ladder cost one read. */
 const EVENT_CACHE_MS = 2_000;
 /** The event ticker of a symbol is kept this long after its contract expired: settlement asks for it then. */
@@ -391,9 +399,8 @@ export class GeminiSandboxVenue implements Venue {
   }
 
   /**
-   * Reads the whole list, page by page. Two pages read a second apart can overlap, so every
-   * event and every contract is taken once. A row that cannot be read is left out, and its
-   * reason is logged when it first shows up.
+   * Reads the list. A row that cannot be read is left out, and its reason is logged when it first
+   * shows up.
    *
    * The venue answers from caches that disagree: a read can return a page that is older than the
    * one before it, by minutes while the list is asked for steadily and by an hour after a pause.
@@ -401,8 +408,41 @@ export class GeminiSandboxVenue implements Venue {
    * event is older than the newest one already seen is such a page. It is dropped and the list
    * held is answered again, for at most `LIST_HOLD_MS`, in case the newest event was simply
    * taken off the list.
+   *
+   * Until a list is held there is nothing to compare a page with, so a page without an event
+   * listed in the last `FRESH_LIST_MS` is not taken yet: the list is read again, at most
+   * `FIRST_LIST_READS` reads in all, and the page with the newest event is kept.
    */
   async #readEvents(): Promise<EventInfo[]> {
+    let read = await this.#readList();
+    for (let reads = 1; this.#listing === null && reads < FIRST_LIST_READS && read.newestMs < this.#now() - FRESH_LIST_MS; reads += 1) {
+      const next = await this.#readList();
+      if (next.newestMs >= read.newestMs) read = next;
+    }
+    const { events, skipped, newestMs } = read;
+
+    const now = this.#now();
+    const held = this.#listing;
+    if (held !== null && newestMs < held.newestMs && now - held.atMs < LIST_HOLD_MS) return held.events;
+
+    for (const reason of skipped) if (!this.#skipped.has(reason)) this.#log(`venue list: skipped ${reason}`);
+    this.#skipped = skipped;
+    for (const { ticker, contracts } of events) {
+      for (const { symbol, expiresAt } of contracts) this.#eventTickers.set(symbol, { ticker, expiresAtMs: expiresAt.getTime() });
+    }
+    for (const [symbol, { expiresAtMs }] of this.#eventTickers) {
+      if (expiresAtMs + TICKER_KEEP_MS <= now) this.#eventTickers.delete(symbol);
+    }
+    this.#feed.follow(events.flatMap((event) => event.contracts));
+    this.#listing = { events, atMs: now, newestMs };
+    return events;
+  }
+
+  /**
+   * One read of the whole list, page by page, with the listing time of its newest event. Two
+   * pages read a second apart can overlap, so every event and every contract is taken once.
+   */
+  async #readList(): Promise<{ events: EventInfo[]; skipped: Set<string>; newestMs: number }> {
     const events: EventInfo[] = [];
     const tickers = new Set<string>();
     const symbols = new Set<string>();
@@ -431,23 +471,7 @@ export class GeminiSandboxVenue implements Venue {
         if (contracts.length > 0) events.push({ ...event, contracts });
       }
     }
-
-    const now = this.#now();
-    const newestMs = Math.max(...events.map((event) => event.listedAt.getTime()));
-    const held = this.#listing;
-    if (held !== null && newestMs < held.newestMs && now - held.atMs < LIST_HOLD_MS) return held.events;
-
-    for (const reason of skipped) if (!this.#skipped.has(reason)) this.#log(`venue list: skipped ${reason}`);
-    this.#skipped = skipped;
-    for (const { ticker, contracts } of events) {
-      for (const { symbol, expiresAt } of contracts) this.#eventTickers.set(symbol, { ticker, expiresAtMs: expiresAt.getTime() });
-    }
-    for (const [symbol, { expiresAtMs }] of this.#eventTickers) {
-      if (expiresAtMs + TICKER_KEEP_MS <= now) this.#eventTickers.delete(symbol);
-    }
-    this.#feed.follow(events.flatMap((event) => event.contracts));
-    this.#listing = { events, atMs: now, newestMs };
-    return events;
+    return { events, skipped, newestMs: Math.max(...events.map((event) => event.listedAt.getTime())) };
   }
 
   /**

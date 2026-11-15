@@ -827,6 +827,29 @@ describe("listEvents", () => {
     await expect(drive(venue.listEvents(), 1_000)).resolves.toHaveLength(1);
   });
 
+  // Seen at a start: the first page was half an hour behind, without the newest fifteen-minute
+  // events; a minute later the list was complete.
+  it("before it holds a list, reads again while the page has no event from the last ten minutes, three reads at most, and keeps the newest", async () => {
+    const { venue, http } = await connected();
+    const listed = (minute: string): Row => {
+      const contracts = [contractRow({ instrumentSymbol: `GEMI-DEMO15M26111403${minute}-UP` })];
+      return eventRow({ ticker: `DEMO15M26111403${minute}`, createdAt: `2026-11-14T02:${minute}:00.000Z`, contracts });
+    };
+    // The clock reads 02:40:00.250.
+    const pages = [[listed("05")], [listed("05"), listed("31")], [listed("05"), listed("31"), listed("30")]];
+    http.respond((_call, index) => listPage(pages[index] ?? []));
+    const events = await drive(venue.listEvents(), 5_000);
+    expect(http.calls).toHaveLength(2); // 02:31 is within ten minutes
+    expect(events.map((event) => event.ticker)).toEqual(["DEMO15M2611140305", "DEMO15M2611140331"]);
+
+    const { venue: other, http: otherHttp } = await connected();
+    const stale = [[listed("05"), listed("12")], [listed("05"), listed("20")], [listed("05")], [listed("05"), listed("29")]];
+    otherHttp.respond((_call, index) => listPage(stale[index] ?? []));
+    const best = await drive(other.listEvents(), 5_000);
+    expect(otherHttp.calls).toHaveLength(3);
+    expect(best.map((event) => event.ticker)).toEqual(["DEMO15M2611140305", "DEMO15M2611140320"]);
+  });
+
   it("fails when the venue cannot be read, rather than answering from its last read", async () => {
     const { venue, http } = await connected();
     http.respond(() => listPage([eventRow()]));

@@ -301,7 +301,7 @@ describe("market tick", () => {
     await w.daemon.tickMarkets();
     expect(w.manager.view(SYMBOL)?.notTradableReason).toBeNull();
     expect(w.daemon.health()).toMatchObject({ ok: true, venueConnected: true });
-    expect(w.alerts.recent()[0]).toMatchObject({ kind: "tick_error", detail: "markets: market refresh failed: chain: injected failure: market" });
+    expect(w.alerts.recent()[0]).toMatchObject({ kind: "tick_error", detail: `markets: market refresh failed: chain ${SYMBOL}: injected failure: market` });
     expect(w.kinds()).toEqual(["tick_error", "tick_error"]);
   });
 
@@ -330,11 +330,18 @@ describe("market tick", () => {
     const config = vi.spyOn(w.chain, "config").mockRejectedValueOnce(new Error("rpc down"));
     await w.daemon.tickMarkets();
     expect(w.manager.view(SYMBOL)?.tradable).toBe(true);
-    expect(w.alerts.recent()).toMatchObject([{ kind: "tick_error", detail: "markets: rpc down" }]);
+    expect(w.alerts.recent()).toMatchObject([{ kind: "tick_error", detail: "markets: chain config read: rpc down" }]);
     expect(w.daemon.health()).toMatchObject({ ok: false, chainTime: 0 });
     await w.daemon.tickMarkets();
     expect(config).toHaveBeenCalledTimes(2);
     expect(w.daemon.health().ok).toBe(true);
+  });
+
+  it("names the chain clock read when that is what failed", async () => {
+    const w = world();
+    vi.spyOn(w.chain, "now").mockRejectedValueOnce(new TypeError("fetch failed"));
+    await w.daemon.tickMarkets();
+    expect(w.alerts.recent()).toMatchObject([{ kind: "tick_error", detail: "markets: chain clock read: fetch failed" }]);
   });
 });
 

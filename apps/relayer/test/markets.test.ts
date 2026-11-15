@@ -250,6 +250,41 @@ describe("refresh", () => {
     expect(manager.view(ETH)?.book).toBeNull(); // the quote of an expired contract is forgotten
   });
 
+  it("stops offering a contract the venue drops from its event from the second list read without it, until it comes back", async () => {
+    const DROPPED = "TEST-BTC15M2611140300-DOWN";
+    const { venue, manager } = await listed();
+    venue.addContract(info(DROPPED));
+    venue.setBook(DROPPED, BOOK);
+    await manager.refresh();
+    const full = await venue.listEvents();
+    const without = (): EventInfo[] => full.map((event) => ({ ...event, contracts: event.contracts.filter((contract) => contract.symbol !== DROPPED) }));
+    const list = vi.spyOn(venue, "listEvents");
+    const reason = () => manager.view(DROPPED)?.notTradableReason;
+
+    const page = without();
+    list.mockResolvedValueOnce(page);
+    await manager.refresh();
+    expect(reason()).toBeNull(); // one read can be a stale page
+    list.mockResolvedValueOnce(page);
+    await manager.refresh();
+    expect(reason()).toBeNull(); // the same answer served again is not a second read
+
+    list.mockResolvedValueOnce(without());
+    await manager.refresh();
+    expect(reason()).toBe("not_active");
+    expect(manager.view(BTC)?.tradable).toBe(true);
+    await expect(manager.ensureOnchain(DROPPED)).rejects.toMatchObject({ code: "not_allowed" });
+
+    list.mockResolvedValueOnce([]); // a read without the whole event says nothing about the contract
+    await manager.refresh();
+    expect(reason()).toBe("not_active");
+
+    list.mockResolvedValueOnce(full);
+    await manager.refresh();
+    expect(reason()).toBeNull();
+    await expect(manager.ensureOnchain(DROPPED)).resolves.toMatchObject({ symbol: DROPPED });
+  });
+
   it("forgets contracts that expired more than a day ago and never got an on-chain market", async () => {
     const { venue, registry, clock, manager } = await listed();
     venue.addContract(info(ETH));
@@ -347,6 +382,73 @@ describe("refresh", () => {
     });
   });
 
+  it("follows the supplies of a settled market as holders redeem, once per refresh interval, and stops once both are zero", async () => {
+    const { chain, registry, clock, manager } = await listed();
+    await manager.ensureOnchain(BTC);
+    chain.setSupply(BTC, 0n, 100n);
+    clock.ms = EXPIRY + 60_000;
+    await chain.settleMarket(BTC, 0n, 10_000n);
+    registry.setSettle(BTC, "settled");
+    await manager.refresh();
+    expect(manager.view(BTC)?.onchain).toMatchObject({ status: "settled", noSupply: "100" });
+
+    chain.setSupply(BTC, 0n, 0n); // the NO holder redeemed
+    chain.reads.length = 0;
+    clock.ms += 14_000;
+    await manager.refresh();
+    expect(chain.reads).toEqual([]);
+    clock.ms += 1_000;
+    await manager.refresh();
+    expect(chain.reads).toEqual([BTC]);
+    expect(manager.view(BTC)?.onchain).toMatchObject({ yesSupply: "0", noSupply: "0" });
+
+    clock.ms += DAY;
+    await manager.refresh();
+    expect(chain.reads).toEqual([BTC]);
+  });
+
+  it("reads one settled market that still has supply per refresh, the oldest copy first, and still reads one that has just settled", async () => {
+    const { venue, chain, registry, clock, manager } = await listed();
+    const symbols = ["S0", "S1", "S2", "S3"].map((contract) => `TEST-BTC15M2611140300-${contract}`);
+    for (const symbol of symbols) venue.addContract(info(symbol));
+    await manager.refresh();
+    for (const symbol of symbols) {
+      await manager.ensureOnchain(symbol);
+      chain.setSupply(symbol, 100n, 0n);
+    }
+    clock.ms = EXPIRY + 60_000;
+    const [late, ...settled] = symbols as [string, ...string[]];
+    for (const symbol of settled) {
+      await chain.settleMarket(symbol, 10_000n, 0n);
+      registry.setSettle(symbol, "settled");
+    }
+    await manager.refresh(); // the settled state of the three is cached
+    const readOf = async (): Promise<string[]> => {
+      chain.reads.length = 0;
+      clock.ms += 1;
+      await manager.refresh();
+      return chain.reads.filter((symbol) => settled.includes(symbol));
+    };
+
+    clock.ms += 15_000;
+    const turns = [await readOf(), await readOf(), await readOf()];
+    expect(turns.map((reads) => reads.length)).toEqual([1, 1, 1]);
+    const order = turns.flat();
+    expect([...order].sort()).toEqual([...settled].sort());
+    expect(await readOf()).toEqual([]); // every copy is fresh
+
+    clock.ms += 15_000;
+    expect([await readOf(), await readOf(), await readOf()].flat()).toEqual(order);
+
+    await chain.settleMarket(late, 10_000n, 0n);
+    registry.setSettle(late, "settled");
+    clock.ms += 15_000;
+    chain.reads.length = 0;
+    await manager.refresh();
+    expect([...chain.reads].sort()).toEqual([late, order[0]!].sort());
+    expect(manager.view(late)?.onchain?.status).toBe("settled");
+  });
+
   it("reports a chain read that fails after the other markets were read", async () => {
     const { venue, chain, clock, manager } = await listed();
     venue.addContract(info(ETH));
@@ -359,6 +461,7 @@ describe("refresh", () => {
 
     const failure = await manager.refresh().catch((error: unknown) => error);
     expect((failure as RefreshError).parts.map((part) => part.part)).toEqual(["chain"]);
+    expect((failure as RefreshError).message).toBe(`market refresh failed: chain ${BTC}: injected failure: market`);
     expect(manager.view(ETH)?.onchain?.yesSupply).toBe("50");
   });
 });
@@ -535,6 +638,17 @@ describe("eventView of an expired event", () => {
     await background();
     expect(contract.mock.calls.map(([symbol]) => symbol)).toEqual([...RUNGS]);
     expect(shown()).toEqual([["settled", "yes"], ["settled", "no"], ["active", null]]);
+  });
+
+  it("shows the event settled once the venue's answers settle its only contract", async () => {
+    const { venue, manager } = await expired();
+    venue.resolve(BTC, "no");
+    manager.eventView("BTC15M2611140300");
+    await background();
+    expect(manager.eventView("BTC15M2611140300")).toMatchObject({
+      venueStatus: "settled",
+      markets: [{ symbol: BTC, venueStatus: "settled", resolution: "no" }],
+    });
   });
 
   it("asks at most once in ten seconds per event, and then only about the contracts that are not settled", async () => {
