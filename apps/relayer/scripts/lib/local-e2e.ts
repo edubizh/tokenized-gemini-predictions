@@ -1,7 +1,9 @@
 // The run behind `scripts/local-e2e.ts`: starts `solana-test-validator` with the program loaded,
-// bootstraps `localnet`, then takes one buy through the order pipeline to an on-chain fill and a
-// second one to a cancel with a full refund, settles the market and redeems both sides, and lets
-// the settlement watcher settle a second, short-lived market on its own.
+// bootstraps `localnet` and puts the relayer's parts around the simulated venue. An up-or-down
+// contract and a ladder contract are picked from the events the venue lists; buys go through the
+// order pipeline to an on-chain fill, one to a cancel with a full refund; the venue resolves both
+// contracts after their expiry, the settlement watcher settles their markets, and every holder
+// redeems.
 
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -42,6 +44,7 @@ import {
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 import { fetchToken as fetchOutcomeToken, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import type { ApiEvent, ApiMarket } from "../../src/api/types.ts";
 import type { ChainOrder } from "../../src/chain/chain.ts";
 import { createSender, waitForSignature, type ChainRpc } from "../../src/chain/send.ts";
 import { createSolanaChain, loadKeypairSigner } from "../../src/chain/solana.ts";
@@ -51,15 +54,22 @@ import { feeCap, PAYOUT_PER_UNIT, takerFee } from "../../src/money.ts";
 import { DEFAULT_PIPELINE_CONFIG, processOrder, type PipelineDeps } from "../../src/pipeline.ts";
 import { openRegistry } from "../../src/registry.ts";
 import { createSettlementWatcher } from "../../src/settlement.ts";
-import { MockVenue } from "../../src/venue/mock.ts";
+import { RollingMockVenue } from "../../src/venue/mock-feed.ts";
+import type { ContractInfo, EventInfo } from "../../src/venue/venue.ts";
 import { bootstrap, LOCALNET_RPC_URL } from "./bootstrap.ts";
 
-const SYMBOL = "TEST-BTC15M-UP";
-/** The short-lived market the settlement watcher settles. */
-const FAST_SYMBOL = "TEST-FAST3M-UP";
-/** Seconds from its creation to its expiry, and how long before that it "started". */
-const FAST_EXPIRES_IN_SECS = 150;
-const FAST_STARTED_AGO_SECS = 60;
+/** Length of the venue's 15-minute window, the shortest it takes. An hourly ladder then lives four of them. */
+const WINDOW_SECS = 180;
+const LADDER_LIFE_SECS = 4 * WINDOW_SECS;
+/** Where the run meets the venue's schedule: this long before an hourly ladder and an up-or-down window expire together. */
+const EXPIRES_IN_SECS = 210;
+/** The top of the price grid: a buy with this limit takes the offer wherever the quote has moved to. */
+const TAKE_PX = 9_900n;
+/** The bottom of it: below every offer. */
+const MISS_PX = 100n;
+/** More YES than NO in each market: the venue account ends long, so a YES result pays it and the watcher has a payout to check. */
+const YES_UNITS = 200n;
+const NO_UNITS = 100n;
 /** The whole run is abandoned (and the validator stopped) after this long. */
 const RUN_TIMEOUT_MS = 480_000;
 const PORTS = [8899, 8900, 9900];
@@ -76,6 +86,42 @@ const programId = OUTCOME_TOKENS_PROGRAM_ADDRESS;
 interface Trader {
   signer: KeyPairSigner;
   stable: Address;
+}
+
+/**
+ * The simulated venue on a clock that runs ahead, with every date it reports set back by as much.
+ * The relayer and the chain keep one clock, and the run meets the venue's schedule at the point
+ * it needs instead of waiting most of a ladder's life for one to come within reach.
+ */
+class MovedVenue extends RollingMockVenue {
+  readonly #aheadMs: number;
+
+  constructor(aheadMs: number) {
+    super({ windowSecs: WINDOW_SECS, resolve: "yes", now: () => Date.now() + aheadMs });
+    this.#aheadMs = aheadMs;
+  }
+
+  override async listEvents(): Promise<EventInfo[]> {
+    return (await super.listEvents()).map((event) => ({
+      ...event,
+      listedAt: this.#back(event.listedAt),
+      expiresAt: this.#back(event.expiresAt),
+      contracts: event.contracts.map((info) => this.#moved(info)),
+    }));
+  }
+
+  override async contract(symbol: string): Promise<ContractInfo | null> {
+    const info = await super.contract(symbol);
+    return info === null ? null : this.#moved(info);
+  }
+
+  #moved(info: ContractInfo): ContractInfo {
+    return { ...info, effectiveAt: this.#back(info.effectiveAt), expiresAt: this.#back(info.expiresAt) };
+  }
+
+  #back(date: Date): Date {
+    return new Date(date.getTime() - this.#aheadMs);
+  }
 }
 
 let validator: ChildProcess | null = null;
@@ -273,56 +319,21 @@ async function run(): Promise<void> {
     say(`  ${role} ${signer.address} registered and funded`);
     return { signer, stable };
   };
-  const yesHolder = await newUser("YES buyer");
-  const noHolder = await newUser("NO buyer");
-  const fastBuyer = await newUser("buyer in the fast market");
+  const yesHolder = await newUser("YES buyer of the up-or-down contract");
+  const noHolder = await newUser("NO buyer of the up-or-down contract");
+  const ladderYes = await newUser("YES buyer of the ladder contract");
+  const ladderNo = await newUser("NO buyer of the ladder contract");
   const user = yesHolder.signer;
   const userStable = yesHolder.stable;
 
-  // 2. The mock venue with one contract, and its market on-chain.
-  say("--- step 2: market");
-  const now = await chain.now();
-  const expiresAt = now + 600;
-  const venue = new MockVenue({ feeFor: takerFee });
-  venue.addContract({
-    symbol: SYMBOL,
-    eventTicker: "TEST-BTC15M",
-    status: "active",
-    marketState: "open",
-    effectiveAt: new Date((now - 300) * 1000),
-    expiresAt: new Date(expiresAt * 1000),
-    tickPx: 100n,
-    unitIncrement: 1n,
-    minUnits: 1n,
-    resolutionSide: null,
-  });
-  venue.setBook(SYMBOL, { bids: [[4_000n, 1_000_000n]], asks: [[4_500n, 1_000_000n]] });
-  venue.setCash(1_000_000n * DUSD);
-  assert.equal(await chain.market(SYMBOL), null, "the market does not exist yet");
-  const spec = {
-    symbol: SYMBOL,
-    closeTs: expiresAt,
-    placeCutoffSecs: 150,
-    tickPx: 100n,
-    maxSupplyUnits: 1_000_000n,
-    yes: { name: "BTC Up test YES", ticker: "BTCYTEST", uri: "" },
-    no: { name: "BTC Up test NO", ticker: "BTCNTEST", uri: "" },
-  };
-  const market = await chain.ensureMarket(spec);
-  assert.equal(market.symbol, SYMBOL);
-  assert.equal(market.status, "open");
-  assert.equal(market.closeTs, expiresAt);
-  assert.equal(market.tickPx, 100n);
-  assert.ok(market.yesMint !== null && market.noMint !== null, "both outcome mints exist");
-  const marketAddress = market.address as Address;
-  const yesMint = market.yesMint as Address;
-  const noMint = market.noMint as Address;
-  assert.equal(market.yesSupply, 0n);
-  assert.deepEqual(await chain.ensureMarket(spec), market, "ensureMarket leaves an existing market alone");
-  const marketSignature = /^market \S+: 3 instruction\(s\) in (\S+)$/.exec(chainLog.at(-1) ?? "")?.[1];
-  say(`  market ${market.address} with mints ${market.yesMint} / ${market.noMint}`);
-
+  // 2. The simulated venue, met a few minutes before one of its hourly ladders and an up-or-down
+  // window expire together, and the relayer's parts around it.
+  say("--- step 2: the venue");
+  const aheadSecs = LADDER_LIFE_SECS - ((Math.floor(Date.now() / 1_000) + EXPIRES_IN_SECS) % LADDER_LIFE_SECS);
+  const venue = new MovedVenue(aheadSecs * 1_000);
   const journal = openJournal(":memory:");
+  const registry = openRegistry(":memory:");
+  const manager = createMarketManager({ venue, chain, registry, now: () => Date.now() });
   const alerts: string[] = [];
   const deps: PipelineDeps = {
     venue,
@@ -335,6 +346,19 @@ async function run(): Promise<void> {
       say(`  alert ${event.kind}: ${event.detail}`);
     },
   };
+  const watcherAlerts: string[] = [];
+  const watcher = createSettlementWatcher({
+    venue,
+    chain,
+    registry,
+    journal,
+    confirmMs: 2_000,
+    now: () => Date.now(),
+    alert: (event) => {
+      watcherAlerts.push(`${event.kind}: ${event.detail}`);
+      say(`  watcher alert ${event.kind}: ${event.detail}`);
+    },
+  });
 
   const placeBuy = async (buyer: Trader, onMarket: Address, side: Side, units: bigint, limitPx: bigint): Promise<{ order: Address; escrow: Address }> => {
     const [trader] = await findTraderPda({ user: buyer.signer.address });
@@ -378,97 +402,118 @@ async function run(): Promise<void> {
     assert.ok(found !== undefined, `openOrders returns ${order}`);
     return found;
   };
+  /** The first contract that can be traded now among the events of a shape, soonest expiry first. */
+  const offered = async (shape: ApiEvent["shape"]): Promise<ApiMarket | undefined> => {
+    await manager.refresh();
+    return manager
+      .eventViews()
+      .filter((event) => event.shape === shape)
+      .flatMap((event) => event.markets)
+      .find((market) => market.tradable);
+  };
+  /** Creates the on-chain market of a listed contract through the market manager. */
+  const createMarket = async (listed: ApiMarket, placeCutoffSecs: number): Promise<{ address: Address; yesMint: Address; noMint: Address }> => {
+    assert.equal(await chain.market(listed.symbol), null, "the market does not exist yet");
+    const onchain = (await manager.ensureOnchain(listed.symbol)).onchain;
+    assert.ok(onchain !== null, `the market of ${listed.symbol} exists on-chain`);
+    assert.deepEqual(
+      { status: onchain.status, closeTs: onchain.closeTs, placeCutoffSecs: onchain.placeCutoffSecs, yesSupply: onchain.yesSupply, noSupply: onchain.noSupply },
+      { status: "open", closeTs: listed.expiresAt / 1_000, placeCutoffSecs, yesSupply: "0", noSupply: "0" },
+    );
+    assert.equal(registry.get(listed.symbol)?.marketAddress, onchain.market);
+    assert.deepEqual((await manager.ensureOnchain(listed.symbol)).onchain, onchain, "a second request leaves the market as it is");
+    say(`  market ${onchain.market} for ${listed.symbol}, mints ${onchain.yesMint} / ${onchain.noMint}`);
+    return { address: onchain.market as Address, yesMint: onchain.yesMint as Address, noMint: onchain.noMint as Address };
+  };
+  /** The first buy of a user: it takes the venue's offer and goes through the pipeline to its on-chain fill. */
+  const buy = async (buyer: Trader, onMarket: Address, side: Side, units: bigint) => {
+    const placed = await placeBuy(buyer, onMarket, side, units, TAKE_PX);
+    const chainOrder = await openOrder(placed.order);
+    assert.equal(await processOrder(chainOrder, deps), "chain_filled");
+    const row = journal.get(placed.order);
+    assert.equal(row?.state, "chain_filled", "journal row is chain_filled");
+    const fills = journal.fills(placed.order);
+    assert.equal(fills.length, 1, "the venue filled the order in one trade");
+    const px = fills[0]!.px;
+    assert.equal(row.amountMicros, units * px, "the cost is the units at the fill price");
+    assert.equal(row.feeMicros, takerFee(units, px));
+    assert.equal(await stableBalance(rpc, buyer.stable), 1_000n * DUSD - row.amountMicros - row.feeMicros, "the buyer paid cost + fee and nothing else");
+    return { chainOrder, px };
+  };
 
-  // The market of the automatic settlement path. It is created now so that its short life runs
-  // while the steps below take place; the watcher settles it at the end.
-  say("--- fast market: created through the market manager, one YES buy");
-  const fastCreatedAt = await chain.now();
-  const fastExpiresAt = fastCreatedAt + FAST_EXPIRES_IN_SECS;
-  say(`  expires at ${fastExpiresAt}; the cluster clock is ${fastCreatedAt - Math.floor(Date.now() / 1000)} s ahead of the local clock`);
-  venue.addContract({
-    symbol: FAST_SYMBOL,
-    eventTicker: "TEST-FAST3M",
-    label: "Up",
-    status: "active",
-    marketState: "open",
-    effectiveAt: new Date((fastCreatedAt - FAST_STARTED_AGO_SECS) * 1000),
-    expiresAt: new Date(fastExpiresAt * 1000),
-    tickPx: 100n,
-    unitIncrement: 1n,
-    minUnits: 1n,
-    resolutionSide: null,
-  });
-  venue.setBook(FAST_SYMBOL, { bids: [[4_000n, 1_000_000n]], asks: [[4_500n, 1_000_000n]] });
-  const registry = openRegistry(":memory:");
-  const manager = createMarketManager({ venue, chain, registry, now: () => Date.now() });
-  await manager.refresh();
-  // Every event the venue lists is offered; the fast market is the one that expires first.
-  const listed = manager.eventViews().flatMap((event) => event.markets);
-  assert.deepEqual(listed.map((view) => view.symbol), [FAST_SYMBOL, SYMBOL], "both listed contracts are offered, soonest expiry first");
-  const fastOnchain = (await manager.ensureOnchain(listed[0]!.symbol)).onchain;
-  assert.ok(fastOnchain !== null, "the fast market exists on-chain");
-  assert.equal(fastOnchain.status, "open");
-  assert.equal(fastOnchain.closeTs, fastExpiresAt);
-  assert.equal(fastOnchain.placeCutoffSecs, 90, "a market of up to 5 minutes stops 60 s before expiry, plus the 30 s buffer");
-  assert.equal(registry.get(FAST_SYMBOL)?.marketAddress, fastOnchain.market);
-  const fastOrder = await placeBuy(fastBuyer, fastOnchain.market as Address, Side.Yes, 200n, 4_500n);
-  assert.equal(await processOrder(await openOrder(fastOrder.order), deps), "chain_filled");
-  assert.equal((await chain.market(FAST_SYMBOL))?.yesSupply, 200n, "the fast market has 200 YES units outstanding");
-  const watcherAlerts: string[] = [];
-  const watcher = createSettlementWatcher({
-    venue,
-    chain,
-    registry,
-    journal,
-    confirmMs: 2_000,
-    now: () => Date.now(),
-    alert: (event) => {
-      watcherAlerts.push(`${event.kind}: ${event.detail}`);
-      say(`  watcher alert ${event.kind}: ${event.detail}`);
-    },
-  });
-  await watcher.tick();
-  assert.equal(registry.get(FAST_SYMBOL)?.settleState, "open", "the watcher leaves a market alone before its expiry");
+  // 3. A contract of the ladder that expires within the run: its market, a YES and a NO buy.
+  say("--- step 3: a ladder contract");
+  const ladder = await offered("ladder");
+  assert.ok(ladder !== undefined, "the venue offers a ladder contract that can be traded now");
+  assert.ok(ladder.expiresAt - Date.now() <= EXPIRES_IN_SECS * 1_000, "it is a contract of the ladder that expires within the run");
+  say(
+    `  ${ladder.symbol} (${ladder.title}: ${ladder.label}) expires in ${Math.round((ladder.expiresAt - Date.now()) / 1_000)} s; ` +
+      `the cluster clock is ${(await chain.now()) - Math.floor(Date.now() / 1_000)} s ahead of the local clock`,
+  );
+  const ladderMarket = await createMarket(ladder, 150); // up to 15 minutes of life: 2 minutes before expiry, plus the 30 s buffer
+  const marketSignature = /^market \S+: 3 instruction\(s\) in (\S+)$/.exec(chainLog.at(-1) ?? "")?.[1];
+  const ladderYesBuy = await buy(ladderYes, ladderMarket.address, Side.Yes, YES_UNITS);
+  const ladderNoBuy = await buy(ladderNo, ladderMarket.address, Side.No, NO_UNITS);
+  assert.equal(await outcomeBalance(ladderYes.signer.address, ladderMarket.yesMint), YES_UNITS, "the YES buyer holds the YES units");
+  assert.equal(await outcomeBalance(ladderNo.signer.address, ladderMarket.noMint), NO_UNITS, "the NO buyer holds the NO units");
+  say(`  YES filled at ${ladderYesBuy.px}, NO at ${ladderNoBuy.px}`);
 
-  // 3. and 4. A buy at the ask: filled at the venue, then on-chain.
-  say("--- steps 3 and 4: a buy that fills");
+  // 4. An up-or-down contract, as soon as its window has opened.
+  say("--- step 4: an up-or-down contract");
+  const opensBy = Date.now() + 90_000;
+  let up = await offered("binary");
+  while (up === undefined) {
+    assert.ok(Date.now() < opensBy, "an up-or-down contract became tradable within 90 s");
+    await sleep(1_000);
+    up = await offered("binary");
+  }
+  // The pipeline goes by the cluster clock, which can be behind the local one.
+  await waitForClusterTime(chain, up.startsAt / 1_000 + 1, 30_000);
+  say(`  ${up.symbol} (${up.title}: ${up.label}) expires in ${Math.round((up.expiresAt - Date.now()) / 1_000)} s`);
+  const upMarket = await createMarket(up, 90); // up to 5 minutes of life: 1 minute before expiry, plus the 30 s buffer
+  const { yesMint, noMint } = upMarket;
+
+  // 5. A buy with room above the offer: filled at the venue's price, then on-chain.
+  say("--- step 5: a buy that fills");
   const treasuryBefore = await chain.treasuryMicros();
-  const first = await placeBuy(yesHolder, marketAddress, Side.Yes, 200n, 4_500n);
-  const maxFee = feeCap(200n, 4_500n);
-  assert.equal(await stableBalance(rpc, userStable), 1_000n * DUSD - 200n * 4_500n - maxFee, "cost and fee allowance are escrowed");
+  const first = await placeBuy(yesHolder, upMarket.address, Side.Yes, YES_UNITS, TAKE_PX);
+  const maxFee = feeCap(YES_UNITS, TAKE_PX);
+  assert.equal(await stableBalance(rpc, userStable), 1_000n * DUSD - YES_UNITS * TAKE_PX - maxFee, "the cost at the limit and the fee allowance are escrowed");
   const firstOrder = await openOrder(first.order);
   assert.deepEqual(
     { ...firstOrder, addressBytes: null, expiresAt: null },
-    { address: first.order, addressBytes: null, user: user.address, symbol: SYMBOL, side: "YES", kind: "buy", units: 200n, limitPx: 4_500n, maxFeeMicros: maxFee, expiresAt: null },
+    { address: first.order, addressBytes: null, user: user.address, symbol: up.symbol, side: "YES", kind: "buy", units: YES_UNITS, limitPx: TAKE_PX, maxFeeMicros: maxFee, expiresAt: null },
   );
   assert.equal(await chain.orderExists(first.order), true);
   assert.equal(await processOrder(firstOrder, deps), "chain_filled");
   const filledRow = journal.get(first.order);
   assert.equal(filledRow?.state, "chain_filled", "journal row is chain_filled");
   assert.ok(filledRow.chainSignature !== null, "the fill signature is journaled");
-  const costMicros = 200n * 4_500n;
-  const feeMicros = takerFee(200n, 4_500n);
+  const fillPx = journal.fills(first.order)[0]?.px;
+  assert.ok(fillPx !== undefined && fillPx < TAKE_PX, "the venue filled at its offer, below the limit");
+  const costMicros = YES_UNITS * fillPx;
+  const feeMicros = takerFee(YES_UNITS, fillPx);
   assert.equal(filledRow.amountMicros, costMicros);
   assert.equal(filledRow.feeMicros, feeMicros);
-  assert.equal(await outcomeBalance(user.address, yesMint), 200n, "the user holds 200 YES units");
+  assert.equal(await outcomeBalance(user.address, yesMint), YES_UNITS, "the user holds the YES units");
   assert.equal((await chain.treasuryMicros()) - treasuryBefore, costMicros + feeMicros, "the treasury received exactly cost + fee");
-  assert.equal(await stableBalance(rpc, userStable), 1_000n * DUSD - costMicros - feeMicros, "the unused fee allowance was refunded");
+  assert.equal(await stableBalance(rpc, userStable), 1_000n * DUSD - costMicros - feeMicros, "what the fill did not use of the escrow was refunded");
   assert.equal(await accountExists(rpc, first.order), false, "the order account is closed");
   assert.equal(await accountExists(rpc, first.escrow), false, "the escrow account is closed");
   assert.equal(await chain.orderExists(first.order), false);
-  assert.equal((await chain.market(SYMBOL))?.yesSupply, 200n, "the YES supply is 200");
+  assert.equal((await chain.market(up.symbol))?.yesSupply, YES_UNITS, "the YES supply is what was bought");
   assert.equal(
-    await chain.fillBuy(firstOrder, { fillUnits: 200n, costMicros, feeMicros }),
+    await chain.fillBuy(firstOrder, { fillUnits: YES_UNITS, costMicros, feeMicros }),
     filledRow.chainSignature,
     "a repeated fillBuy resolves with the signature of the fill that landed",
   );
   await assert.rejects(chain.cancel(firstOrder), /^Error: order closed: filled in /, "a cancel of a filled order is refused");
-  say(`  filled in ${filledRow.chainSignature}`);
+  say(`  filled at ${fillPx} in ${filledRow.chainSignature}`);
 
-  // 5. A buy below the ask: not filled, cancelled, fully refunded.
-  say("--- step 5: a buy that does not fill");
+  // 6. A buy below every offer: not filled, cancelled, fully refunded.
+  say("--- step 6: a buy that does not fill");
   const stableBefore = await stableBalance(rpc, userStable);
-  const second = await placeBuy(yesHolder, marketAddress, Side.Yes, 200n, 4_400n);
+  const second = await placeBuy(yesHolder, upMarket.address, Side.Yes, YES_UNITS, MISS_PX);
   const secondOrder = await openOrder(second.order);
   assert.equal(await processOrder(secondOrder, deps), "chain_cancelled");
   const cancelledRow = journal.get(second.order);
@@ -477,120 +522,138 @@ async function run(): Promise<void> {
   assert.equal(await stableBalance(rpc, userStable), stableBefore, "the escrow was refunded in full");
   assert.equal(await accountExists(rpc, second.order), false, "the order account is closed");
   assert.equal(await accountExists(rpc, second.escrow), false, "the escrow account is closed");
-  assert.equal((await chain.market(SYMBOL))?.yesSupply, 200n, "nothing was minted");
+  assert.equal((await chain.market(up.symbol))?.yesSupply, YES_UNITS, "nothing was minted");
   assert.equal(await chain.cancel(secondOrder), cancelledRow.chainSignature, "a repeated cancel resolves with the signature of the cancel that landed");
   await assert.rejects(
-    chain.fillBuy(secondOrder, { fillUnits: 200n, costMicros: 200n * 4_400n, feeMicros: 0n }),
+    chain.fillBuy(secondOrder, { fillUnits: YES_UNITS, costMicros: YES_UNITS * MISS_PX, feeMicros: 0n }),
     /^Error: order closed: cancelled in /,
     "a fill of a cancelled order is refused",
   );
-  assert.deepEqual(await chain.openOrders(), [], "no order is left open");
-  assert.deepEqual(alerts, [], "the pipeline raised no alert");
   say(`  cancelled in ${cancelledRow.chainSignature}`);
 
-  // 6. A second user buys NO: the venue order takes from the bids, at 10_000 less the bid.
-  say("--- step 6: a NO buy that fills");
-  const noUnits = 300n;
-  const noPx = PAYOUT_PER_UNIT - 4_000n;
-  const third = await placeBuy(noHolder, marketAddress, Side.No, noUnits, noPx);
-  const thirdOrder = await openOrder(third.order);
-  assert.equal(thirdOrder.side, "NO");
-  assert.equal(await processOrder(thirdOrder, deps), "chain_filled");
-  const noRow = journal.get(third.order);
-  assert.equal(noRow?.state, "chain_filled", "journal row is chain_filled");
-  assert.equal(noRow.amountMicros, noUnits * noPx);
-  assert.equal(await outcomeBalance(noHolder.signer.address, noMint), noUnits, "the second user holds 300 NO units");
-  assert.equal(await stableBalance(rpc, noHolder.stable), 1_000n * DUSD - noUnits * noPx - takerFee(noUnits, noPx), "the second user paid cost + fee");
-  const beforeSettlement = await chain.market(SYMBOL);
+  // 7. A second user buys NO: the venue order takes from the bids.
+  say("--- step 7: a NO buy that fills");
+  const noBuy = await buy(noHolder, upMarket.address, Side.No, NO_UNITS);
+  assert.equal(noBuy.chainOrder.side, "NO");
+  assert.equal(await outcomeBalance(noHolder.signer.address, noMint), NO_UNITS, "the second user holds the NO units");
+  const beforeSettlement = await chain.market(up.symbol);
   assert.deepEqual(
     { status: beforeSettlement?.status, yes: beforeSettlement?.yesSupply, no: beforeSettlement?.noSupply, yesPayout: beforeSettlement?.yesPayout, redeemAfter: beforeSettlement?.redeemAfter },
-    { status: "open", yes: 200n, no: noUnits, yesPayout: null, redeemAfter: null },
+    { status: "open", yes: YES_UNITS, no: NO_UNITS, yesPayout: null, redeemAfter: null },
   );
+  assert.deepEqual(await chain.openOrders(), [], "no order is left open");
   assert.deepEqual(alerts, [], "the pipeline raised no alert");
 
-  // 7. Settlement: the settler funds the vault from the treasury.
-  say("--- step 7: settle (10_000, 0)");
-  const [vault] = await findVaultPda({ market: marketAddress });
-  assert.equal(await accountExists(rpc, vault), false, "the vault does not exist before settlement");
+  // 8. The automatic path: the venue resolves both contracts after their expiry and the watcher
+  // settles their markets, funding each vault from the treasury.
+  say("--- step 8: the settlement watcher");
+  const held = [
+    { listed: up, market: upMarket, yes: yesHolder, no: noHolder },
+    { listed: ladder, market: ladderMarket, yes: ladderYes, no: ladderNo },
+  ];
+  const vaults: Address[] = [];
+  for (const { market } of held) {
+    const [vault] = await findVaultPda({ market: market.address });
+    assert.equal(await accountExists(rpc, vault), false, "the vault does not exist before settlement");
+    vaults.push(vault);
+  }
+  await watcher.tick();
+  for (const { listed } of held) {
+    assert.equal(registry.get(listed.symbol)?.settleState, "open", "the watcher looks at a market before its expiry and leaves it open");
+  }
+  const expiry = Math.max(up.expiresAt, ladder.expiresAt);
+  say(`  waiting ${Math.max(0, Math.round((expiry - Date.now()) / 1_000))} s for the expiry`);
+  await sleep(Math.max(0, expiry - Date.now()) + 250);
   const treasuryBeforeSettlement = await chain.treasuryMicros();
-  const settleSignature = await chain.settleMarket(SYMBOL, PAYOUT_PER_UNIT, 0n);
-  const settledAt = await chain.now();
-  const settled = await chain.market(SYMBOL);
-  assert.ok(settled !== null);
-  assert.equal(settled.status, "settled", "the market reads as settled");
-  assert.equal(settled.yesPayout, 10_000n);
-  assert.equal(settled.noPayout, 0n);
-  const redeemAfter = settled.redeemAfter;
-  assert.ok(redeemAfter !== null, "a settled market has a redeemAfter");
-  assert.ok(
-    redeemAfter <= settledAt + chainConfig.settleDelaySecs && redeemAfter >= settledAt + chainConfig.settleDelaySecs - 20,
-    `redeemAfter ${redeemAfter} is settle_delay_secs after the settlement (cluster clock now ${settledAt})`,
-  );
-  const funding = settled.yesSupply * PAYOUT_PER_UNIT;
-  assert.equal(funding, 200n * 10_000n);
-  assert.equal(await stableBalance(rpc, vault), funding, "the vault holds exactly yesSupply * 10_000");
-  assert.equal(treasuryBeforeSettlement - (await chain.treasuryMicros()), funding, "the treasury funded the vault");
-  assert.equal(await chain.settleMarket(SYMBOL, PAYOUT_PER_UNIT, 0n), settleSignature, "a repeated settleMarket resolves with the signature of the settlement that landed");
-  await assert.rejects(chain.settleMarket(SYMBOL, 0n, PAYOUT_PER_UNIT), /^Error: already settled: /, "other payouts for a settled market are refused");
-  say(`  settled in ${settleSignature}, redemption opens at ${redeemAfter}`);
-
-  // 8. Redemption is locked until redeemAfter.
-  say("--- step 8: a redeem before redeemAfter");
-  assert.ok((await chain.now()) < redeemAfter, "the early redeem is sent before redeemAfter");
-  await assert.rejects(redeem(yesHolder, marketAddress, yesMint, 200n), /RedeemLocked/, "an early redeem fails with RedeemLocked");
-  assert.equal(await outcomeBalance(user.address, yesMint), 200n, "nothing was burned");
-  say(`  refused with RedeemLocked; waiting for the cluster clock to reach ${redeemAfter}`);
-  await waitForClusterTime(chain, redeemAfter, 120_000);
-
-  // 9. Winners are paid 10_000 per unit, losers nothing; the vault ends empty.
-  say("--- step 9: redeem");
-  const yesStableBefore = await stableBalance(rpc, userStable);
-  const redeemYesSignature = await redeem(yesHolder, marketAddress, yesMint, 200n);
-  assert.equal((await stableBalance(rpc, userStable)) - yesStableBefore, 200n * 10_000n, "the YES holder received exactly units * 10_000");
-  assert.equal(await outcomeBalance(user.address, yesMint), 0n, "the YES units were burned");
-  const noStableBefore = await stableBalance(rpc, noHolder.stable);
-  const redeemNoSignature = await redeem(noHolder, marketAddress, noMint, noUnits);
-  assert.equal(await stableBalance(rpc, noHolder.stable), noStableBefore, "the NO holder received nothing");
-  assert.equal(await outcomeBalance(noHolder.signer.address, noMint), 0n, "the NO units were burned");
-  const redeemed = await chain.market(SYMBOL);
-  assert.deepEqual({ status: redeemed?.status, yes: redeemed?.yesSupply, no: redeemed?.noSupply }, { status: "settled", yes: 0n, no: 0n }, "both supplies are zero");
-  assert.equal(await stableBalance(rpc, vault), 0n, "the vault is empty");
-  say(`  YES redeemed in ${redeemYesSignature}, NO in ${redeemNoSignature}`);
-
-  // 10. The automatic path: expiry, the venue's resolution, then the watcher settles on-chain.
-  say("--- step 10: the settlement watcher settles the fast market");
-  assert.equal(registry.get(FAST_SYMBOL)?.settleState, "open");
-  await waitForClusterTime(chain, fastExpiresAt, 240_000);
-  const untilLocalExpiry = fastExpiresAt * 1000 - Date.now();
-  if (untilLocalExpiry >= 0) await sleep(untilLocalExpiry + 250);
-  venue.resolve(FAST_SYMBOL, "yes");
   const watcherDeadline = Date.now() + 60_000;
   let ticks = 0;
   for (;;) {
     await watcher.tick();
     ticks += 1;
-    const row = registry.get(FAST_SYMBOL);
-    if (row?.settleState === "settled") break;
-    assert.equal(row?.settleState, "awaiting_result", `the fast market is waiting for its settlement (${row?.detail ?? "no detail"})`);
-    assert.ok(Date.now() < watcherDeadline, "the watcher settled the fast market within 60 s");
+    const rows = held.map(({ listed }) => registry.get(listed.symbol));
+    if (rows.every((row) => row?.settleState === "settled")) break;
+    for (const row of rows) {
+      assert.ok(
+        row?.settleState === "awaiting_result" || row?.settleState === "settled",
+        `${row?.symbol} is waiting for its settlement (${row?.settleState}: ${row?.detail ?? "no detail"})`,
+      );
+    }
+    assert.ok(Date.now() < watcherDeadline, "the watcher settled both markets within 60 s of their expiry");
     await sleep(1_000);
   }
-  assert.ok(ticks >= 2, "the resolution was confirmed over more than one tick");
-  const fastSignature = registry.get(FAST_SYMBOL)?.settleSignature;
-  assert.ok(typeof fastSignature === "string", "the registry has the settlement signature");
-  const fastSettled = await chain.market(FAST_SYMBOL);
-  assert.deepEqual(
-    { status: fastSettled?.status, yesPayout: fastSettled?.yesPayout, noPayout: fastSettled?.noPayout },
-    { status: "settled", yesPayout: 10_000n, noPayout: 0n },
-    "the fast market is settled (10_000, 0) on-chain",
-  );
-  assert.ok(fastSettled?.redeemAfter != null, "the fast market has a redeemAfter");
-  const [fastVault] = await findVaultPda({ market: fastOnchain.market as Address });
-  assert.equal(await stableBalance(rpc, fastVault), 200n * 10_000n, "the fast market's vault holds the winners' payout");
-  assert.equal(await chain.settleMarket(FAST_SYMBOL, PAYOUT_PER_UNIT, 0n), fastSignature, "the adapter finds the watcher's settlement");
+  assert.ok(ticks >= 2, "the resolutions were confirmed over more than one tick");
   assert.deepEqual(watcherAlerts, [], "the watcher raised no alert");
+  const settledAt = await chain.now();
+  say(`  both markets settled after ${ticks} ticks`);
+
+  // 9. Redemption is locked until redeemAfter.
+  say("--- step 9: a redeem before redeemAfter");
+  const lockedUntil = (await chain.market(up.symbol))?.redeemAfter;
+  assert.ok(lockedUntil != null, "a settled market has a redeemAfter");
+  assert.ok((await chain.now()) < lockedUntil, "the early redeem is sent before redeemAfter");
+  await assert.rejects(redeem(yesHolder, upMarket.address, yesMint, YES_UNITS), /RedeemLocked/, "an early redeem fails with RedeemLocked");
+  assert.equal(await outcomeBalance(user.address, yesMint), YES_UNITS, "nothing was burned");
+  say("  refused with RedeemLocked");
+
+  // 10. What the watcher did: each market settled the way the venue resolved its contract.
+  say("--- step 10: the settlements");
+  assert.equal(registry.get(up.symbol)?.resolution, "yes", "the up-or-down contract resolved the way the venue was told to");
+  const settlements: Array<{ side: "yes" | "no"; signature: string }> = [];
+  let funded = 0n;
+  let redeemAfter = 0;
+  for (const [index, { listed }] of held.entries()) {
+    const row = registry.get(listed.symbol);
+    const side = row?.resolution;
+    assert.ok(side === "yes" || side === "no", `the registry has the resolution of ${listed.symbol}`);
+    const [yesPayout, noPayout] = side === "yes" ? [PAYOUT_PER_UNIT, 0n] : [0n, PAYOUT_PER_UNIT];
+    const settled = await chain.market(listed.symbol);
+    assert.deepEqual(
+      { status: settled?.status, yesPayout: settled?.yesPayout, noPayout: settled?.noPayout, yes: settled?.yesSupply, no: settled?.noSupply },
+      { status: "settled", yesPayout, noPayout, yes: YES_UNITS, no: NO_UNITS },
+      `${listed.symbol} is settled on-chain the way the venue resolved it`,
+    );
+    assert.ok(settled?.redeemAfter != null, "a settled market has a redeemAfter");
+    assert.ok(
+      settled.redeemAfter <= settledAt + chainConfig.settleDelaySecs && settled.redeemAfter >= settledAt + chainConfig.settleDelaySecs - 20,
+      `redeemAfter ${settled.redeemAfter} is settle_delay_secs after the settlement (cluster clock then ${settledAt})`,
+    );
+    redeemAfter = Math.max(redeemAfter, settled.redeemAfter);
+    const funding = (side === "yes" ? YES_UNITS : NO_UNITS) * PAYOUT_PER_UNIT;
+    assert.equal(await stableBalance(rpc, vaults[index]!), funding, "the vault holds exactly what the winning side can claim");
+    funded += funding;
+    const signature = row?.settleSignature;
+    assert.ok(typeof signature === "string", "the registry has the settlement signature");
+    assert.equal(await chain.settleMarket(listed.symbol, yesPayout, noPayout), signature, "a repeated settleMarket resolves with the signature of the watcher's settlement");
+    await assert.rejects(chain.settleMarket(listed.symbol, noPayout, yesPayout), /^Error: already settled: /, "other payouts for a settled market are refused");
+    settlements.push({ side, signature });
+    say(`  ${listed.symbol}: ${side.toUpperCase()} wins, settled in ${signature}, redemption opens at ${settled.redeemAfter}`);
+  }
+  assert.equal(treasuryBeforeSettlement - (await chain.treasuryMicros()), funded, "the treasury funded both vaults");
+  const settleSignature = settlements[0]!.signature;
+
+  // 11. Winners are paid 10_000 per unit, losers nothing; the vaults end empty.
+  say(`--- step 11: redeem, once the cluster clock has reached ${redeemAfter}`);
+  await waitForClusterTime(chain, redeemAfter, 120_000);
+  const redeems: Array<{ yes: string; no: string }> = [];
+  for (const [index, { listed, market, yes, no }] of held.entries()) {
+    const { side } = settlements[index]!;
+    const yesStableBefore = await stableBalance(rpc, yes.stable);
+    const yesSignature = await redeem(yes, market.address, market.yesMint, YES_UNITS);
+    assert.equal((await stableBalance(rpc, yes.stable)) - yesStableBefore, side === "yes" ? YES_UNITS * PAYOUT_PER_UNIT : 0n, "the YES holder received units * 10_000 if YES won, else nothing");
+    assert.equal(await outcomeBalance(yes.signer.address, market.yesMint), 0n, "the YES units were burned");
+    const noStableBefore = await stableBalance(rpc, no.stable);
+    const noSignature = await redeem(no, market.address, market.noMint, NO_UNITS);
+    assert.equal((await stableBalance(rpc, no.stable)) - noStableBefore, side === "no" ? NO_UNITS * PAYOUT_PER_UNIT : 0n, "the NO holder received units * 10_000 if NO won, else nothing");
+    assert.equal(await outcomeBalance(no.signer.address, market.noMint), 0n, "the NO units were burned");
+    const redeemed = await chain.market(listed.symbol);
+    assert.deepEqual({ status: redeemed?.status, yes: redeemed?.yesSupply, no: redeemed?.noSupply }, { status: "settled", yes: 0n, no: 0n }, "both supplies are zero");
+    assert.equal(await stableBalance(rpc, vaults[index]!), 0n, "the vault is empty");
+    redeems.push({ yes: yesSignature, no: noSignature });
+    say(`  ${listed.symbol}: YES redeemed in ${yesSignature}, NO in ${noSignature}`);
+  }
+  const redeemYesSignature = redeems[0]!.yes;
+  const redeemNoSignature = redeems[0]!.no;
   assert.deepEqual(alerts, [], "the pipeline raised no alert");
-  say(`  settled by the watcher in ${fastSignature} after ${ticks} ticks`);
 
   say(
     `--- compute units of the 300000 limit (whole transaction): market and both mints ${await unitsConsumed(rpc, marketSignature)}, ` +

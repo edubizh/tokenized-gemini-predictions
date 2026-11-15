@@ -459,6 +459,22 @@ describe("RollingMockVenue", () => {
     expect(await venue.settledPayoutMicros(decided.symbol)).toBe(1_000_000n);
   });
 
+  it("never forgets a contract it took over, however long ago its event expired: the relayer may still have to settle it", async () => {
+    const first = rolling();
+    const held = (await first.venue.listEvents()).find((event) => event.ticker === "XRP2611140300")!.contracts[0]!;
+
+    // The new process starts more than a day after the ladder expired.
+    const { venue, clock } = rolling();
+    clock.ms = END + 25 * 60 * MINUTE;
+    venue.adopt(held, 300n);
+    const read = await venue.contract(held.symbol);
+    expect(read).toMatchObject({ status: "settled", eventTicker: "XRP2611140300" });
+    expect(await venue.settledPayoutMicros(held.symbol)).toBe(read?.resolutionSide === "yes" ? 3_000_000n : 0n);
+
+    clock.ms += 48 * 60 * MINUTE;
+    expect((await venue.contract(held.symbol))?.status).toBe("settled");
+  });
+
   it("forgets a settled contract a day after its expiry, but not what the account did in it", async () => {
     const { venue, clock } = rolling({ resolve: "yes" });
     const bought = await venue.placeOrder(order());

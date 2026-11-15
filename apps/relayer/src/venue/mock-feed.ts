@@ -368,6 +368,8 @@ export class RollingMockVenue extends MockVenue {
   private readonly settled: ScheduledEvent[] = [];
   /** Contracts of earlier runs that the schedule does not hold, with how each will resolve. */
   private readonly adopted = new Map<string, { expiresAt: number; side: "yes" | "no" }>();
+  /** Tickers of the schedule's events with a contract taken over from an earlier run: never forgotten. */
+  private readonly takenOver = new Set<string>();
 
   constructor(options: RollingMockVenueOptions) {
     super({ feeFor: takerFee, now: options.now });
@@ -387,7 +389,8 @@ export class RollingMockVenue extends MockVenue {
    * Takes over a contract an earlier run listed, with the position the account held in it. One
    * of the schedule's own goes back under its event and follows the clock like its siblings. Any
    * other, and any with a `resolution` the relayer already saw, resolves by itself: at once that
-   * way, or after its expiry.
+   * way, or after its expiry. Whichever it is, it stays readable however old it gets: the relayer
+   * may still have to settle its market.
    */
   adopt(info: ContractInfo, signedUnits: bigint, resolution?: "yes" | "no"): void {
     const expiresAt = info.expiresAt.getTime();
@@ -397,6 +400,7 @@ export class RollingMockVenue extends MockVenue {
     if (event !== undefined && own) this.addEvent(describe(event));
     if (event !== undefined && own && resolution === undefined) {
       this.open.set(event.ticker, event);
+      this.takenOver.add(event.ticker);
       return;
     }
     this.addContract({ ...info, status: "active", resolutionSide: null });
@@ -491,7 +495,7 @@ export class RollingMockVenue extends MockVenue {
     });
     if (settled) {
       this.open.delete(event.ticker);
-      this.settled.push(event);
+      if (!this.takenOver.has(event.ticker)) this.settled.push(event);
       event.strikes.forEach((_, index) => this.restingBid.delete(symbolOf(event, index)));
     }
   }
