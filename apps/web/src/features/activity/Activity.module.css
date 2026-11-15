@@ -1,133 +1,41 @@
-/* An order row */
-.order {
+.page {
   display: grid;
-  gap: 2px;
-  padding-block: var(--space-1);
-  min-width: 0;
+  gap: var(--space-4);
 }
 
-.terms {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 var(--space-2);
-}
-
-.kind {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-
-.side {
+.note {
+  max-width: 65ch;
   font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0.04em;
+  line-height: var(--leading-sm);
+  color: var(--forest-soft);
 }
 
-.yes {
-  color: var(--yes);
-}
-
-.no {
-  color: var(--no);
-}
-
-.title {
-  font-weight: var(--weight-semibold);
+/* A row's main text is a link without a resting underline; the pointer brings it back. */
+.rowTitle {
   text-decoration-color: transparent;
 }
 
-a.title:hover {
-  text-decoration-color: currentColor;
-}
-
-.unlisted {
-  font-weight: var(--weight-medium);
-  color: var(--ink-2);
-}
-
-.words {
-  max-width: 62ch;
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
-  color: var(--ink-2);
-}
-
-.figure {
-  font-family: var(--font-mono);
-  font-weight: var(--weight-medium);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.stack {
+.time {
   display: grid;
-  justify-items: end;
-  gap: 2px;
 }
 
-.sub {
+.day {
   font-size: var(--text-xs);
   line-height: var(--leading-xs);
-  color: var(--ink-3);
-  white-space: nowrap;
+  color: var(--forest-soft);
 }
 
-.caret {
-  display: inline-block;
-  width: 1ch;
-  margin-right: var(--space-1);
-  font-family: var(--font-mono);
-  text-decoration: none;
-}
-
-/* The list stacks below 56rem (it is a dense row list), and its values then read from the left. */
-@media (max-width: 56rem) {
-  .stack {
-    justify-items: start;
-  }
-}
-
-/* The row opened in place: its steps on the left, its receipt on the right. */
+/* An opened order: its steps, and its figures beside them; one under the other in a narrow list. */
 .detail {
   display: grid;
-  gap: var(--space-5);
-  align-items: start;
-  padding: var(--space-2) 0 var(--space-3);
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-6);
+  padding-block: var(--space-2) var(--space-3);
 }
 
-.receipt {
-  min-width: 0;
-}
-
-.address {
-  overflow-wrap: anywhere;
-}
-
-@media (min-width: 56rem) {
+@container (max-width: 48rem) {
   .detail {
-    grid-template-columns: minmax(0, 1fr) 23rem;
-    column-gap: var(--space-7);
-    padding-left: var(--space-2);
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-5);
   }
-}
-
-.count {
-  margin-top: var(--space-3);
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
-  color: var(--ink-3);
-}
-
-/* Above the rows while the relayer is not answering: what the list is made of. */
-.offline {
-  max-width: 44rem;
-  margin-bottom: var(--space-3);
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
-  color: var(--ink-2);
 }

@@ -1,11 +1,11 @@
 // One row of the activity list per order: its entry, its market where the relayer still lists
-// it, the derived timeline and the receipt read off it. Pure.
+// it, the derived timeline and the figures read off it. Pure.
 
 import type { ApiMarket } from "@outcome/relayer/api-types";
 import { marketTitle } from "@/features/markets/wording";
 import type { OrderEntry } from "@/features/ticket/entries";
 import { deriveTimeline, type DerivedTimeline } from "@/features/ticket/timeline";
-import { orderReceipt, outcomeWords, type OrderReceipt } from "./receipt";
+import { orderReceipt, type OrderReceipt } from "./receipt";
 
 export interface ActivityRow {
   address: string;
@@ -15,8 +15,6 @@ export interface ActivityRow {
   title: string | null;
   kind: "buy" | "sell";
   timeline: DerivedTimeline;
-  /** The outcome in one or two short sentences. */
-  words: string;
   receipt: OrderReceipt;
 }
 
@@ -32,7 +30,6 @@ export function buildActivityRows(entries: readonly OrderEntry[], markets: reado
       title: market ? marketTitle(market) : null,
       kind: timeline.kind,
       timeline,
-      words: outcomeWords(timeline),
       receipt: orderReceipt(timeline, entry.api),
     };
   });

@@ -2,139 +2,113 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import type { SideName } from "@outcome/relayer/api-types";
+import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button, ButtonLink } from "@/components/ui/Button";
-import { EmptyState } from "@/components/ui/EmptyState";
 import { ExternalLink } from "@/components/ui/ExternalLink";
-import { Receipt, ReceiptLine } from "@/components/ui/Receipt";
+import { Fact, Facts } from "@/components/ui/Facts";
+import { Notice } from "@/components/ui/Notice";
 import { Row, RowList, type Column } from "@/components/ui/RowList";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { Stamp } from "@/components/ui/Stamp";
-import { marketHref } from "@/lib/routes";
-import { formatClock, type TimeOptions } from "@/features/markets/wording";
+import { NO_VALUE } from "@/features/markets/derive";
+import { formatClock } from "@/features/markets/wording";
 import { OrderTimelineView } from "@/features/ticket/OrderTimeline";
-import type { SendProgress } from "@/features/ticket/Ticket";
-import { formatContracts, formatDollars, formatPrice, shortAddress } from "@/lib/format";
-import type { ReconnectView } from "@/lib/privy/reconnect";
+import type { OrderStamp } from "@/features/ticket/timeline";
+import { formatCents, formatContracts, formatDollars, shortAddress } from "@/lib/format";
+import { marketHref } from "@/lib/routes";
+import { orderAmount } from "./receipt";
 import type { ActivityRow } from "./rows";
+import type { Reclaiming } from "./useOrderRows";
 import styles from "./Activity.module.css";
 
 const COLUMNS: Column[] = [
-  { id: "order", header: "Order", primary: true },
-  { id: "placed", header: "Placed", align: "right", width: "6.5rem" },
-  { id: "quantity", header: "Quantity", align: "right", width: "5.5rem" },
-  { id: "limit", header: "Limit", align: "right", width: "4.5rem" },
-  { id: "status", header: "Status", width: "6.5rem" },
-  { id: "more", header: "Details", actions: true, width: "6rem" },
+  { id: "market", header: "Market", primary: true, width: "minmax(12rem, 1fr)" },
+  { id: "order", header: "Order", width: "5rem" },
+  { id: "time", header: "Placed", align: "right", width: "5.5rem" },
+  { id: "contracts", header: "Contracts", align: "right", width: "5rem" },
+  { id: "price", header: "Price", align: "right", width: "3.5rem" },
+  { id: "amount", header: "Amount", align: "right", width: "5rem" },
+  { id: "status", header: "Status", width: "5.5rem" },
+  { id: "details", header: "Details", actions: true, width: "5.5rem" },
 ];
 
-export interface ActivityReclaim {
-  /** The order being reclaimed, or the one whose last attempt failed. */
-  address: string | null;
-  progress: SendProgress | null;
-  error: string | null;
-  /** Set while the trading wallet is not connected in this tab. */
-  reconnect?: ReconnectView | null;
-  onReclaim(row: ActivityRow): void;
-}
+const SIDE_WORD: Record<SideName, string> = { YES: "Yes", NO: "No" };
+const STATUS: Record<OrderStamp, { word: string; tone: BadgeTone }> = {
+  OPEN: { word: "Open", tone: "neutral" },
+  FILLED: { word: "Filled", tone: "positive" },
+  REFUNDED: { word: "Refunded", tone: "neutral" },
+  EXPIRED: { word: "Expired", tone: "neutral" },
+};
 
-export interface ActivityViewProps extends TimeOptions {
+export interface ActivityViewProps {
   /** Newest first. Null until the orders have been read. */
   rows: readonly ActivityRow[] | null;
   /** True while the relayer is not answering: only what Solana and this browser know is listed. */
-  offline?: boolean;
+  offline: boolean;
   /** The wall clock the list is drawn for, unix milliseconds. */
   nowMs: number;
   /** The cluster clock, unix milliseconds: order deadlines are on-chain. */
   chainNow(): number;
-  /** Freezes the expiry countdowns at this cluster time, for the gallery. */
-  frozenAtMs?: number;
   /** Called when an order's expiry countdown reaches zero. */
-  onExpired?(): void;
-  reclaim: ActivityReclaim;
+  onExpired(): void;
+  reclaim: Reclaiming;
   txUrl(signature: string): string;
   addressUrl(address: string): string;
-  /** Order addresses drawn open, for the gallery. */
-  defaultExpanded?: readonly string[];
 }
 
-function day(atMs: number, timeZone?: string): string {
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone }).format(new Date(atMs));
-}
+const day = (atMs: number) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(atMs));
 
-function OrderReceiptView({ row, txUrl, addressUrl }: { row: ActivityRow; txUrl(signature: string): string; addressUrl(address: string): string }) {
+/** The figures of one order, where the steps above them say what happened. */
+function OrderFacts({ row, addressUrl }: { row: ActivityRow; addressUrl(address: string): string }) {
   const { receipt, timeline } = row;
-  const symbol = row.entry.symbol ?? row.market?.symbol ?? null;
   const sale = receipt.sale;
-  const tokens = (units: bigint) => `${formatContracts(units)} ${timeline.side}`;
-  const waiting = timeline.canReclaim ? "waiting to be reclaimed" : "still held";
-  let note: string;
-  if (sale) {
-    note =
-      sale.paidMicros === null
-        ? "The tokens stay with the program on Solana until the order fills, is cancelled, or is reclaimed."
-        : "A sale is filled as a buy of the opposite outcome. The fee comes out of the proceeds, and only when a fill is recorded on Solana.";
-  } else {
-    note =
-      receipt.returnedMicros === null
-        ? "The hold stays with the program on Solana until the order fills, is cancelled, or is reclaimed."
-        : "Amounts are in test dollars. Cost and fee are taken from the hold only when a fill is recorded on Solana.";
-  }
+  const tokens = (units: bigint) => `${formatContracts(units)} ${SIDE_WORD[timeline.side]}`;
+  const waiting = timeline.canReclaim ? "To reclaim" : "Still held";
   return (
-    <Receipt title="Order receipt" note={note}>
-      {row.title && <ReceiptLine label="Market">{row.title}</ReceiptLine>}
-      <ReceiptLine label="Venue symbol">{symbol ?? "not known"}</ReceiptLine>
-      <ReceiptLine label="Venue order id">{receipt.venueOrderId ?? "not sent"}</ReceiptLine>
-      {receipt.fills.map((fill, index) => (
-        <ReceiptLine key={fill.tradeId} label={receipt.fills.length > 1 ? `Fill ${index + 1} of ${receipt.fills.length}` : "Fill"}>
-          {`${formatContracts(fill.units)} at ${formatPrice(fill.px)}`}
-        </ReceiptLine>
-      ))}
-      {receipt.fills.length === 0 && <ReceiptLine label="Fill">none</ReceiptLine>}
-      <ReceiptLine label="Order account">
-        <ExternalLink href={addressUrl(row.address)} mono>
-          {shortAddress(row.address)}
-        </ExternalLink>
-      </ReceiptLine>
-      {receipt.signatures.map((entry) => (
-        <ReceiptLine key={entry.signature} label={`${entry.label}, transaction`}>
-          <ExternalLink href={txUrl(entry.signature)} mono>
-            {shortAddress(entry.signature)}
-          </ExternalLink>
-        </ReceiptLine>
-      ))}
-      {sale ? (
-        <>
-          <ReceiptLine label="Tokens held" total>
-            {tokens(sale.heldUnits)}
-          </ReceiptLine>
-          <ReceiptLine label="Proceeds">{formatDollars(sale.proceedsMicros)}</ReceiptLine>
-          <ReceiptLine label="Fee">{formatDollars(receipt.feeMicros)}</ReceiptLine>
-          <ReceiptLine label="Tokens returned">{sale.returnedUnits === null ? waiting : tokens(sale.returnedUnits)}</ReceiptLine>
-          <ReceiptLine label="Test dollars paid" total>
-            {sale.paidMicros === null ? "not yet" : formatDollars(sale.paidMicros)}
-          </ReceiptLine>
-        </>
-      ) : (
-        <>
-          <ReceiptLine label="Held" total>
-            {formatDollars(receipt.heldMicros)}
-          </ReceiptLine>
-          <ReceiptLine label="Cost">{formatDollars(receipt.costMicros)}</ReceiptLine>
-          <ReceiptLine label="Fee">{formatDollars(receipt.feeMicros)}</ReceiptLine>
-          <ReceiptLine label="Hold returned" total>
-            {receipt.returnedMicros === null ? waiting : formatDollars(receipt.returnedMicros)}
-          </ReceiptLine>
-        </>
-      )}
-    </Receipt>
+    <>
+      <h3 className="sr-only">Figures of the order</h3>
+      <Facts>
+        {receipt.fills.length === 0 ? (
+          <Fact label="Fill">None</Fact>
+        ) : (
+          receipt.fills.map((fill, index) => (
+            <Fact key={fill.tradeId} label={receipt.fills.length > 1 ? `Fill ${index + 1} of ${receipt.fills.length}` : "Fill"}>
+              {`${formatContracts(fill.units)} at ${formatCents(fill.px)}`}
+            </Fact>
+          ))
+        )}
+        <Fact label="Order account">
+          <ExternalLink href={addressUrl(row.address)}>{shortAddress(row.address)}</ExternalLink>
+        </Fact>
+        {sale ? (
+          <>
+            <Fact label="Tokens held">{tokens(sale.heldUnits)}</Fact>
+            <Fact label="Proceeds">{formatDollars(sale.proceedsMicros)}</Fact>
+            <Fact label="Fee">{formatDollars(receipt.feeMicros)}</Fact>
+            <Fact label="Tokens returned">{sale.returnedUnits === null ? waiting : tokens(sale.returnedUnits)}</Fact>
+            <Fact label="Test dollars paid" total>
+              {sale.paidMicros === null ? "Not yet" : formatDollars(sale.paidMicros)}
+            </Fact>
+          </>
+        ) : (
+          <>
+            <Fact label="Held">{formatDollars(receipt.heldMicros)}</Fact>
+            <Fact label="Cost">{formatDollars(receipt.costMicros)}</Fact>
+            <Fact label="Fee">{formatDollars(receipt.feeMicros)}</Fact>
+            <Fact label="Hold returned" total>
+              {receipt.returnedMicros === null ? waiting : formatDollars(receipt.returnedMicros)}
+            </Fact>
+          </>
+        )}
+      </Facts>
+    </>
   );
 }
 
-/** Orders newest first as ruled rows; each opens in place into its steps and its receipt. */
-export function ActivityView({ rows, offline = false, nowMs, chainNow, frozenAtMs, onExpired, reclaim, txUrl, addressUrl, defaultExpanded, timeZone }: ActivityViewProps) {
-  // What the user opened or closed. An order whose hold can be reclaimed starts open, so the
-  // Reclaim button is on screen without a click.
-  const [chosen, setChosen] = useState<ReadonlyMap<string, boolean>>(() => new Map((defaultExpanded ?? []).map((address) => [address, true])));
+/** Every order of the wallet, newest first; each opens in place into its steps and its figures. */
+export function ActivityView({ rows, offline, nowMs, chainNow, onExpired, reclaim, txUrl, addressUrl }: ActivityViewProps) {
+  // What the user opened or closed. An order that can be reclaimed starts open, so Reclaim is in view.
+  const [chosen, setChosen] = useState<ReadonlyMap<string, boolean>>(new Map());
   const isOpen = (row: ActivityRow) => chosen.get(row.address) ?? row.timeline.canReclaim;
   const toggle = (row: ActivityRow) => setChosen((previous) => new Map(previous).set(row.address, !isOpen(row)));
 
@@ -142,19 +116,18 @@ export function ActivityView({ rows, offline = false, nowMs, chainNow, frozenAtM
     return (
       <div aria-busy="true">
         <span className="sr-only">Loading your orders</span>
-        <RowList label="Your orders, loading" columns={COLUMNS} dense>
+        <RowList label="Your orders, loading" columns={COLUMNS}>
           {[0, 1, 2].map((index) => (
             <Row
               key={index}
               cells={[
-                <div key="order" className={styles.order}>
-                  <Skeleton width="11rem" height="1.25rem" />
-                  <Skeleton width="min(22rem, 100%)" height="1rem" />
-                </div>,
-                <Skeleton key="placed" width="4rem" height="1rem" />,
-                <Skeleton key="quantity" width="2.5rem" height="1rem" />,
-                <Skeleton key="limit" width="2.5rem" height="1rem" />,
-                <Skeleton key="status" width="4rem" height="1.25rem" />,
+                <Skeleton key="m" width="14rem" />,
+                <Skeleton key="o" width="3.5rem" />,
+                <Skeleton key="t" width="4rem" />,
+                <Skeleton key="c" width="2.5rem" />,
+                <Skeleton key="p" width="2rem" />,
+                <Skeleton key="a" width="3rem" />,
+                <Skeleton key="s" width="4rem" />,
                 null,
               ]}
             />
@@ -163,83 +136,76 @@ export function ActivityView({ rows, offline = false, nowMs, chainNow, frozenAtM
       </div>
     );
   }
-  if (rows.length === 0 && offline) {
-    return <EmptyState>You have no open orders on Solana. Orders that have finished are listed again when the relayer answers.</EmptyState>;
-  }
   if (rows.length === 0) {
-    return <EmptyState action={<ButtonLink href="/">See all markets</ButtonLink>}>No orders yet. Each order you place is listed here, with every step it took and its receipt.</EmptyState>;
+    return offline ? (
+      <Notice title="No open orders on Solana">Orders that have finished are listed again when the relayer answers.</Notice>
+    ) : (
+      <Notice title="No orders yet" action={<ButtonLink href="/" size="row">See markets</ButtonLink>}>
+        Each order you place is listed here, with every step it took and its transactions.
+      </Notice>
+    );
   }
 
-  const today = day(nowMs, timeZone);
+  const today = day(nowMs);
   return (
-    <>
+    <div className={styles.page}>
       {offline && (
-        <p className={styles.offline} role="status">
-          Listed while the relayer is away: orders still open on Solana, each of which can be reclaimed once it expires, and earlier orders as they were last known. An order that finished in the meantime is listed again when the relayer answers.
+        <p className={styles.note} role="status">
+          The relayer is not answering, so this lists the orders still open on Solana and earlier orders as they were last known.
         </p>
       )}
-      <RowList label="Your orders" columns={COLUMNS} dense>
+      <RowList label="Your orders" columns={COLUMNS}>
         {rows.map((row) => {
           const { timeline } = row;
           const open = isOpen(row);
           const detailId = `order-${row.address}`;
-          const terms = `${row.kind} ${timeline.side} ${formatContracts(timeline.units)}${row.title ? ` of ${row.title}` : ""}`;
-          const placedDay = row.entry.placedAt === null ? null : day(row.entry.placedAt, timeZone);
+          const order = `${timeline.kind === "sell" ? "Sell" : "Buy"} ${SIDE_WORD[timeline.side]}`;
+          const placed = row.entry.placedAt;
+          const amount = orderAmount(row.receipt);
+          const status = STATUS[timeline.stamp];
           return (
             <Row
               key={row.address}
               cells={[
-                <div key="order" className={styles.order} data-testid="activity-order" data-stamp={timeline.stamp}>
-                  <p className={styles.terms}>
-                    <span className={styles.kind}>{row.kind}</span>
-                    <span className={`${styles.side} ${timeline.side === "YES" ? styles.yes : styles.no}`}>{timeline.side}</span>
-                    {row.market && row.title ? (
-                      <Link href={marketHref(row.market)} className={styles.title}>
-                        {row.title}
-                      </Link>
-                    ) : (
-                      <span className={styles.unlisted}>Market no longer listed</span>
-                    )}
-                  </p>
-                  <p className={styles.words}>{row.words}</p>
-                </div>,
-                row.entry.placedAt === null ? (
-                  <span key="placed" className={styles.sub}>
-                    not known
-                  </span>
+                row.market && row.title ? (
+                  <Link key="market" href={marketHref(row.market)} className={styles.rowTitle} data-testid="activity-order" data-stamp={timeline.stamp}>
+                    {row.title}
+                  </Link>
                 ) : (
-                  <div key="placed" className={styles.stack}>
-                    <span className={styles.figure}>{formatClock(row.entry.placedAt, { timeZone })}</span>
-                    {placedDay !== today && <span className={styles.sub}>{placedDay}</span>}
-                  </div>
-                ),
-                <span key="quantity" className={styles.figure}>
-                  {formatContracts(timeline.units)}
-                </span>,
-                <span key="limit" className={styles.figure}>
-                  {formatPrice(timeline.limitPx)}
-                </span>,
-                <Stamp key="status" value={timeline.stamp} />,
-                <Button key="more" size="row" variant="quiet" aria-expanded={open} aria-controls={detailId} onClick={() => toggle(row)}>
-                  <span className={styles.caret} aria-hidden="true">
-                    {open ? "−" : "+"}
+                  <span key="market" data-testid="activity-order" data-stamp={timeline.stamp}>
+                    Market no longer listed
                   </span>
-                  Details
-                  <span className="sr-only">{` of the order to ${terms}`}</span>
+                ),
+                order,
+                placed === null ? (
+                  NO_VALUE
+                ) : (
+                  <span key="time" className={styles.time}>
+                    {formatClock(placed)}
+                    {day(placed) !== today && <span className={styles.day}>{day(placed)}</span>}
+                  </span>
+                ),
+                formatContracts(timeline.units),
+                formatCents(timeline.limitPx),
+                amount === null ? NO_VALUE : formatDollars(amount),
+                <Badge key="status" tone={status.tone}>
+                  {status.word}
+                </Badge>,
+                <Button key="details" size="row" variant="quiet" aria-expanded={open} aria-controls={detailId} onClick={() => toggle(row)} data-testid="activity-details">
+                  {open ? "Hide" : "Details"}
+                  <span className="sr-only">{` of ${order} ${row.title ?? ""}`}</span>
                 </Button>,
               ]}
               detail={
                 open ? (
-                  <div id={detailId} className={styles.detail}>
+                  <div id={detailId} className={styles.detail} data-testid="activity-steps">
                     <OrderTimelineView
                       variant="detail"
                       timeline={timeline}
                       marketTitle={row.title ?? undefined}
                       txUrl={txUrl}
                       chainNow={chainNow}
-                      frozenAtMs={frozenAtMs}
                       onExpired={onExpired}
-                      timeZone={timeZone}
                       reclaim={{
                         onReclaim: () => reclaim.onReclaim(row),
                         progress: reclaim.address === row.address ? reclaim.progress : null,
@@ -247,8 +213,8 @@ export function ActivityView({ rows, offline = false, nowMs, chainNow, frozenAtM
                         reconnect: reclaim.reconnect,
                       }}
                     />
-                    <div className={styles.receipt}>
-                      <OrderReceiptView row={row} txUrl={txUrl} addressUrl={addressUrl} />
+                    <div className={styles.facts}>
+                      <OrderFacts row={row} addressUrl={addressUrl} />
                     </div>
                   </div>
                 ) : undefined
@@ -257,7 +223,7 @@ export function ActivityView({ rows, offline = false, nowMs, chainNow, frozenAtM
           );
         })}
       </RowList>
-      <p className={styles.count}>{`${rows.length} ${rows.length === 1 ? "order" : "orders"}. Times are in your time zone, ${formatClock(nowMs, { zone: true, timeZone }).split(" ").at(-1)}.`}</p>
-    </>
+      <p className={styles.note}>{`Times are in your time zone, ${formatClock(nowMs, { zone: true }).split(" ").at(-1)}.`}</p>
+    </div>
   );
 }

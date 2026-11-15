@@ -1,27 +1,9 @@
-// What a row of the activity list says about an order, and the numbers of its receipt. Both are
-// read off the derived timeline, so the list, the timeline and the receipt cannot disagree. Pure.
+// The figures of an order, read off its derived timeline and the relayer's record, so the list,
+// the steps and the figures cannot disagree. Pure.
 
 import type { ApiOrder } from "@outcome/relayer/api-types";
 import { complementPx } from "@outcome/relayer/money";
 import type { DerivedTimeline } from "@/features/ticket/timeline";
-
-function sentence(text: string): string {
-  return /[.!?]$/.test(text) ? text : `${text}.`;
-}
-
-/** The outcome of an order in one or two short sentences. */
-export function outcomeWords(timeline: DerivedTimeline): string {
-  const [, sent, filled, result] = timeline.steps;
-  if (timeline.stamp === "OPEN") {
-    const current = timeline.steps.find((step) => step.status === "current" && step.text !== "");
-    return sentence(current?.text ?? "In progress");
-  }
-  if (timeline.stamp === "FILLED") return `${sentence(filled.text)} ${sentence(result.text)}`;
-  // Refunded or expired: the first step that did not happen is the reason.
-  const reason = sent.status === "skipped" ? sent : filled.status === "skipped" ? filled : null;
-  if (timeline.stamp === "EXPIRED" || reason === null) return sentence(result.text);
-  return `${sentence(reason.text)} ${sentence(result.text)}`;
-}
 
 export interface ReceiptFill {
   tradeId: string;
@@ -94,4 +76,13 @@ export function orderReceipt(timeline: DerivedTimeline, api: ApiOrder | null): O
       returnedUnits: timeline.open ? null : timeline.units - soldUnits,
     },
   };
+}
+
+/**
+ * The money of an order in one figure. A buy: what it paid (cost and fee) once a fill is recorded
+ * on Solana, otherwise what it held. A sale: the test dollars it paid, or null before or without a fill.
+ */
+export function orderAmount(receipt: OrderReceipt): bigint | null {
+  if (receipt.sale) return receipt.sale.paidMicros !== null && receipt.sale.paidMicros > 0n ? receipt.sale.paidMicros : null;
+  return receipt.costMicros > 0n ? receipt.costMicros + receipt.feeMicros : receipt.heldMicros;
 }

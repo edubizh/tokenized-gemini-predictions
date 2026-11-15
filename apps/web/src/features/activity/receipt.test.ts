@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ApiOrder } from "@outcome/relayer/api-types";
 import { deriveTimeline, type ChainOrderView, type LocalOrder, type TimelineInput } from "@/features/ticket/timeline";
-import { orderReceipt, outcomeWords } from "./receipt";
+import { orderAmount, orderReceipt } from "./receipt";
 
 const ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 const NOW = 1_800_000_000; // chain seconds
@@ -35,36 +35,10 @@ const api = (patch: Partial<ApiOrder>): ApiOrder => ({
 const venue = { venueOrderId: "73615284000001117" };
 const filled = { ...venue, filledUnits: "200", amountMicros: "880000", feeMicros: "40000", fills: [{ tradeId: "1", units: "200", px: "4400", feeMicros: "40000" }] };
 const input = (patch: Partial<TimelineInput>): TimelineInput => ({ chainOrder: chain, apiOrder: null, local, chainNowSecs: NOW, ...patch });
-const words = (patch: Partial<TimelineInput>) => outcomeWords(deriveTimeline(input(patch)));
 const receipt = (patch: Partial<TimelineInput>) => {
   const full = input(patch);
   return orderReceipt(deriveTimeline(full), full.apiOrder);
 };
-
-describe("outcomeWords", () => {
-  it("says where an open order is", () => {
-    expect(words({})).toBe("Waiting for the relayer.");
-    expect(words({ apiOrder: api({ state: "submitting", ...venue }) })).toBe("Waiting for the venue's answer.");
-    expect(words({ apiOrder: api({ state: "venue_filled", ...filled }) })).toBe("Minting your tokens.");
-  });
-
-  it("says what a fill gave", () => {
-    expect(words({ chainOrder: null, apiOrder: api({ state: "chain_filled", ...filled, chainSignature: "fillSig" }) })).toBe(
-      "Filled 2.00 at $0.44. 2.00 YES tokens minted. $0.05 of the hold returned.",
-    );
-  });
-
-  it("says why nothing was bought and that the hold came back", () => {
-    expect(words({ chainOrder: null, apiOrder: api({ state: "chain_cancelled", ...venue, chainSignature: "cancelSig" }) })).toBe("No fill at your limit. Hold returned in full.");
-    expect(words({ chainOrder: null, apiOrder: api({ state: "chain_cancelled", detail: "expiry_window", chainSignature: "cancelSig" }) })).toBe(
-      "Not sent: the order arrived too close to the close. Hold returned in full.",
-    );
-  });
-
-  it("points an expired order at Reclaim", () => {
-    expect(words({ chainNowSecs: EXPIRES + 1 })).toBe("Expired. Reclaim your hold.");
-  });
-});
 
 describe("orderReceipt", () => {
   it("accounts for a filled order: cost and fee taken, the rest of the hold returned", () => {
@@ -110,6 +84,17 @@ describe("orderReceipt", () => {
   });
 });
 
+describe("orderAmount of a buy", () => {
+  it("is the hold while the order is open and when nothing filled", () => {
+    expect(orderAmount(receipt({}))).toBe(970_000n);
+    expect(orderAmount(receipt({ chainOrder: null, apiOrder: api({ state: "chain_cancelled", ...venue, chainSignature: "cancelSig" }) }))).toBe(970_000n);
+  });
+
+  it("is the cost and the fee once a fill is recorded on Solana", () => {
+    expect(orderAmount(receipt({ chainOrder: null, apiOrder: api({ state: "chain_filled", ...filled, chainSignature: "fillSig" }) }))).toBe(920_000n);
+  });
+});
+
 describe("a sell", () => {
   // 3.00 YES at no less than $0.55, filled as a buy of NO at $0.44: $1.68 of proceeds, $0.06 of fee.
   const sellChain: ChainOrderView = { ...chain, kind: 1, qtyUnits: 300n, limitPx: 5_500n, maxFee: 90_000n };
@@ -121,12 +106,6 @@ describe("a sell", () => {
     const full = sellInput(patch);
     return orderReceipt(deriveTimeline(full), full.apiOrder);
   };
-
-  it("says what a sale gave", () => {
-    expect(outcomeWords(deriveTimeline(sellInput({ chainOrder: null, apiOrder: sellApi({ state: "chain_filled", ...sold, chainSignature: "fillSig" }) })))).toBe(
-      "Filled 3.00 at $0.56. 3.00 YES tokens burned. $1.62 paid.",
-    );
-  });
 
   it("accounts for a filled sale in tokens held and test dollars paid", () => {
     const filledReceipt = sellReceipt({ chainOrder: null, apiOrder: sellApi({ state: "chain_filled", ...sold, chainSignature: "fillSig" }) });
@@ -143,6 +122,12 @@ describe("a sell", () => {
   it("returns every token when nothing filled, and nothing yet while the order is open", () => {
     expect(sellReceipt({ chainOrder: null, apiOrder: sellApi({ state: "chain_cancelled", ...venue, chainSignature: "cancelSig" }) }).sale).toEqual({ heldUnits: 300n, proceedsMicros: 0n, paidMicros: 0n, returnedUnits: 300n });
     expect(sellReceipt({}).sale).toEqual({ heldUnits: 300n, proceedsMicros: 0n, paidMicros: null, returnedUnits: null });
+  });
+
+  it("amounts to the test dollars paid once filled, and to nothing before or without a fill", () => {
+    expect(orderAmount(sellReceipt({ chainOrder: null, apiOrder: sellApi({ state: "chain_filled", ...sold, chainSignature: "fillSig" }) }))).toBe(1_620_000n);
+    expect(orderAmount(sellReceipt({}))).toBeNull();
+    expect(orderAmount(sellReceipt({ chainOrder: null, apiOrder: sellApi({ state: "chain_cancelled", ...venue, chainSignature: "cancelSig" }) }))).toBeNull();
   });
 
   it("has no sale part for a buy", () => {
