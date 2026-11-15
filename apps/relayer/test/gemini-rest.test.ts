@@ -190,6 +190,15 @@ describe("publicGet", () => {
     expect(calls[1]!.at - calls[0]!.at).toBe(1_000);
   });
 
+  it("counts the public calls queued or running", async () => {
+    const { client } = harness();
+    expect(client.publicPending()).toBe(0);
+    const calls = [client.publicGet("/v1/a"), client.publicGet("/v1/b"), client.publicGet("/v1/c")];
+    expect(client.publicPending()).toBe(3);
+    await Promise.all(calls);
+    expect(client.publicPending()).toBe(0);
+  });
+
   it("does not make signed calls wait for public ones", async () => {
     const { client, sleeps } = harness();
     await client.publicGet("/v1/book/DEMO");

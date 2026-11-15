@@ -89,6 +89,8 @@ export interface Registry {
   onchain(limit: number): RegistryMarket[];
   /** Markets with an on-chain address whose settle state is open or awaiting_result. */
   onchainUnsettled(): RegistryMarket[];
+  /** Markets with an on-chain address whose settle state is needs_review, however old. */
+  onchainUnderReview(): RegistryMarket[];
   close(): void;
 }
 
@@ -314,6 +316,9 @@ export function openRegistry(path: string): Registry {
     `${SELECT_MARKETS} WHERE m.market_address IS NOT NULL AND m.settle_state IN ('open', 'awaiting_result')
      ORDER BY m.expires_at, m.symbol`,
   );
+  const selectUnderReview = db.prepare(
+    `${SELECT_MARKETS} WHERE m.market_address IS NOT NULL AND m.settle_state = 'needs_review' ORDER BY m.expires_at, m.symbol`,
+  );
 
   function get(symbol: string): RegistryMarket | undefined {
     const row = selectOne.get(symbol) as Row | undefined;
@@ -451,6 +456,10 @@ export function openRegistry(path: string): Registry {
 
     onchainUnsettled() {
       return (selectUnsettled.all() as Row[]).map(toMarket);
+    },
+
+    onchainUnderReview() {
+      return (selectUnderReview.all() as Row[]).map(toMarket);
     },
 
     close() {

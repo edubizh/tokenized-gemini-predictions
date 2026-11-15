@@ -38,6 +38,8 @@ const EVENT_CACHE_MS = 2_000;
 const TICKER_KEEP_MS = 7 * 24 * 3_600_000;
 /** Rows asked for per page of positions. */
 const PAGE_ROWS = 100;
+/** Public calls queued or running beyond which display reads are not sent. */
+const DISPLAY_QUEUE_LIMIT = 3;
 /** The most trades the venue returns in one read. */
 const MAX_TRADES = 500;
 /** The venue's candle frame for each step in seconds. */
@@ -319,18 +321,19 @@ export class GeminiSandboxVenue implements Venue {
   }
 
   /**
-   * The payout of the account's settled position in the contract. No row means the account was
-   * flat at resolution. A payout that cannot be read is an error, never "nothing paid".
+   * The payout of the account's settled position in the contract, summed over its rows. No row
+   * means the account was flat at resolution, or the row is not published yet. A payout that
+   * cannot be read is an error, never "nothing paid".
    */
   async settledPayoutMicros(symbol: string): Promise<bigint | null> {
     const wanted = symbol.toUpperCase();
     const eventTicker = this.#eventTickerOf(wanted);
     if (eventTicker === null) throw new Error(`no event ticker for ${symbol}`);
     const rows = await this.#positionRows(SETTLED_POSITIONS, { eventTicker });
-    const row = rows.find((candidate) => upper(candidate.instrumentSymbol) === wanted);
-    if (row === undefined) return null;
+    const matching = rows.filter((candidate) => upper(candidate.instrumentSymbol) === wanted);
+    if (matching.length === 0) return null;
     try {
-      return parseMicros(text(row.payout) ?? "");
+      return matching.reduce((sum, row) => sum + parseMicros(text(row.payout) ?? ""), 0n);
     } catch {
       throw new Error(`settled position for ${symbol}: unreadable payout`);
     }
@@ -339,6 +342,9 @@ export class GeminiSandboxVenue implements Venue {
   async topOfBook(symbol: string): Promise<TopOfBook> {
     const { bids, asks } = await this.#book(symbol, 1);
     const [bid, ask] = [bids[0], asks[0]];
+    // A new contract's book route can answer an empty book for minutes while the stream shows quotes.
+    const live = bid === undefined && ask === undefined ? this.#feed.top(symbol) : undefined;
+    if (live !== undefined) return live.top;
     return { bidPx: bid?.px ?? null, bidUnits: bid?.units ?? 0n, askPx: ask?.px ?? null, askUnits: ask?.units ?? 0n };
   }
 
@@ -350,11 +356,13 @@ export class GeminiSandboxVenue implements Venue {
   async depth(symbol: string, levels: number): Promise<Depth> {
     // The venue reads a limit of zero as "every level".
     atLeastOne("levels", levels);
+    if (this.#publicBusy()) return { bids: [], asks: [] };
     return nothingWhenUnknown(this.#book(symbol, levels), { bids: [], asks: [] });
   }
 
   async trades(symbol: string, limit: number): Promise<VenueTrade[]> {
     atLeastOne("limit", limit);
+    if (this.#publicBusy()) return [];
     const tape = this.#get(`/v1/trades/${encodeURIComponent(symbol)}?limit_trades=${Math.min(limit, MAX_TRADES)}`).then(toTrades);
     return (await nothingWhenUnknown(tape, [])).slice(0, limit);
   }
@@ -363,6 +371,7 @@ export class GeminiSandboxVenue implements Venue {
   async history(symbol: string, stepSecs: number): Promise<PricePoint[]> {
     const frame = CANDLE_FRAMES.get(stepSecs);
     if (frame === undefined) throw new RangeError(`the venue has no candles of ${stepSecs} seconds`);
+    if (this.#publicBusy()) return [];
     return nothingWhenUnknown(this.#get(`/v2/candles/${encodeURIComponent(symbol)}/${frame}`).then(toHistory), []);
   }
 
@@ -558,6 +567,14 @@ export class GeminiSandboxVenue implements Venue {
     const delayMs = BACKOFF_MS[Math.min(this.#attempts, BACKOFF_MS.length - 1)] ?? 10_000;
     this.#nextAttemptAtMs = this.#now() + delayMs;
     this.#attempts++;
+  }
+
+  /**
+   * Display reads share the public queue with order and settlement reads, which must not wait
+   * behind them: while the queue is backed up, display reads answer empty without a call.
+   */
+  #publicBusy(): boolean {
+    return this.#rest.publicPending() > DISPLAY_QUEUE_LIMIT;
   }
 
   #get(path: string): Promise<unknown> {

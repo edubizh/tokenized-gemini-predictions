@@ -62,8 +62,8 @@ async function serve(overrides: Partial<ApiHandlers> = {}, clock = { ms: 1_000_0
   const server = createApiServer({ port: 0, handlers, log: (line) => logs.push(line), now: () => clock.ms });
   servers.push(server);
   const port = await server.listen();
-  const call = async (method: string, path: string) => {
-    const response = await fetch(`http://127.0.0.1:${port}${path}`, { method });
+  const call = async (method: string, path: string, headers: Record<string, string> = {}) => {
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers });
     return { status: response.status, headers: response.headers, body: (await response.json()) as unknown };
   };
   return { call, get: (path: string) => call("GET", path), post: (path: string) => call("POST", path), logs, clock, handlers };
@@ -78,6 +78,17 @@ describe("routes", () => {
     expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(servers[0]!.address()).toMatchObject({ address: "127.0.0.1" });
+  });
+
+  it("refuses any request a browser page sends: one with an Origin header", async () => {
+    const ensureMarket = vi.fn(async (symbol: string) => market(symbol, true));
+    const { call } = await serve({ ensureMarket });
+    for (const origin of ["https://evil.example", "http://localhost:3000", "null"]) {
+      expect(await call("GET", "/events", { Origin: origin })).toMatchObject({ status: 403, body: { error: "forbidden" } });
+      expect(await call("POST", `/markets/${SYMBOL}/ensure`, { Origin: origin })).toMatchObject({ status: 403, body: { error: "forbidden" } });
+    }
+    expect(ensureMarket).not.toHaveBeenCalled();
+    expect(await call("POST", `/markets/${SYMBOL}/ensure`)).toMatchObject({ status: 200 });
   });
 
   it("GET /events lists the events with their markets", async () => {
@@ -223,20 +234,6 @@ describe("POST /markets/:symbol/ensure", () => {
     expect(await post("/markets/TEST-DOGE/ensure")).toMatchObject({ status: 409, body: { error: "market TEST-DOGE is not active at the venue" } });
     expect(await post("/markets/TEST-LATE/ensure")).toMatchObject({ status: 409, body: { error: "market TEST-LATE has expired" } });
     expect(await post("/markets/TEST-BOOM/ensure")).toMatchObject({ status: 500, body: { error: "internal error" } });
-  });
-
-  it("shares one call between concurrent requests for a symbol", async () => {
-    let release: (value: ApiMarket) => void = () => {};
-    const ensureMarket = vi.fn(() => new Promise<ApiMarket>((resolve) => (release = resolve)));
-    const { post } = await serve({ ensureMarket });
-    const first = post(`/markets/${SYMBOL}/ensure`);
-    await vi.waitFor(() => expect(ensureMarket).toHaveBeenCalledTimes(1));
-    const second = post(`/markets/${SYMBOL}/ensure`);
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    release(market(SYMBOL, true));
-    expect((await first).status).toBe(200);
-    expect(await second).toMatchObject({ status: 200, body: market(SYMBOL, true) });
-    expect(ensureMarket).toHaveBeenCalledTimes(1);
   });
 
   it("allows six calls a minute over all symbols", async () => {

@@ -593,6 +593,12 @@ describe("settledPayoutMicros", () => {
     await expect(drive(venue.settledPayoutMicros(SYMBOL), 3_000)).resolves.toBe(500_000n);
   });
 
+  it("sums the payouts of every settled row of the symbol", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => ({ positions: [settledRow({ payout: "5" }), settledRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-DOWN", payout: "3" }), settledRow({ payout: "7.5" })] }));
+    await expect(drive(venue.settledPayoutMicros(SYMBOL), 3_000)).resolves.toBe(12_500_000n);
+  });
+
   it("returns null when the venue has no settled position for the symbol", async () => {
     const { venue, http } = await connected();
     http.respond(() => ({ positions: [settledRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-DOWN" })] }));
@@ -1028,6 +1034,15 @@ describe("topOfBook", () => {
     await expect(drive(venue.topOfBook(LOW), 1_000)).resolves.toEqual({ bidPx: null, bidUnits: 0n, askPx: 9_700n, askUnits: 2_100n });
   });
 
+  // For its first minutes the book route can also answer an active contract with an empty book.
+  it("takes the streamed top over an empty book read, and believes an empty book only when nothing is streamed", async () => {
+    const { venue, http, feed } = await listed();
+    http.respond(() => ({ bids: [], asks: [] }));
+    feed.serverFrame(ticker(LOW, ["0.0300", "33.00"], ["0.0900", "10.00"]));
+    await expect(drive(venue.topOfBook(LOW), 1_000)).resolves.toEqual({ bidPx: 300n, bidUnits: 3_300n, askPx: 900n, askUnits: 1_000n });
+    await expect(drive(venue.topOfBook(HIGH), 1_000)).resolves.toEqual({ bidPx: null, bidUnits: 0n, askPx: null, askUnits: 0n });
+  });
+
   it("fails, for the caller to try again, when the socket cannot answer either: it never reports an empty book", async () => {
     const { venue, http, feed } = await listed();
     http.respond(() => unknownSymbol(LOW));
@@ -1107,6 +1122,18 @@ describe("depth, trades and history", () => {
     http.respond(() => unknownSymbol(SYMBOL));
     await expect(drive(venue.depth(SYMBOL, 10), 1_000)).resolves.toEqual({ bids: [], asks: [] });
     expect(http.calls).toHaveLength(2);
+  });
+
+  it("answers display reads empty without a venue call while order reads wait in the public queue", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => ({ bids: [{ price: "0.03", amount: "1" }], asks: [{ price: "0.17", amount: "1" }] }));
+    // Six order reads: the first goes out at once, five wait a second apart.
+    const orderReads = [1, 2, 3, 4, 5, 6].map(() => venue.topOfBook(SYMBOL));
+    await expect(venue.depth(SYMBOL, 10)).resolves.toEqual({ bids: [], asks: [] });
+    await expect(venue.trades(SYMBOL, 50)).resolves.toEqual([]);
+    await expect(venue.history(SYMBOL, 60)).resolves.toEqual([]);
+    await drive(Promise.all(orderReads), 6_000);
+    expect(http.calls.map((call) => call.path)).toEqual(Array(6).fill(`/v1/book/${SYMBOL}`));
   });
 
   it("never asks the venue for a whole book: zero levels would mean all of them", async () => {
@@ -1200,7 +1227,7 @@ describe("depth, trades and history", () => {
       if (call.path.startsWith("/v1/book")) return { bids: [], asks: [] };
       return [];
     });
-    await drive(Promise.all([venue.listEvents(), venue.contract(SYMBOL), venue.topOfBook(SYMBOL), venue.depth(SYMBOL, 10), venue.trades(SYMBOL, 50), venue.history(SYMBOL, 60)]), 10_000);
+    await drive(Promise.all([venue.depth(SYMBOL, 10), venue.trades(SYMBOL, 50), venue.history(SYMBOL, 60), venue.listEvents(), venue.contract(SYMBOL), venue.topOfBook(SYMBOL)]), 10_000);
     expect(http.calls.map((call) => call.at - http.calls[0]!.at)).toEqual([0, 1_000, 2_000, 3_000, 4_000, 5_000]);
     expect(http.calls.every((call) => call.payload === null)).toBe(true);
   });

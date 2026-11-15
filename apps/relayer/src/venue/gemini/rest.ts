@@ -25,6 +25,8 @@ export interface RestClientOptions {
 
 export interface RestClient {
   publicGet(path: string): Promise<unknown>;
+  /** Public calls queued or running. */
+  publicPending(): number;
   signed(
     method: "GET" | "POST",
     path: string,
@@ -88,6 +90,9 @@ export function createRestClient(options: RestClientOptions): RestClient {
     publicGet(path) {
       return publicQueue(() => call("GET", path, host + path));
     },
+    publicPending() {
+      return publicQueue.pending;
+    },
     signed(method, path, params = {}, query) {
       return signedQueue(() => {
         const nonce = Math.floor(now() / 1000);
@@ -117,16 +122,23 @@ export function createRestClient(options: RestClientOptions): RestClient {
 function createQueue(spacingMs: number, now: () => number, sleep: (ms: number) => Promise<void>) {
   let tail: Promise<unknown> = Promise.resolve();
   let lastStartMs = Number.NEGATIVE_INFINITY;
-  return function run<T>(task: () => Promise<T>): Promise<T> {
-    const turn = tail.then(async () => {
-      const waitMs = lastStartMs + spacingMs - now();
-      if (waitMs > 0) await sleep(waitMs);
-      lastStartMs = now();
-      return task();
-    });
+  const run = <T>(task: () => Promise<T>): Promise<T> => {
+    run.pending++;
+    const turn = tail
+      .then(async () => {
+        const waitMs = lastStartMs + spacingMs - now();
+        if (waitMs > 0) await sleep(waitMs);
+        lastStartMs = now();
+        return task();
+      })
+      .finally(() => {
+        run.pending--;
+      });
     tail = turn.catch(() => {});
     return turn;
   };
+  run.pending = 0;
+  return run;
 }
 
 const LONG_INTEGER = /^-?\d{16,}$/;

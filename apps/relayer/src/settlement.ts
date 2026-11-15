@@ -72,10 +72,10 @@ export function createSettlementWatcher(input: SettlementInput): { tick(): Promi
   const raise = (kind: string, symbol: string, detail: string): void => alert({ kind, orderAddress: null, detail: `${symbol}: ${detail}` });
 
   /** Leaves the market to a person: it drops out of the unsettled list, so this happens once. */
-  function review(symbol: string, detail: string): void {
+  function review(symbol: string, detail: string, kind = "needs_review"): void {
     sightings.delete(symbol);
     registry.setSettle(symbol, "needs_review", { detail });
-    raise("needs_review", symbol, detail);
+    raise(kind, symbol, detail);
   }
 
   const hasUnresolvedOrders = (symbol: string): boolean => journal.unresolved().some((row) => row.symbol === symbol);
@@ -120,9 +120,9 @@ export function createSettlementWatcher(input: SettlementInput): { tick(): Promi
     const side = settledAtVenue ? info.resolutionSide : null;
     if (side === null) {
       // A resolution that is gone again was a stale read: the wait starts afresh with the next one.
-      sightings.delete(symbol);
+      const wasSighted = sightings.delete(symbol);
       if (settledAtVenue) review(symbol, "settled at the venue without a yes or no resolution");
-      else if (now() - market.expiresAt >= reviewAfterMs) review(symbol, `no resolution ${Math.floor(reviewAfterMs / 1_000)} s after expiry`);
+      else if (!wasSighted && now() - market.expiresAt >= reviewAfterMs) review(symbol, `no resolution ${Math.floor(reviewAfterMs / 1_000)} s after expiry`);
       return null;
     }
     // Resolved before its expiry: from here on the market is looked at on every tick.
@@ -156,16 +156,21 @@ export function createSettlementWatcher(input: SettlementInput): { tick(): Promi
     const net = final.yesSupply - final.noSupply + journal.houseInventoryUnits(symbol);
     const winningUnits = side === "yes" ? net : -net;
     const expected = winningUnits > 0n ? winningUnits * PAYOUT_PER_UNIT : 0n;
-    // No settled row counts as nothing paid, which is right when nothing is expected.
-    const paid = (await venue.settledPayoutMicros(symbol)) ?? 0n;
+    const reported = await venue.settledPayoutMicros(symbol);
+    const inGrace = now() - seen.at < payoutGraceMs;
+    // An account that held a position gets a settled row, whatever side won: until it is
+    // published, nothing is known about the payout.
+    if (reported === null && net !== 0n) {
+      if (!inGrace) review(symbol, `no settled position for a net position of ${net} units`, "payout_mismatch");
+      return;
+    }
+    // A flat account has no settled row: nothing paid.
+    const paid = reported ?? 0n;
     // A shortfall can be a row that is not published yet: look again on later ticks. Too much is
     // never a matter of waiting.
-    if (paid < expected && now() - seen.at < payoutGraceMs) return;
+    if (paid < expected && inGrace) return;
     if (paid !== expected) {
-      const detail = `venue paid ${paid} micro-dollars, expected ${expected}`;
-      sightings.delete(symbol);
-      registry.setSettle(symbol, "needs_review", { detail });
-      raise("payout_mismatch", symbol, detail);
+      review(symbol, `venue paid ${paid} micro-dollars, expected ${expected}`, "payout_mismatch");
       return;
     }
 

@@ -258,6 +258,39 @@ describe("settlement watcher", () => {
     expect(w.alerts).toEqual([]);
   });
 
+  it("does not read a missing settled row as nothing paid while a position is held, even on the losing side", async () => {
+    const w = world();
+    w.market(SYMBOL, 300n, 0n);
+    await w.hold(SYMBOL, 300n);
+    w.venue.resolve(SYMBOL, "no"); // the confirmed side expects no payout
+    const payout = vi.spyOn(w.venue, "settledPayoutMicros").mockResolvedValue(null); // row not published yet
+    await w.confirm();
+    w.clock.ms = START + PAYOUT_GRACE - 1;
+    await w.watcher.tick();
+    expect(w.chain.settlements).toEqual([]);
+    expect(w.alerts).toEqual([]);
+
+    payout.mockRestore(); // the row shows up: payout 0
+    await w.watcher.tick();
+    expect(w.chain.settlements).toMatchObject([{ symbol: SYMBOL, yesPayout: 0n, noPayout: 10_000n }]);
+    expect(w.alerts).toEqual([]);
+  });
+
+  it("asks for review when the settled row of a held position never shows up", async () => {
+    const w = world();
+    w.market(SYMBOL, 300n, 0n);
+    await w.hold(SYMBOL, 300n);
+    w.venue.resolve(SYMBOL, "no");
+    vi.spyOn(w.venue, "settledPayoutMicros").mockResolvedValue(null);
+    await w.confirm();
+    w.clock.ms = START + PAYOUT_GRACE;
+    await w.watcher.tick();
+    const detail = "no settled position for a net position of 300 units";
+    expect(w.registry.get(SYMBOL)).toMatchObject({ settleState: "needs_review", detail });
+    expect(w.alerts).toEqual([{ kind: "payout_mismatch", orderAddress: null, detail: `${SYMBOL}: ${detail}` }]);
+    expect(w.chain.settlements).toEqual([]);
+  });
+
   it("counts units the operator holds for orphaned orders in the expected payout", async () => {
     const w = world();
     w.market(SYMBOL, 300n, 0n);
@@ -340,7 +373,7 @@ describe("settlement watcher", () => {
     expect(w.chain.settlements).toEqual([]);
   });
 
-  it("treats a settled row that never shows up as nothing paid once the grace has passed", async () => {
+  it("asks for review when no settled row shows up within the grace for a position the chain implies", async () => {
     const w = world();
     w.market(SYMBOL, 300n, 0n);
     w.venue.resolve(SYMBOL, "yes"); // the venue account was flat
@@ -348,7 +381,7 @@ describe("settlement watcher", () => {
     expect(w.registry.get(SYMBOL)?.settleState).toBe("awaiting_result");
     w.clock.ms = START + PAYOUT_GRACE;
     await w.watcher.tick();
-    expect(w.registry.get(SYMBOL)).toMatchObject({ settleState: "needs_review", detail: "venue paid 0 micro-dollars, expected 3000000" });
+    expect(w.registry.get(SYMBOL)).toMatchObject({ settleState: "needs_review", detail: "no settled position for a net position of 300 units" });
     expect(w.chain.settlements).toEqual([]);
   });
 
@@ -470,6 +503,26 @@ describe("settlement watcher", () => {
     expect(w.registry.get(SYMBOL)?.settleState).toBe("needs_review");
     expect(w.alerts).toEqual([{ kind: "needs_review", orderAddress: null, detail: `${SYMBOL}: no resolution 600 s after expiry` }]);
     expect(w.chain.settlements).toEqual([]);
+  });
+
+  it("restarts the wait, without review, when a resolution seen long after expiry falls back", async () => {
+    const w = world();
+    w.market(SYMBOL, 300n, 0n);
+    await w.hold(SYMBOL, 300n);
+    w.clock.ms = EXPIRY + REVIEW_AFTER + 60_000;
+    w.venue.resolve(SYMBOL, "yes");
+    await w.watcher.tick();
+
+    w.clock.ms += 5_000; // a stale read: under review again
+    w.venue.addContract({ ...info(SYMBOL), status: "under_review", marketState: "closed" });
+    await w.watcher.tick();
+    expect(w.registry.get(SYMBOL)?.settleState).toBe("awaiting_result");
+
+    w.clock.ms += 5_000;
+    w.venue.addContract({ ...info(SYMBOL), status: "settled", marketState: "closed", resolutionSide: "yes" });
+    await w.confirm();
+    expect(w.chain.settlements).toMatchObject([{ symbol: SYMBOL, yesPayout: 10_000n, noPayout: 0n }]);
+    expect(w.alerts).toEqual([]);
   });
 
   it("asks for review when the venue settled the contract without a yes or no", async () => {

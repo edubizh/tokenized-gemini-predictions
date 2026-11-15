@@ -375,6 +375,15 @@ describe("queries", () => {
     registry.setSettle("TEST-B", "needs_review");
     expect(registry.onchainUnsettled()).toEqual([]);
   });
+
+  it("onchainUnderReview: every market with an address whose settle state is needs_review", () => {
+    const registry = seeded();
+    for (const symbol of ["TEST-A", "TEST-B", "TEST-C"]) onchain(registry, symbol);
+    registry.setSettle("TEST-A", "needs_review");
+    registry.setSettle("TEST-C", "needs_review");
+    registry.setSettle("TEST-D", "needs_review"); // no address: not on-chain
+    expect(symbols(registry.onchainUnderReview())).toEqual(["TEST-A", "TEST-C"]);
+  });
 });
 
 describe("prune", () => {

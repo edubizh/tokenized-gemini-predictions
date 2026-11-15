@@ -53,7 +53,8 @@ export interface ApiServer {
 const SYMBOL = /^[A-Z0-9-]{1,64}$/;
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const MAX_ORDERS = 100;
-/** Market creations (calls that reach the chain) allowed per window, over all symbols. */
+/** Market creation requests allowed per window, over all symbols. Concurrent requests for one
+ *  symbol share one chain call in `MarketManager.ensureOnchain`. */
 const ENSURE_CALLS = 6;
 const ENSURE_WINDOW_MS = 60_000;
 
@@ -74,8 +75,6 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
   const host = options.host ?? "127.0.0.1";
   const log = options.log ?? (() => {});
   const now = options.now ?? Date.now;
-  /** Market creations in flight, by symbol. */
-  const flights = new Map<string, Promise<ApiMarket>>();
   /** Start times of the creations of the last minute. */
   const recentEnsures: number[] = [];
 
@@ -84,23 +83,15 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     if (known === undefined) return fail(404, "unknown market");
     if (known.onchain !== null) return ok(known);
 
-    let flight = flights.get(symbol);
-    if (flight === undefined) {
-      const at = now();
-      while (recentEnsures.length > 0 && recentEnsures[0]! <= at - ENSURE_WINDOW_MS) recentEnsures.shift();
-      if (recentEnsures.length >= ENSURE_CALLS) {
-        const retryAfterSecs = Math.max(1, Math.ceil((recentEnsures[0]! + ENSURE_WINDOW_MS - at) / 1_000));
-        return fail(429, "too many market creations, try again shortly", { "Retry-After": String(retryAfterSecs) });
-      }
-      recentEnsures.push(at);
-      // The handler may throw before it returns a promise.
-      flight = Promise.resolve()
-        .then(() => handlers.ensureMarket(symbol))
-        .finally(() => flights.delete(symbol));
-      flights.set(symbol, flight);
+    const at = now();
+    while (recentEnsures.length > 0 && recentEnsures[0]! <= at - ENSURE_WINDOW_MS) recentEnsures.shift();
+    if (recentEnsures.length >= ENSURE_CALLS) {
+      const retryAfterSecs = Math.max(1, Math.ceil((recentEnsures[0]! + ENSURE_WINDOW_MS - at) / 1_000));
+      return fail(429, "too many market creations, try again shortly", { "Retry-After": String(retryAfterSecs) });
     }
+    recentEnsures.push(at);
     try {
-      return ok(await flight);
+      return ok(await handlers.ensureMarket(symbol));
     } catch (error) {
       if (error instanceof MarketError) return error.code === "unknown" ? fail(404, "unknown market") : fail(409, error.message);
       throw error;
@@ -193,7 +184,9 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
       } catch {
         segments = null;
       }
-      reply = segments === null ? fail(400, "invalid path") : await route(method, segments, url.searchParams);
+      // Only the web app's server calls this API, and it sends no Origin: a browser page always does.
+      if (request.headers.origin !== undefined) reply = fail(403, "forbidden");
+      else reply = segments === null ? fail(400, "invalid path") : await route(method, segments, url.searchParams);
     } catch (error) {
       log(`api ${method} ${pathname} failed: ${error instanceof Error ? error.message : String(error)}`);
       reply = fail(500, "internal error");

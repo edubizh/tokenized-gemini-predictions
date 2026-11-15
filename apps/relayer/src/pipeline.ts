@@ -170,6 +170,8 @@ async function failedGuard(row: JournalOrder, deps: PipelineDeps): Promise<strin
   if (row.maxFeeMicros < cap) return "fee_cap";
   // A sell pays its fee out of the proceeds, so the least it can return must exceed the allowance.
   if (row.kind === "sell" && !(minProceeds > row.maxFeeMicros)) return "min_proceeds";
+  // The venue reads above wait in a shared queue: the window must still hold when the order goes out.
+  if (!(row.expiresAt - (await chain.now()) >= config.minWindowSecs)) return "expiry_window";
   return null;
 }
 

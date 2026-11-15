@@ -247,6 +247,20 @@ describe("pre-trade guards", () => {
     expect(w.journal.get(order.address)).toMatchObject({ state: "chain_cancelled", detail, chainSignature: "sig-1" });
   });
 
+  it("cancels without touching the venue when slow venue reads use up the window (expiry_window)", async () => {
+    const w = world();
+    const topOfBook = w.venue.topOfBook.bind(w.venue);
+    w.venue.topOfBook = async (symbol) => {
+      w.chain.nowSecs += 100; // the read waited behind other requests
+      return topOfBook(symbol);
+    };
+    const order = buyOrder();
+    expect(await place(w, order)).toBe("chain_cancelled");
+    expect(w.venue.requests).toEqual([]);
+    expect(w.chain.cancels).toEqual([order.address]);
+    expect(w.journal.get(order.address)).toMatchObject({ state: "chain_cancelled", detail: "expiry_window" });
+  });
+
   it("accepts an order with exactly the minimum window and exactly the required allowances", async () => {
     const w = world();
     expect(await place(w, buyOrder({ expiresAt: T0 + 25 }))).toBe("chain_filled");

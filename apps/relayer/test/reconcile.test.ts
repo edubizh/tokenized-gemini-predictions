@@ -200,6 +200,21 @@ describe("reconcile", () => {
     expect(result.solvency.requiredMicros).toBe("1900000");
   });
 
+  it("covers a market under review however many newer markets exist on-chain", async () => {
+    const w = world();
+    w.market(ETH, { yes: 70n, no: 90n });
+    w.registry.setSettle(ETH, "needs_review");
+    const newer = Array.from({ length: 500 }, (_, i) => ({ ...info(`TEST-N${i}-UP`), eventTicker: `N${i}`, expiresAt: new Date(EXPIRY + (i + 1) * 60_000) }));
+    w.registry.storeEvents(newer.map((contract) => eventOf([contract])), EXPIRY - 600_000);
+    for (const { symbol } of newer) {
+      w.registry.setOnchain(symbol, { marketAddress: `market:${symbol}`, yesMint: `yes:${symbol}`, noMint: `no:${symbol}` });
+      w.registry.setSettle(symbol, "settled");
+    }
+    const result = await reconcile(w.deps);
+    expect(result.markets.map((market) => market.symbol)).toEqual([ETH]);
+    expect(result.solvency.requiredMicros).toBe("900000");
+  });
+
   it("solvency: the treasury must cover the larger side of every unsettled market", async () => {
     const w = world();
     w.market(BTC, { yes: 500n, no: 200n });

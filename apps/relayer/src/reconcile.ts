@@ -21,8 +21,6 @@ export type ReconcileResult = Pick<ApiStatus, "markets" | "solvency">;
 
 /** Consecutive unbalanced runs of one market that trigger the automatic pause. */
 export const UNBALANCED_RUNS_TO_PAUSE = 3;
-/** How many on-chain markets are searched for the ones under review. */
-const REVIEW_SCAN_LIMIT = 500;
 
 /** Signed units the venue account gained from the row's fill. The venue only ever buys: a buy
  *  holds the order's own side, a sell holds the opposite one. YES is positive. */
@@ -33,10 +31,7 @@ function signedFilledUnits(row: JournalOrder): bigint {
 
 export async function reconcile({ venue, chain, registry, journal }: ReconcileDeps): Promise<ReconcileResult> {
   // Not settled: still trading, awaiting a result, or held for review. Unused markets have no supply.
-  const candidates = [
-    ...registry.onchainUnsettled(),
-    ...registry.onchain(REVIEW_SCAN_LIMIT).filter((market) => market.settleState === "needs_review"),
-  ];
+  const candidates = [...registry.onchainUnsettled(), ...registry.onchainUnderReview()];
   // One read for the whole run. A contract the account is flat in has no row.
   const positions = await venue.positions();
   const markets: ApiReconcileMarket[] = [];
