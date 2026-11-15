@@ -29,18 +29,24 @@ export type CloseInfo =
   | { reason: "closed"; code: number }
   | { reason: "error"; detail: string };
 
-export interface PrivateSocketOptions {
+export interface SocketOptions {
   /** Must be exactly the sandbox url. */
   url: string;
-  apiKey: string;
-  apiSecret: string;
   WebSocketImpl?: WebSocketConstructor;
   /** Receives the text of every frame before it is parsed. */
-  onFrame(raw: string): void;
+  onFrame?(raw: string): void;
   /** Receives every frame after parsing, acks included. */
   onMessage?(frame: VenueFrame): void;
   /** Called once, and only for a socket that had opened. */
   onClose(info: CloseInfo): void;
+  livenessTimeoutMs?: number;
+  requestTimeoutMs?: number;
+  openTimeoutMs?: number;
+}
+
+export interface PrivateSocketOptions extends SocketOptions {
+  apiKey: string;
+  apiSecret: string;
   /** Epoch milliseconds. */
   now?: () => number;
   /**
@@ -48,12 +54,9 @@ export interface PrivateSocketOptions {
    * caller can queue it behind its signed REST calls.
    */
   beforeConnect?: () => Promise<void>;
-  livenessTimeoutMs?: number;
-  requestTimeoutMs?: number;
-  openTimeoutMs?: number;
 }
 
-export interface PrivateSocket {
+export interface VenueSocket {
   readonly isOpen: boolean;
   /** Sends `{ id, method, params }` and resolves with the ack carrying that id, whatever its status. */
   request(method: string, params?: unknown, timeoutMs?: number): Promise<AckFrame>;
@@ -82,35 +85,44 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
+/** Opens the authenticated socket: the account's streams and its orders. */
+export async function openPrivateSocket(options: PrivateSocketOptions): Promise<VenueSocket> {
+  assertSandbox(options.url);
+  await options.beforeConnect?.();
+  const nonce = String(Math.floor((options.now ?? Date.now)() / 1000));
+  const payload = Buffer.from(nonce).toString("base64");
+  return open(options, {
+    "X-GEMINI-APIKEY": options.apiKey,
+    "X-GEMINI-NONCE": nonce,
+    "X-GEMINI-PAYLOAD": payload,
+    "X-GEMINI-SIGNATURE": createHmac("sha384", options.apiSecret).update(payload).digest("hex"),
+  });
+}
+
+/** Opens the same socket without credentials: market data streams and requests only. */
+export async function openPublicSocket(options: SocketOptions): Promise<VenueSocket> {
+  assertSandbox(options.url);
+  return open(options, {});
+}
+
+function assertSandbox(url: string): void {
+  if (url !== SANDBOX_WS_URL) throw new Error(`refusing socket url ${JSON.stringify(url)}: this build is sandbox only`);
+}
+
 /**
- * Opens the authenticated socket and resolves once it is open. The socket never reconnects by
- * itself: after `onClose` it is dead and the caller decides what to do.
+ * Opens a socket with the given upgrade headers and resolves once it is open. The socket never
+ * reconnects by itself: after `onClose` it is dead and the caller decides what to do.
  *
  * Liveness: the server sends a protocol ping about every 20 s. A connection can also die without
  * a close event, so when neither a frame nor a ping arrives for `livenessTimeoutMs` the socket is
  * terminated and reported closed.
  */
-export async function openPrivateSocket(options: PrivateSocketOptions): Promise<PrivateSocket> {
-  if (options.url !== SANDBOX_WS_URL) {
-    throw new Error(`refusing socket url ${JSON.stringify(options.url)}: this build is sandbox only`);
-  }
-  const now = options.now ?? Date.now;
+async function open(options: SocketOptions, headers: Record<string, string>): Promise<VenueSocket> {
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const openTimeoutMs = options.openTimeoutMs ?? DEFAULT_OPEN_TIMEOUT_MS;
   const livenessTimeoutMs = options.livenessTimeoutMs ?? DEFAULT_LIVENESS_TIMEOUT_MS;
   const Impl: WebSocketConstructor = options.WebSocketImpl ?? (WebSocket as unknown as WebSocketConstructor);
-
-  await options.beforeConnect?.();
-  const nonce = String(Math.floor(now() / 1000));
-  const payload = Buffer.from(nonce).toString("base64");
-  const ws = new Impl(options.url, {
-    headers: {
-      "X-GEMINI-APIKEY": options.apiKey,
-      "X-GEMINI-NONCE": nonce,
-      "X-GEMINI-PAYLOAD": payload,
-      "X-GEMINI-SIGNATURE": createHmac("sha384", options.apiSecret).update(payload).digest("hex"),
-    },
-  });
+  const ws = new Impl(options.url, { headers });
 
   const pending = new Map<string, Pending>();
   let nextId = 1;
@@ -143,7 +155,7 @@ export async function openPrivateSocket(options: PrivateSocketOptions): Promise<
   ws.on("message", (data) => {
     if (finished) return;
     const raw = toText(data);
-    options.onFrame(raw);
+    options.onFrame?.(raw);
     alive();
     const frame = parseFrame(raw);
     options.onMessage?.(frame);

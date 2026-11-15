@@ -1,13 +1,16 @@
-import { formatPx, formatUnits, parseDecimal, parseMicros, parsePx, parseUnits } from "../../money.ts";
+import { formatPx, formatUnits, parseMicros, parseUnits } from "../../money.ts";
 import { FillAggregator } from "../fills.ts";
 import type { AggregateState } from "../fills.ts";
 import type { VenueFrame } from "../frames.ts";
 import type { VenueOrderRequest, VenueOrderResult } from "../types.ts";
-import type { ContractInfo, OrderLookup, TopOfBook, Venue } from "../venue.ts";
+import type { ContractInfo, Depth, EventInfo, OrderLookup, PricePoint, TopOfBook, Venue, VenueTrade } from "../venue.ts";
+import { MarketFeed } from "./feed.ts";
+import { isRecord, listOf, lower, rowsOf, text, toContract, toDepth, toEvent, toHistory, toTrades, upper, wholePx } from "./payloads.ts";
+import type { Row } from "./payloads.ts";
 import { RestError, SANDBOX_REST_HOST, createRestClient } from "./rest.ts";
 import type { FetchLike, RestClient } from "./rest.ts";
 import { SANDBOX_WS_URL, openPrivateSocket } from "./socket.ts";
-import type { CloseInfo, PrivateSocket, WebSocketConstructor } from "./socket.ts";
+import type { CloseInfo, VenueSocket, WebSocketConstructor } from "./socket.ts";
 
 const STREAMS = ["orders@account", "positions@account", "balances@account"] as const;
 /** Wait before each reconnection attempt; the last value repeats. */
@@ -23,6 +26,31 @@ const POSITIONS = "/v1/prediction-markets/positions";
 const SETTLED_POSITIONS = "/v1/prediction-markets/positions/settled";
 const BALANCES = "/v1/balances";
 
+/** Every event that trades or is about to. The venue returns at most 500 events a page. */
+const LIST_QUERY = "status=active&status=approved&limit=500";
+/** `listEvents` answers from its last read while that read is younger than this: a guard against bursts of calls. */
+const LIST_CACHE_MS = 10_000;
+/** A list page older than the one held is not taken while the held one is younger than this. */
+const LIST_HOLD_MS = 300_000;
+/** A single-event read is shared for this long, so the contracts of one ladder cost one read. */
+const EVENT_CACHE_MS = 2_000;
+/** The event ticker of a symbol is kept this long after its contract expired: settlement asks for it then. */
+const TICKER_KEEP_MS = 7 * 24 * 3_600_000;
+/** Rows asked for per page of positions. */
+const PAGE_ROWS = 100;
+/** The most trades the venue returns in one read. */
+const MAX_TRADES = 500;
+/** The venue's candle frame for each step in seconds. */
+const CANDLE_FRAMES = new Map([
+  [60, "1m"],
+  [300, "5m"],
+  [900, "15m"],
+  [1_800, "30m"],
+  [3_600, "1hr"],
+  [21_600, "6hr"],
+  [86_400, "1day"],
+]);
+
 export interface GeminiSandboxVenueOptions {
   apiKey: string;
   apiSecret: string;
@@ -34,10 +62,12 @@ export interface GeminiSandboxVenueOptions {
   /** Epoch milliseconds. */
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
-  /** Receives the text of every socket frame, for recording. */
+  /** Receives the text of every frame of the authenticated socket, for recording. */
   onFrame?: (raw: string) => void;
-  /** Called when an established connection is lost. */
+  /** Called when an established authenticated connection is lost. */
   onDisconnect?: (info: CloseInfo) => void;
+  /** Receives a line when a listed row is skipped or the market data socket fails. Default: the console. */
+  log?: (line: string) => void;
   /** How long to wait for the final order event after the ack. */
   fillTimeoutMs?: number;
 }
@@ -54,13 +84,15 @@ interface Flight {
   finish(end: FlightEnd): void;
 }
 
-type Row = Record<string, unknown>;
-
 /**
- * The Gemini Predictions sandbox as a `Venue`: orders over the private socket, everything else
- * over REST. The venue does not deduplicate client order ids, so an order is sent at most once
- * and never retried; when its outcome cannot be established the result is `unknown` and the
- * caller reconciles through `findOrder`.
+ * The Gemini Predictions sandbox as a `Venue`: orders over the authenticated socket, the live top
+ * of book of every active contract over the public socket, everything else over REST. The venue
+ * does not deduplicate client order ids, so an order is sent at most once and never retried;
+ * when its outcome cannot be established the result is `unknown` and the caller reconciles
+ * through `findOrder`.
+ *
+ * Public reads share one queue of one request a second. The list is read when it is asked for,
+ * at most every `LIST_CACHE_MS`; every other public read is made when it is asked for.
  */
 export class GeminiSandboxVenue implements Venue {
   readonly #options: GeminiSandboxVenueOptions;
@@ -68,16 +100,26 @@ export class GeminiSandboxVenue implements Venue {
   readonly #wsUrl: string;
   readonly #now: () => number;
   readonly #sleep: (ms: number) => Promise<void>;
+  readonly #log: (line: string) => void;
   readonly #fillTimeoutMs: number;
+  readonly #feed: MarketFeed;
   readonly #flights = new Map<string, Flight>();
-  readonly #eventTickers = new Map<string, string>();
+  /** The event of every symbol a list has shown, with the expiry of its contract in epoch milliseconds. */
+  readonly #eventTickers = new Map<string, { ticker: string; expiresAtMs: number }>();
+  /** Single-event reads by ticker. `atMs` is when the read arrived; it is infinite until then. */
+  readonly #eventReads = new Map<string, { atMs: number; body: Promise<unknown> }>();
 
-  #socket: PrivateSocket | null = null;
+  #socket: VenueSocket | null = null;
   /** Bumped whenever the current socket stops being the current one. */
   #generation = 0;
   #connecting: Promise<void> | null = null;
   #attempts = 0;
   #nextAttemptAtMs = 0;
+  /** The last list page taken: when it was read, and the newest listing time among its events. */
+  #listing: { events: EventInfo[]; atMs: number; newestMs: number } | null = null;
+  #listRead: Promise<EventInfo[]> | null = null;
+  /** Why rows of the last list read were left out. */
+  #skipped = new Set<string>();
 
   constructor(options: GeminiSandboxVenueOptions) {
     this.#wsUrl = options.wsUrl ?? SANDBOX_WS_URL;
@@ -87,6 +129,7 @@ export class GeminiSandboxVenue implements Venue {
     this.#options = options;
     this.#now = options.now ?? Date.now;
     this.#sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    this.#log = options.log ?? ((line) => console.warn(line));
     this.#fillTimeoutMs = options.fillTimeoutMs ?? DEFAULT_FILL_TIMEOUT_MS;
     this.#rest = createRestClient({
       host: options.restHost ?? SANDBOX_REST_HOST,
@@ -96,14 +139,20 @@ export class GeminiSandboxVenue implements Venue {
       sleep: this.#sleep,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
+    this.#feed = new MarketFeed({
+      url: this.#wsUrl,
+      now: this.#now,
+      log: this.#log,
+      ...(options.WebSocketImpl === undefined ? {} : { WebSocketImpl: options.WebSocketImpl }),
+    });
   }
 
-  /** True while the socket is open and all three subscriptions are acked. */
+  /** True while the authenticated socket is open and all three subscriptions are acked. */
   get connected(): boolean {
     return this.#socket !== null && this.#socket.isOpen;
   }
 
-  /** Opens the socket and subscribes, now. Concurrent calls share one attempt. */
+  /** Opens the authenticated socket and subscribes, now. Concurrent calls share one attempt. */
   connect(): Promise<void> {
     if (this.connected) return Promise.resolve();
     this.#connecting ??= this.#open().finally(() => {
@@ -122,10 +171,11 @@ export class GeminiSandboxVenue implements Venue {
     return this.connect();
   }
 
-  /** Closes the socket. In-flight orders end as `unknown`. */
+  /** Closes both sockets. In-flight orders end as `unknown`, and the market data socket stays closed. */
   close(): void {
     const socket = this.#drop();
     socket?.close();
+    this.#feed.close();
   }
 
   async placeOrder(request: VenueOrderRequest): Promise<VenueOrderResult> {
@@ -216,21 +266,27 @@ export class GeminiSandboxVenue implements Venue {
     return open === null ? { found: false } : lookupOf(open, false);
   }
 
-  async netPosition(symbol: string): Promise<bigint> {
-    const body = await this.#signedRead(POSITIONS, {}, { limit: "100" });
-    const wanted = symbol.toUpperCase();
-    const row = rowsOf(body, "positions").find((candidate) => upper(candidate.symbol) === wanted);
-    if (row === undefined) return 0n;
-    const quantity = parseUnits(text(row.totalQuantity) ?? "");
-    if (quantity === 0n) return 0n;
-    switch (lower(row.outcome)) {
-      case "yes":
-        return quantity;
-      case "no":
-        return -quantity;
-      default:
+  /** A position that cannot be read is an error: neither its size nor its sign is ever guessed. */
+  async positions(): Promise<Map<string, bigint>> {
+    const net = new Map<string, bigint>();
+    for (const row of await this.#positionRows(POSITIONS, {})) {
+      const symbol = upper(row.symbol);
+      if (symbol === null) throw new Error("position without a symbol");
+      let quantity: bigint;
+      try {
+        quantity = parseUnits(text(row.totalQuantity) ?? "");
+      } catch {
+        throw new Error(`position for ${symbol}: unreadable quantity`);
+      }
+      if (quantity === 0n) continue;
+      const outcome = lower(row.outcome);
+      if (outcome !== "yes" && outcome !== "no") {
         throw new Error(`position for ${symbol} has an unknown outcome: ${String(row.outcome)}`);
+      }
+      net.set(symbol, (net.get(symbol) ?? 0n) + (outcome === "yes" ? quantity : -quantity));
     }
+    for (const [symbol, units] of net) if (units === 0n) net.delete(symbol);
+    return net;
   }
 
   async cashMicros(): Promise<bigint> {
@@ -240,20 +296,26 @@ export class GeminiSandboxVenue implements Venue {
     return isRecord(usd) ? parseMicros(text(usd.available) ?? "") : 0n;
   }
 
+  /**
+   * The contract as its own event reads now: the list can be minutes behind, and a result is
+   * only ever taken from here.
+   */
   async contract(symbol: string): Promise<ContractInfo | null> {
     const wanted = symbol.toUpperCase();
-    const eventTicker = this.#eventTickers.get(wanted) ?? eventTickerOf(wanted);
+    const eventTicker = this.#eventTickerOf(wanted);
     if (eventTicker === null) return null;
-    let body: unknown;
-    try {
-      body = await this.#get(`${EVENTS}/${encodeURIComponent(eventTicker)}`);
-    } catch (error) {
-      if (error instanceof RestError && error.status === 404) return null;
-      throw error;
-    }
-    const contracts: unknown[] = isRecord(body) && Array.isArray(body.contracts) ? body.contracts : [];
-    const row = contracts.filter(isRecord).find((candidate) => upper(candidate.instrumentSymbol) === wanted);
-    return row === undefined ? null : toContractInfo(wanted, eventTicker, row, isRecord(body) ? body : {});
+    const event = await this.#event(eventTicker);
+    const rows: unknown[] = isRecord(event) && Array.isArray(event.contracts) ? event.contracts : [];
+    const row = rows.find((candidate) => isRecord(candidate) && upper(candidate.instrumentSymbol) === wanted);
+    return row === undefined ? null : toContract(row, eventTicker);
+  }
+
+  async listEvents(): Promise<EventInfo[]> {
+    if (this.#listing !== null && this.#now() - this.#listing.atMs < LIST_CACHE_MS) return this.#listing.events;
+    this.#listRead ??= this.#readEvents().finally(() => {
+      this.#listRead = null;
+    });
+    return this.#listRead;
   }
 
   /**
@@ -262,10 +324,10 @@ export class GeminiSandboxVenue implements Venue {
    */
   async settledPayoutMicros(symbol: string): Promise<bigint | null> {
     const wanted = symbol.toUpperCase();
-    const eventTicker = this.#eventTickers.get(wanted) ?? eventTickerOf(wanted);
+    const eventTicker = this.#eventTickerOf(wanted);
     if (eventTicker === null) throw new Error(`no event ticker for ${symbol}`);
-    const body = await this.#signedRead(SETTLED_POSITIONS, {}, { eventTicker, limit: "20" });
-    const row = rowsOf(body, "positions").find((candidate) => upper(candidate.instrumentSymbol) === wanted);
+    const rows = await this.#positionRows(SETTLED_POSITIONS, { eventTicker });
+    const row = rows.find((candidate) => upper(candidate.instrumentSymbol) === wanted);
     if (row === undefined) return null;
     try {
       return parseMicros(text(row.payout) ?? "");
@@ -274,41 +336,167 @@ export class GeminiSandboxVenue implements Venue {
     }
   }
 
-  /**
-   * Active crypto contracts. Also records each symbol's event ticker, which `contract` then uses
-   * instead of deriving it from the symbol. Contracts that cannot be read are left out.
-   */
-  async listContracts(): Promise<ContractInfo[]> {
-    const body = await this.#get(`${EVENTS}?status=active&category=crypto&limit=500`);
-    const contracts: ContractInfo[] = [];
-    for (const event of rowsOf(body, "data")) {
-      if (typeof event.ticker !== "string" || !Array.isArray(event.contracts)) continue;
-      for (const row of event.contracts.filter(isRecord)) {
-        const symbol = upper(row.instrumentSymbol);
-        if (symbol === null) continue;
-        this.#eventTickers.set(symbol, event.ticker);
-        try {
-          contracts.push(toContractInfo(symbol, event.ticker, row, event));
-        } catch {
-          // Not describable, so not offered.
-        }
-      }
-    }
-    return contracts;
+  async topOfBook(symbol: string): Promise<TopOfBook> {
+    const { bids, asks } = await this.#book(symbol, 1);
+    const [bid, ask] = [bids[0], asks[0]];
+    return { bidPx: bid?.px ?? null, bidUnits: bid?.units ?? 0n, askPx: ask?.px ?? null, askUnits: ask?.units ?? 0n };
   }
 
-  async topOfBook(symbol: string): Promise<TopOfBook> {
-    const body = await this.#get(`/v1/book/${encodeURIComponent(symbol)}?limit_bids=1&limit_asks=1`);
-    if (!isRecord(body)) throw new Error(`unexpected book response for ${symbol}`);
-    const bid = bestLevel(body.bids);
-    const ask = bestLevel(body.asks);
-    return { bidPx: bid.px, bidUnits: bid.units, askPx: ask.px, askUnits: ask.units };
+  /** Served while the public socket is connected and the contract is active; see `MarketFeed`. */
+  liveTop(symbol: string): { top: TopOfBook; atMs: number } | undefined {
+    return this.#feed.top(symbol);
+  }
+
+  async depth(symbol: string, levels: number): Promise<Depth> {
+    // The venue reads a limit of zero as "every level".
+    atLeastOne("levels", levels);
+    return nothingWhenUnknown(this.#book(symbol, levels), { bids: [], asks: [] });
+  }
+
+  async trades(symbol: string, limit: number): Promise<VenueTrade[]> {
+    atLeastOne("limit", limit);
+    const tape = this.#get(`/v1/trades/${encodeURIComponent(symbol)}?limit_trades=${Math.min(limit, MAX_TRADES)}`).then(toTrades);
+    return (await nothingWhenUnknown(tape, [])).slice(0, limit);
+  }
+
+  /** Candles are built from trades: a contract that never traded has none (HTTP 400 `NoDataFound`). */
+  async history(symbol: string, stepSecs: number): Promise<PricePoint[]> {
+    const frame = CANDLE_FRAMES.get(stepSecs);
+    if (frame === undefined) throw new RangeError(`the venue has no candles of ${stepSecs} seconds`);
+    return nothingWhenUnknown(this.#get(`/v2/candles/${encodeURIComponent(symbol)}/${frame}`).then(toHistory), []);
+  }
+
+  /**
+   * Up to `levels` levels a side of the book, read now. For its first minutes as an instrument an
+   * active contract is unknown to the book route on about half the calls, while the socket has
+   * its book from the first second: then the socket is asked instead, and when it cannot answer
+   * the read fails, for the caller to try again. An unknown symbol is never read as an empty book.
+   */
+  async #book(symbol: string, levels: number): Promise<Depth> {
+    try {
+      return toDepth(await this.#get(`/v1/book/${encodeURIComponent(symbol)}?limit_bids=${levels}&limit_asks=${levels}`), levels);
+    } catch (error) {
+      if (!isUnknownSymbol(error) || !this.#feed.follows(symbol)) throw error;
+      return this.#feed.depth(symbol, levels);
+    }
+  }
+
+  /**
+   * Reads the whole list, page by page. Two pages read a second apart can overlap, so every
+   * event and every contract is taken once. A row that cannot be read is left out, and its
+   * reason is logged when it first shows up.
+   *
+   * The venue answers from caches that disagree: a read can return a page that is older than the
+   * one before it, by minutes while the list is asked for steadily and by an hour after a pause.
+   * Events are listed all the time and stay listed until they expire, so a page whose newest
+   * event is older than the newest one already seen is such a page. It is dropped and the list
+   * held is answered again, for at most `LIST_HOLD_MS`, in case the newest event was simply
+   * taken off the list.
+   */
+  async #readEvents(): Promise<EventInfo[]> {
+    const events: EventInfo[] = [];
+    const tickers = new Set<string>();
+    const symbols = new Set<string>();
+    const skipped = new Set<string>();
+    let offset = 0;
+    let total = Number.POSITIVE_INFINITY;
+    while (offset < total) {
+      const body = await this.#get(`${EVENTS}?${LIST_QUERY}&offset=${offset}`);
+      const rows = listOf(body, "data");
+      if (rows.length === 0) break;
+      offset += rows.length;
+      const pagination: unknown = isRecord(body) ? body.pagination : undefined;
+      total = isRecord(pagination) && typeof pagination.total === "number" ? pagination.total : offset;
+      for (const row of rows) {
+        let event: EventInfo;
+        try {
+          event = toEvent(row, (reason) => skipped.add(reason));
+        } catch (error) {
+          skipped.add(messageOf(error));
+          continue;
+        }
+        if (tickers.has(event.ticker)) continue;
+        tickers.add(event.ticker);
+        const contracts = event.contracts.filter((contract) => !symbols.has(contract.symbol));
+        for (const contract of contracts) symbols.add(contract.symbol);
+        if (contracts.length > 0) events.push({ ...event, contracts });
+      }
+    }
+
+    const now = this.#now();
+    const newestMs = Math.max(...events.map((event) => event.listedAt.getTime()));
+    const held = this.#listing;
+    if (held !== null && newestMs < held.newestMs && now - held.atMs < LIST_HOLD_MS) return held.events;
+
+    for (const reason of skipped) if (!this.#skipped.has(reason)) this.#log(`venue list: skipped ${reason}`);
+    this.#skipped = skipped;
+    for (const { ticker, contracts } of events) {
+      for (const { symbol, expiresAt } of contracts) this.#eventTickers.set(symbol, { ticker, expiresAtMs: expiresAt.getTime() });
+    }
+    for (const [symbol, { expiresAtMs }] of this.#eventTickers) {
+      if (expiresAtMs + TICKER_KEEP_MS <= now) this.#eventTickers.delete(symbol);
+    }
+    this.#feed.follow(events.flatMap((event) => event.contracts));
+    this.#listing = { events, atMs: now, newestMs };
+    return events;
+  }
+
+  /**
+   * The event of a symbol: the one the list gave, else `GEMI-<EVENT>-<CONTRACT>` split at its last
+   * dash (event tickers can hold dashes, contract tickers do not).
+   */
+  #eventTickerOf(symbol: string): string | null {
+    return this.#eventTickers.get(symbol)?.ticker ?? /^GEMI-(.+)-[^-]+$/.exec(symbol)?.[1] ?? null;
+  }
+
+  /** One event, or null when the venue does not know the ticker. */
+  #event(ticker: string): Promise<unknown> {
+    const now = this.#now();
+    for (const [key, read] of this.#eventReads) if (now - read.atMs >= EVENT_CACHE_MS) this.#eventReads.delete(key);
+    const shared = this.#eventReads.get(ticker);
+    if (shared !== undefined) return shared.body;
+
+    const body = this.#get(`${EVENTS}/${encodeURIComponent(ticker)}`).catch((error: unknown) => {
+      if (error instanceof RestError && error.status === 404) return null;
+      throw error;
+    });
+    const read = { atMs: Number.POSITIVE_INFINITY, body };
+    this.#eventReads.set(ticker, read);
+    body.then(
+      () => {
+        read.atMs = this.#now();
+      },
+      () => {
+        if (this.#eventReads.get(ticker) === read) this.#eventReads.delete(ticker);
+      },
+    );
+    return body;
+  }
+
+  /**
+   * Every row of a list of positions, page by page. The last page is the one that reaches the
+   * venue's `total`; a list filtered by event comes without a total, and there it is the first
+   * page that is not full.
+   */
+  async #positionRows(path: string, query: Record<string, string>): Promise<Row[]> {
+    const rows: Row[] = [];
+    let offset = 0;
+    let more = true;
+    while (more) {
+      const body = await this.#signedRead(path, {}, { ...query, limit: String(PAGE_ROWS), offset: String(offset) });
+      const page = listOf(body, "positions");
+      rows.push(...page.filter(isRecord));
+      offset += page.length;
+      const total = isRecord(body) && typeof body.total === "number" ? body.total : null;
+      more = page.length > 0 && (total === null ? page.length >= PAGE_ROWS : offset < total);
+    }
+    return rows;
   }
 
   async #open(): Promise<void> {
     const generation = ++this.#generation;
     const { apiKey, apiSecret, WebSocketImpl, onFrame } = this.#options;
-    let socket: PrivateSocket | undefined;
+    let socket: VenueSocket | undefined;
     try {
       socket = await openPrivateSocket({
         url: this.#wsUrl,
@@ -358,7 +546,7 @@ export class GeminiSandboxVenue implements Venue {
   }
 
   /** Forgets the current socket and ends every in-flight order. */
-  #drop(): PrivateSocket | null {
+  #drop(): VenueSocket | null {
     const socket = this.#socket;
     this.#generation++;
     this.#socket = null;
@@ -418,6 +606,31 @@ async function retryOnce<T>(call: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * The answer of a market data read, or `nothing` when the venue has none to give: its market
+ * data routes do not know the symbol (a listed contract is not an instrument before it is
+ * active, and stays unknown to them on and off for minutes after), or no candle holds a trade.
+ */
+async function nothingWhenUnknown<T>(read: Promise<T>, nothing: T): Promise<T> {
+  try {
+    return await read;
+  } catch (error) {
+    if (isUnknownSymbol(error) || (error instanceof RestError && isRecord(error.body) && error.body.reason === "NoDataFound")) return nothing;
+    throw error;
+  }
+}
+
+/** HTTP 400 "... is not a valid symbol", which the candles route sends as plain text. */
+function isUnknownSymbol(error: unknown): boolean {
+  if (!(error instanceof RestError) || error.status !== 400) return false;
+  const message: unknown = isRecord(error.body) ? error.body.message : error.body;
+  return typeof message === "string" && message.includes("is not a valid symbol");
+}
+
+function atLeastOne(name: string, value: number): void {
+  if (!Number.isInteger(value) || value < 1) throw new RangeError(`${name} must be a whole number of at least 1: ${value}`);
+}
+
 /** The newest row for the client order id that was not created well before `sinceMs`. */
 function newestMatch(rows: Row[], clientOrderId: string, sinceMs: number): Row | null {
   let best: Row | null = null;
@@ -448,90 +661,6 @@ function lookupOf(row: Row, closed: boolean): OrderLookup {
   };
 }
 
-/** A price as px, or null when it is absent or not exactly a whole px. */
-function wholePx(value: unknown): bigint | null {
-  try {
-    return parsePx(text(value) ?? "");
-  } catch {
-    return null;
-  }
-}
-
-function bestLevel(side: unknown): { px: bigint | null; units: bigint } {
-  const level: unknown = Array.isArray(side) ? side[0] : undefined;
-  if (!isRecord(level)) return { px: null, units: 0n };
-  return { px: parsePx(text(level.price) ?? ""), units: parseUnits(text(level.amount) ?? "") };
-}
-
-/** `GEMI-<EVENT>-<CONTRACT>` -> `<EVENT>`. */
-function eventTickerOf(symbol: string): string | null {
-  const match = /^GEMI-(.+)-[^-]+$/.exec(symbol);
-  return match?.[1] ?? null;
-}
-
-/**
- * States and the resolution side are read leniently (unknown values pass through or become
- * null) and an unreadable date becomes an invalid Date. The price and quantity grid is not
- * guessed: an unreadable increment throws. Display fields come from the event (title, series)
- * and the contract (label, strike, settlement value) and are left out or null when absent. The
- * best bid and ask come from the contract's `prices` and are left out when it has none.
- */
-function toContractInfo(symbol: string, eventTicker: string, row: Row, event: Row): ContractInfo {
-  const grid = (field: string, decimals: number): bigint => {
-    try {
-      return parseDecimal(text(row[field]) ?? "", decimals);
-    } catch {
-      throw new Error(`contract ${symbol}: unreadable ${field}`);
-    }
-  };
-  const side = lower(row.resolutionSide);
-  return {
-    symbol,
-    eventTicker,
-    status: typeof row.status === "string" ? row.status : "unknown",
-    marketState: typeof row.marketState === "string" ? row.marketState : "unknown",
-    effectiveAt: new Date(String(row.effectiveDate)),
-    expiresAt: new Date(String(row.expiryDate)),
-    tickPx: grid("priceIncrement", 4),
-    unitIncrement: grid("quantityIncrement", 2),
-    minUnits: grid("quantityMinimum", 2),
-    resolutionSide: side === "yes" || side === "no" ? side : null,
-    ...(typeof event.title === "string" ? { title: event.title } : {}),
-    ...(typeof row.label === "string" ? { label: row.label } : {}),
-    ...(typeof event.series === "string" ? { series: event.series } : {}),
-    strike: isRecord(row.strike) ? text(row.strike.value) : null,
-    settlementValue: text(row.settlementValue),
-    // `prices` is `{ buy: {}, sell: {} }` without quotes; a side that is absent has no quote.
-    ...(isRecord(row.prices) ? { bestBidPx: wholePx(row.prices.bestBid), bestAskPx: wholePx(row.prices.bestAsk) } : {}),
-  };
-}
-
-/** The records of the list at `body[key]`. A body without that list is an error, not "no rows". */
-function rowsOf(body: unknown, key: string): Row[] {
-  const list: unknown = isRecord(body) ? body[key] : undefined;
-  if (!Array.isArray(list)) throw new Error(`unexpected response: no "${key}" list`);
-  return list.filter(isRecord);
-}
-
-/** A string, or a number that survived JSON parsing exactly, as text. */
-function text(value: unknown): string | null {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  return null;
-}
-
-function lower(value: unknown): string | null {
-  return typeof value === "string" ? value.toLowerCase() : null;
-}
-
-function upper(value: unknown): string | null {
-  return typeof value === "string" ? value.toUpperCase() : null;
-}
-
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function isRecord(value: unknown): value is Row {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

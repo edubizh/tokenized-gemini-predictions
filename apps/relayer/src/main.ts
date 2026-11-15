@@ -169,6 +169,7 @@ async function start(config: RelayerConfig): Promise<void> {
       apiKey: config.geminiApiKey ?? "",
       apiSecret: config.geminiApiSecret ?? "",
       onDisconnect: (info) => log(`venue socket closed: ${info.reason}`),
+      log,
     });
     venue = sandbox;
     venueConnected = () => sandbox.connected;

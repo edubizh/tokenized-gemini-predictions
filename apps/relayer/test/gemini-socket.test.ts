@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VenueFrame } from "../src/venue/frames.ts";
-import { RequestTimeoutError, SocketClosedError, openPrivateSocket } from "../src/venue/gemini/socket.ts";
+import { RequestTimeoutError, SocketClosedError, openPrivateSocket, openPublicSocket } from "../src/venue/gemini/socket.ts";
 import type { CloseInfo, PrivateSocketOptions } from "../src/venue/gemini/socket.ts";
 
 const URL = "wss://ws.sandbox.gemini.com";
@@ -162,6 +162,42 @@ describe("openPrivateSocket: upgrade", () => {
 
     expect(((await outcome) as Error).message).toBe("socket did not open within 4000 ms");
     expect(FakeWebSocket.instances[0]!.terminated).toBe(true);
+  });
+});
+
+describe("openPublicSocket", () => {
+  it.each(["wss://ws.gemini.com", "wss://ws.sandbox.gemini.com/", "ws://ws.sandbox.gemini.com", ""])("refuses the url %j", async (url) => {
+    await expect(openPublicSocket({ url, WebSocketImpl: FakeWebSocket, onClose: () => {} })).rejects.toThrow("this build is sandbox only");
+    expect(FakeWebSocket.instances).toHaveLength(0);
+  });
+
+  it("opens the same host without any credential, and handles requests, frames, silence and closes alike", async () => {
+    const messages: VenueFrame[] = [];
+    const closes: CloseInfo[] = [];
+    const pending = openPublicSocket({
+      url: URL,
+      WebSocketImpl: FakeWebSocket,
+      onMessage: (frame) => messages.push(frame),
+      onClose: (info) => closes.push(info),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const ws = FakeWebSocket.instances[0]!;
+    expect(ws.url).toBe(URL);
+    expect(ws.headers).toEqual({});
+    ws.serverOpen();
+    const socket = await pending;
+
+    const subscription = socket.request("SUBSCRIBE", ["contractStatus"]);
+    expect(JSON.parse(ws.sent[0]!)).toEqual({ id: "1", method: "SUBSCRIBE", params: ["contractStatus"] });
+    ws.serverFrame({ e: "contractStatus", E: 1794693427011, s: "gemi-demo15m2611140300-up", k: "demo15m2611140300", c: "UP", i: 700001, o: "Approved", n: "Active" });
+    ws.serverFrame({ id: "1", status: 200 });
+    await expect(subscription).resolves.toEqual({ kind: "ack", id: "1", status: 200 });
+    expect(messages[0]).toEqual({ kind: "contractStatus", symbol: "GEMI-DEMO15M2611140300-UP", from: "Approved", to: "Active" });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(ws.terminated).toBe(true);
+    expect(closes).toEqual([{ reason: "liveness" }]);
+    expect(socket.isOpen).toBe(false);
   });
 });
 

@@ -1,14 +1,10 @@
-import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GeminiSandboxVenue } from "../src/venue/gemini/venue.ts";
 import type { GeminiSandboxVenueOptions } from "../src/venue/gemini/venue.ts";
 import type { VenueOrderRequest } from "../src/venue/types.ts";
+import { EVENT, FakeWebSocket, LADDER, START_MS, SYMBOL, contractRow, drive, eventRow, httpFake, ladderRow, strikeRow } from "./gemini-fakes.ts";
+import type { HttpCall, Row } from "./gemini-fakes.ts";
 
-// Everything here is synthetic: invented ids and an invented symbol, in the shape of the frames
-// and REST rows the sandbox sends (ids as bare JSON integers, decimals as strings).
-const START_MS = 1_794_624_000_250; // 2026-11-14T02:40:00.250Z
-const SYMBOL = "GEMI-DEMO15M2611140300-UP";
-const EVENT = "DEMO15M2611140300";
 const CLIENT_ID = "o-0123456789abcdef0123456789abcdef";
 const ORDER_ID = "700000000000000001";
 const TRADE_ID = "5000000000000001";
@@ -22,116 +18,6 @@ const REQUEST: VenueOrderRequest = {
   timeInForce: "FOK",
 };
 
-interface Sent {
-  id: string;
-  method: string;
-  params: unknown;
-}
-
-/** Stands in for the `ws` client. Opens by itself and acks SUBSCRIBE; a test plays the rest. */
-class FakeWebSocket extends EventEmitter {
-  static instances: FakeWebSocket[] = [];
-  static refuseUpgrade = false;
-  static subscribeStatus = 200;
-  readonly createdAt = Date.now();
-  readyState = 0;
-  sent: Sent[] = [];
-  terminated = false;
-
-  constructor(_url: string, _options: { headers: Record<string, string> }) {
-    super();
-    FakeWebSocket.instances.push(this);
-    queueMicrotask(() => {
-      if (FakeWebSocket.refuseUpgrade) this.emit("unexpected-response", {}, { statusCode: 503 });
-      else {
-        this.readyState = 1;
-        this.emit("open");
-      }
-    });
-  }
-
-  send(data: string): void {
-    if (this.readyState !== 1) throw new Error("WebSocket is not open");
-    const message = JSON.parse(data) as Sent;
-    this.sent.push(message);
-    if (message.method === "SUBSCRIBE") {
-      queueMicrotask(() => this.serverFrame(JSON.stringify({ id: message.id, status: FakeWebSocket.subscribeStatus })));
-    }
-  }
-
-  terminate(): void {
-    this.terminated = true;
-    this.readyState = 3;
-  }
-
-  close(): void {
-    this.serverClose(1005);
-  }
-
-  /** Text frames reach `ws` listeners as a Buffer. */
-  serverFrame(raw: string): void {
-    this.emit("message", Buffer.from(raw), false);
-  }
-
-  serverClose(code: number): void {
-    if (this.readyState === 3) return;
-    this.readyState = 3;
-    this.emit("close", code, Buffer.from(""));
-  }
-
-  placed(): Sent[] {
-    return this.sent.filter((message) => message.method === "order.place");
-  }
-}
-
-interface HttpCall {
-  method: string;
-  path: string;
-  query: string;
-  /** The decoded signed payload, or null for a public call. */
-  payload: Record<string, unknown> | null;
-  at: number;
-}
-
-function httpFake() {
-  const calls: HttpCall[] = [];
-  let handler: (call: HttpCall, index: number) => unknown = () => ({});
-  return {
-    calls,
-    /** The handler returns a JSON body, a ready Response, or an Error to throw. */
-    respond(next: (call: HttpCall, index: number) => unknown) {
-      handler = next;
-    },
-    fetch: async (url: string, init: RequestInit): Promise<Response> => {
-      const parsed = new URL(url);
-      const headers = init.headers as Record<string, string> | undefined;
-      const call: HttpCall = {
-        method: String(init.method),
-        path: parsed.pathname,
-        query: parsed.search,
-        payload: headers ? (JSON.parse(Buffer.from(headers["X-GEMINI-PAYLOAD"]!, "base64").toString()) as Record<string, unknown>) : null,
-        at: Date.now(),
-      };
-      calls.push(call);
-      const result = handler(call, calls.length - 1);
-      if (result instanceof Error) throw result;
-      return result instanceof Response ? result : new Response(JSON.stringify(result), { status: 200 });
-    },
-  };
-}
-
-/** Advances the fake clock, then returns the promise's outcome. */
-async function drive<T>(promise: Promise<T>, ms = 0): Promise<T> {
-  const outcome = promise.then(
-    (value) => ({ ok: true as const, value }),
-    (error: unknown) => ({ ok: false as const, error }),
-  );
-  await vi.advanceTimersByTimeAsync(ms);
-  const settled = await outcome;
-  if (settled.ok) return settled.value;
-  throw settled.error;
-}
-
 async function connected(extra: Partial<GeminiSandboxVenueOptions> = {}) {
   const http = httpFake();
   const venue = new GeminiSandboxVenue({
@@ -139,6 +25,7 @@ async function connected(extra: Partial<GeminiSandboxVenueOptions> = {}) {
     apiSecret: "test-secret",
     WebSocketImpl: FakeWebSocket,
     fetch: http.fetch,
+    log: () => {},
     ...extra,
   });
   await drive(venue.connect());
@@ -182,9 +69,7 @@ async function place(venue: GeminiSandboxVenue, ws: FakeWebSocket, request: Venu
 }
 
 beforeEach(() => {
-  FakeWebSocket.instances = [];
-  FakeWebSocket.refuseUpgrade = false;
-  FakeWebSocket.subscribeStatus = 200;
+  FakeWebSocket.reset();
   vi.useFakeTimers();
   vi.setSystemTime(START_MS);
 });
@@ -581,30 +466,87 @@ describe("findOrder", () => {
   });
 });
 
-describe("netPosition and cashMicros", () => {
-  it("signs the position: yes positive, no negative, no row zero", async () => {
+const POSITIONS = "/v1/prediction-markets/positions";
+const SETTLED = "/v1/prediction-markets/positions/settled";
+const EVENTS = "/v1/prediction-markets/events";
+const LOW = `GEMI-${LADDER}-HI0D82`;
+const HIGH = `GEMI-${LADDER}-HI0D84`;
+
+/** The value of one query parameter of a recorded call. */
+function param(call: HttpCall, name: string): string | null {
+  return new URLSearchParams(call.query).get(name);
+}
+
+/** One page of the event list, as the venue wraps it. */
+function listPage(data: unknown[], total = data.length): Row {
+  return { data, pagination: { limit: 500, offset: 0, total } };
+}
+
+describe("positions and cashMicros", () => {
+  const position = (symbol: string, totalQuantity: string, outcome: string): Row => ({
+    symbol,
+    instrumentId: 33_000_001,
+    totalQuantity,
+    quantityOnHold: "0",
+    avgPrice: "0.17",
+    outcome,
+  });
+
+  it("reads every open position in one call as signed units: yes positive, no negative, flat left out", async () => {
     const { venue, http } = await connected();
-    const row = (outcome: string) => ({ positions: [{ symbol: "GEMI-OTHER-UP", totalQuantity: "3", outcome: "yes" }, { symbol: SYMBOL, totalQuantity: "12", outcome }], total: 2 });
+    http.respond(() => ({ positions: [position(SYMBOL, "12", "yes"), position(LOW, "0.5", "no"), position(HIGH, "0", "yes")], total: 3 }));
 
-    http.respond(() => row("yes"));
-    await expect(drive(venue.netPosition(SYMBOL), 3_000)).resolves.toBe(1_200n);
-    http.respond(() => row("no"));
-    await expect(drive(venue.netPosition(SYMBOL), 3_000)).resolves.toBe(-1_200n);
+    await expect(drive(venue.positions(), 3_000)).resolves.toEqual(
+      new Map([
+        [SYMBOL, 1_200n],
+        [LOW, -50n],
+      ]),
+    );
+    expect(http.calls).toHaveLength(1);
+    expect(http.calls[0]).toMatchObject({ method: "POST", path: POSITIONS, query: "?limit=100&offset=0", payload: { request: POSITIONS } });
+
     http.respond(() => ({ positions: [], total: 0 }));
-    await expect(drive(venue.netPosition(SYMBOL), 3_000)).resolves.toBe(0n);
+    await expect(drive(venue.positions(), 3_000)).resolves.toEqual(new Map());
+  });
 
-    expect(http.calls[0]).toMatchObject({
-      method: "POST",
-      path: "/v1/prediction-markets/positions",
-      query: "?limit=100",
-      payload: { request: "/v1/prediction-markets/positions" },
+  it("pages on the total, one signed call at a time", async () => {
+    const { venue, http } = await connected();
+    // The venue hands out two rows a page here, whatever limit is asked for.
+    const rows = ["A", "B", "C", "D", "E"].map((name, index) => position(`GEMI-${name}2611140300-UP`, String(index + 1), index % 2 === 0 ? "yes" : "no"));
+    http.respond((call) => {
+      const offset = Number(param(call, "offset"));
+      return { positions: rows.slice(offset, offset + 2), total: rows.length };
     });
+
+    const positions = await drive(venue.positions(), 10_000);
+    expect([...positions]).toEqual([
+      ["GEMI-A2611140300-UP", 100n],
+      ["GEMI-B2611140300-UP", -200n],
+      ["GEMI-C2611140300-UP", 300n],
+      ["GEMI-D2611140300-UP", -400n],
+      ["GEMI-E2611140300-UP", 500n],
+    ]);
+    expect(http.calls.map((call) => call.query)).toEqual(["?limit=100&offset=0", "?limit=100&offset=2", "?limit=100&offset=4"]);
+    expect(http.calls.map((call) => call.at - http.calls[0]!.at)).toEqual([0, 1_100, 2_200]);
+  });
+
+  it("nets a yes row against a no row of the same contract", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => ({ positions: [position(SYMBOL, "5", "yes"), position(SYMBOL, "2", "no"), position(LOW, "3", "no"), position(LOW, "3", "yes")], total: 4 }));
+    await expect(drive(venue.positions(), 3_000)).resolves.toEqual(new Map([[SYMBOL, 300n]]));
   });
 
   it("rejects a position with an unknown outcome instead of guessing its sign", async () => {
     const { venue, http } = await connected();
-    http.respond(() => ({ positions: [{ symbol: SYMBOL, totalQuantity: "12", outcome: "maybe" }] }));
-    await expect(drive(venue.netPosition(SYMBOL), 3_000)).rejects.toThrow(`position for ${SYMBOL} has an unknown outcome`);
+    http.respond(() => ({ positions: [position(SYMBOL, "12", "maybe")], total: 1 }));
+    await expect(drive(venue.positions(), 3_000)).rejects.toThrow(`position for ${SYMBOL} has an unknown outcome`);
+
+    http.respond(() => ({ positions: [position(SYMBOL, "a dozen", "yes")], total: 1 }));
+    await expect(drive(venue.positions(), 3_000)).rejects.toThrow(`position for ${SYMBOL}: unreadable quantity`);
+    http.respond(() => ({ positions: [{ totalQuantity: "12", outcome: "yes" }], total: 1 }));
+    await expect(drive(venue.positions(), 3_000)).rejects.toThrow("position without a symbol");
+    http.respond(() => ({ total: 0 }));
+    await expect(drive(venue.positions(), 3_000)).rejects.toThrow('unexpected response: no "positions" list');
   });
 
   it("reads available USD in micro-dollars", async () => {
@@ -622,7 +564,7 @@ describe("netPosition and cashMicros", () => {
 });
 
 describe("settledPayoutMicros", () => {
-  const settledRow = (fields: Record<string, unknown> = {}) => ({
+  const settledRow = (fields: Row = {}): Row => ({
     instrumentSymbol: SYMBOL,
     position: 12,
     positionQuantity: "12",
@@ -637,11 +579,12 @@ describe("settledPayoutMicros", () => {
     const { venue, http } = await connected();
     http.respond(() => ({ positions: [settledRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-DOWN", payout: "3" }), settledRow()] }));
     await expect(drive(venue.settledPayoutMicros(SYMBOL), 3_000)).resolves.toBe(12_000_000n);
+    expect(http.calls).toHaveLength(1);
     expect(http.calls[0]).toMatchObject({
       method: "POST",
-      path: "/v1/prediction-markets/positions/settled",
-      query: `?eventTicker=${EVENT}&limit=20`,
-      payload: { request: "/v1/prediction-markets/positions/settled" },
+      path: SETTLED,
+      query: `?eventTicker=${EVENT}&limit=100&offset=0`,
+      payload: { request: SETTLED },
     });
 
     http.respond(() => ({ positions: [settledRow({ outcome: "no", payout: "0" })] }));
@@ -658,6 +601,15 @@ describe("settledPayoutMicros", () => {
     await expect(drive(venue.settledPayoutMicros(SYMBOL), 3_000)).resolves.toBeNull();
   });
 
+  it("reads on past a full page: the venue sends no total for one event", async () => {
+    const { venue, http } = await connected();
+    const others = Array.from({ length: 100 }, (_unused, index) => settledRow({ instrumentSymbol: `GEMI-${EVENT}-X${index}`, payout: "1" }));
+    http.respond((call) => ({ positions: param(call, "offset") === "0" ? others : [settledRow({ payout: "7" })] }));
+
+    await expect(drive(venue.settledPayoutMicros(SYMBOL), 5_000)).resolves.toBe(7_000_000n);
+    expect(http.calls.map((call) => call.query)).toEqual([`?eventTicker=${EVENT}&limit=100&offset=0`, `?eventTicker=${EVENT}&limit=100&offset=100`]);
+  });
+
   it("rejects an unreadable payout and a symbol with no event part instead of reporting nothing paid", async () => {
     const { venue, http } = await connected();
     http.respond(() => ({ positions: [settledRow({ payout: "twelve" })] }));
@@ -668,25 +620,10 @@ describe("settledPayoutMicros", () => {
   });
 });
 
-function contractRow(fields: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    ticker: "UP",
-    instrumentSymbol: SYMBOL,
-    status: "active",
-    marketState: "open",
-    expiryDate: "2026-11-14T03:00:00.000Z",
-    effectiveDate: "2026-11-14T02:45:00.000Z",
-    quantityIncrement: "0.01",
-    quantityMinimum: "0.01",
-    priceIncrement: "0.01",
-    ...fields,
-  };
-}
-
-describe("contract and listContracts", () => {
-  it("maps a contract of the event derived from the symbol", async () => {
+describe("contract", () => {
+  it("reads one contract from the event its symbol names", async () => {
     const { venue, http } = await connected();
-    http.respond(() => ({ ticker: EVENT, status: "active", contracts: [contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-DOWN" }), contractRow()] }));
+    http.respond(() => eventRow({ contracts: [contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-DOWN" }), contractRow()] }));
 
     await expect(drive(venue.contract(SYMBOL), 1_000)).resolves.toEqual({
       symbol: SYMBOL,
@@ -699,93 +636,35 @@ describe("contract and listContracts", () => {
       unitIncrement: 1n,
       minUnits: 1n,
       resolutionSide: null,
+      label: "Up",
+      sortOrder: 0,
+      rules: "If the price of Demo is at or above the reference price, this market resolves to Yes. View the full rules.",
       strike: null,
       settlementValue: null,
+      bestBidPx: null,
+      bestAskPx: null,
+      lastPx: null,
     });
-    expect(http.calls[0]).toMatchObject({ method: "GET", path: `/v1/prediction-markets/events/${EVENT}`, payload: null });
+    expect(http.calls[0]).toMatchObject({ method: "GET", path: `${EVENTS}/${EVENT}`, query: "", payload: null });
   });
 
-  it("fills the display fields from the event and the contract", async () => {
+  it("reads the result of a settled contract from its own fields, whatever the event says", async () => {
     const { venue, http } = await connected();
-    const strike = { type: "reference", value: "64000.50", availableAt: "2026-11-14T02:45:00.000Z" };
-    http.respond(() => ({
-      ticker: EVENT,
-      title: "Demo price today at 10pm",
-      series: "DEMO15M",
-      contracts: [contractRow({ label: "Up", strike, settlementValue: 64100.125, status: "settled", resolutionSide: "yes" })],
-    }));
-    await expect(drive(venue.contract(SYMBOL), 1_000)).resolves.toMatchObject({
-      title: "Demo price today at 10pm",
-      series: "DEMO15M",
-      label: "Up",
-      strike: "64000.50",
-      settlementValue: "64100.125",
-    });
+    const settled = { status: "settled", marketState: "closed", resolutionSide: "yes", resolvedAt: "2026-11-14T04:00:07.000Z", settlementValue: "0.8431" };
+    // One contract of the ladder is settled, its sibling is stuck, and the event is still under review.
+    http.respond(() => ladderRow([strikeRow("0.82", 0, settled), strikeRow("0.84", 1, { status: "under_review", marketState: "closed" })], { status: "under_review" }));
 
-    // Before the window starts the reference price is not known yet.
-    http.respond(() => ({ ticker: EVENT, contracts: [contractRow({ strike: { type: "reference", value: null }, settlementValue: "64100.5" })] }));
-    const early = await drive(venue.contract(SYMBOL), 1_000);
-    expect(early).toMatchObject({ strike: null, settlementValue: "64100.5" });
-    expect(early).not.toHaveProperty("title");
-    expect(early).not.toHaveProperty("label");
-    expect(early).not.toHaveProperty("series");
-  });
-
-  it("lists contracts with the display fields of their event", async () => {
-    const { venue, http } = await connected();
-    http.respond(() => ({
-      data: [{ ticker: EVENT, title: "Demo price today at 10pm", series: "DEMO15M", contracts: [contractRow({ label: "Up", strike: { type: "reference", value: "64000.50" } })] }],
-    }));
-    await expect(drive(venue.listContracts(), 1_000)).resolves.toEqual([
-      expect.objectContaining({ symbol: SYMBOL, title: "Demo price today at 10pm", series: "DEMO15M", label: "Up", strike: "64000.50", settlementValue: null }),
-    ]);
-  });
-
-  it("reads the top of book the event list and the single event carry, in YES price space", async () => {
-    const { venue, http } = await connected();
-    const quoted = { buy: { yes: "0.11", no: "0.97" }, sell: { yes: "0.03", no: "0.89" }, bestBid: "0.03", bestAsk: "0.11" };
-    http.respond(() => ({
-      data: [
-        {
-          ticker: EVENT,
-          contracts: [
-            contractRow({ prices: quoted }),
-            contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-DOWN", prices: { buy: {}, sell: {} } }),
-            contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-FLAT", prices: { buy: {}, sell: {}, bestBid: "0.4", bestAsk: "soon" } }),
-            contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-BARE" }),
-          ],
-        },
-      ],
-    }));
-    const listed = await drive(venue.listContracts(), 1_000);
-    expect(listed.map((contract) => [contract.bestBidPx, contract.bestAskPx])).toEqual([
-      [300n, 1_100n],
-      [null, null],
-      [4_000n, null],
-      [undefined, undefined],
-    ]);
-    expect(listed[3]).not.toHaveProperty("bestBidPx");
-
-    http.respond(() => ({ ticker: EVENT, contracts: [contractRow({ prices: quoted })] }));
-    await expect(drive(venue.contract(SYMBOL), 1_000)).resolves.toMatchObject({ bestBidPx: 300n, bestAskPx: 1_100n });
-  });
-
-  it("passes unknown states through and reads the resolution side leniently", async () => {
-    const { venue, http } = await connected();
-    http.respond(() => ({ ticker: EVENT, contracts: [contractRow({ status: "settled", marketState: "closed", resolutionSide: "YES" })] }));
-    await expect(drive(venue.contract(SYMBOL), 1_000)).resolves.toMatchObject({ status: "settled", marketState: "closed", resolutionSide: "yes" });
-
-    http.respond(() => ({ ticker: EVENT, contracts: [contractRow({ status: "under_review", marketState: 7, resolutionSide: "void" })] }));
-    await expect(drive(venue.contract(SYMBOL), 1_000)).resolves.toMatchObject({ status: "under_review", marketState: "unknown", resolutionSide: null });
+    await expect(drive(venue.contract(LOW), 1_000)).resolves.toMatchObject({ status: "settled", marketState: "closed", resolutionSide: "yes", settlementValue: "0.8431", strike: "0.82" });
+    await expect(drive(venue.contract(HIGH), 1_000)).resolves.toMatchObject({ status: "under_review", resolutionSide: null, settlementValue: null });
   });
 
   it("returns null for an unknown event, a missing contract, or a symbol with no event part", async () => {
     const { venue, http } = await connected();
-    http.respond(() => new Response('{"error":"not found"}', { status: 404 }));
-    await expect(drive(venue.contract(SYMBOL), 1_000)).resolves.toBeNull();
+    http.respond(() => new Response('{"error":"Event not found"}', { status: 404 }));
+    await expect(drive(venue.contract(SYMBOL), 3_000)).resolves.toBeNull();
 
-    http.respond(() => ({ ticker: EVENT, contracts: [contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-DOWN" })] }));
-    await expect(drive(venue.contract(SYMBOL), 1_000)).resolves.toBeNull();
+    http.respond(() => eventRow({ contracts: [contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140300-DOWN" })] }));
+    await expect(drive(venue.contract(SYMBOL), 3_000)).resolves.toBeNull();
 
     const before = http.calls.length;
     await expect(venue.contract("NOEVENT")).resolves.toBeNull();
@@ -794,34 +673,327 @@ describe("contract and listContracts", () => {
 
   it("rejects a contract whose price grid cannot be read", async () => {
     const { venue, http } = await connected();
-    http.respond(() => ({ ticker: EVENT, contracts: [contractRow({ priceIncrement: "a cent" })] }));
+    http.respond(() => eventRow({ contracts: [contractRow({ priceIncrement: "a cent" })] }));
     await expect(drive(venue.contract(SYMBOL), 1_000)).rejects.toThrow(`contract ${SYMBOL}: unreadable priceIncrement`);
   });
 
-  it("lists active contracts and remembers each symbol's event ticker", async () => {
+  it("shares one event read between the contracts of a ladder for two seconds", async () => {
     const { venue, http } = await connected();
-    const odd = "GEMI-ODD-SYMBOL-WITH-PARTS";
-    http.respond((call) =>
-      call.path === "/v1/prediction-markets/events"
-        ? {
-            data: [
-              { ticker: EVENT, contracts: [contractRow()] },
-              { ticker: "ODDEVENT", contracts: [contractRow({ instrumentSymbol: odd }), contractRow({ instrumentSymbol: "GEMI-BROKEN-UP", quantityIncrement: null })] },
-            ],
-          }
-        : { ticker: "ODDEVENT", contracts: [contractRow({ instrumentSymbol: odd })] },
-    );
+    http.respond(() => ladderRow([strikeRow("0.82", 0), strikeRow("0.84", 1)]));
 
-    const listed = await drive(venue.listContracts(), 1_000);
-    expect(listed.map((contract) => [contract.symbol, contract.eventTicker])).toEqual([
-      [SYMBOL, EVENT],
-      [odd, "ODDEVENT"],
+    // Asked for together, they wait for the same read.
+    const [low, high] = await drive(Promise.all([venue.contract(LOW), venue.contract(HIGH)]), 0);
+    expect([low?.strike, high?.strike]).toEqual(["0.82", "0.84"]);
+    expect(http.calls).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    await expect(venue.contract(HIGH)).resolves.toMatchObject({ symbol: HIGH });
+    expect(http.calls).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(drive(venue.contract(LOW), 0)).resolves.toMatchObject({ symbol: LOW });
+    expect(http.calls).toHaveLength(2);
+  });
+
+  it("does not keep a failed event read, and keeps one read per event", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => new Error("fetch failed"));
+    await expect(drive(venue.contract(LOW), 5_000)).rejects.toThrow("fetch failed");
+    expect(http.calls).toHaveLength(2); // the read and its one retry
+
+    http.respond((call) => (call.path.endsWith(LADDER) ? ladderRow([strikeRow("0.82", 0)]) : eventRow()));
+    await expect(drive(venue.contract(LOW), 1_000)).resolves.toMatchObject({ symbol: LOW });
+    await expect(drive(venue.contract(SYMBOL), 1_000)).resolves.toMatchObject({ symbol: SYMBOL });
+    expect(http.calls.slice(2).map((call) => call.path)).toEqual([`${EVENTS}/${LADDER}`, `${EVENTS}/${EVENT}`]);
+  });
+});
+
+describe("listEvents", () => {
+  it("asks for every active and approved event and maps both shapes", async () => {
+    const { venue, http } = await connected();
+    const approved = { status: "approved", marketState: "post_only" };
+    http.respond(() => listPage([eventRow({ volume: "48" }), ladderRow([strikeRow("0.84", 1, approved), strikeRow("0.82", 0, approved)], { status: "approved", category: "Commodities" })]));
+
+    const events = await drive(venue.listEvents(), 1_000);
+    expect(http.calls).toHaveLength(1);
+    expect(http.calls[0]).toMatchObject({ method: "GET", path: EVENTS, query: "?status=active&status=approved&limit=500&offset=0", payload: null });
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ ticker: EVENT, shape: "binary", cadence: "15m", category: "Crypto", status: "active", volumeUnits: 4_800n });
+    expect(events[0]!.contracts.map((contract) => contract.symbol)).toEqual([SYMBOL]);
+    expect(events[1]).toMatchObject({ ticker: LADDER, shape: "ladder", cadence: "hourly", category: "Commodities", status: "approved" });
+    expect(events[1]!.contracts.map((contract) => [contract.symbol, contract.status, contract.marketState, contract.strike])).toEqual([
+      [LOW, "approved", "post_only", "0.82"],
+      [HIGH, "approved", "post_only", "0.84"],
     ]);
-    expect(http.calls[0]).toMatchObject({ path: "/v1/prediction-markets/events", query: "?status=active&category=crypto&limit=500" });
+  });
 
-    // The remembered ticker wins over the one derived from the symbol.
-    await expect(drive(venue.contract(odd), 1_000)).resolves.toMatchObject({ symbol: odd, eventTicker: "ODDEVENT" });
-    expect(http.calls[1]!.path).toBe("/v1/prediction-markets/events/ODDEVENT");
+  it("pages on the total and lists each event and each contract once", async () => {
+    const { venue, http } = await connected();
+    const later = eventRow({ ticker: "DEMO15M2611140315", contracts: [contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140315-UP" })] });
+    // The venue hands out two events a page here; the list moved between two pages, so one event
+    // comes twice, and two other events repeat a contract that is already listed.
+    const pages: Record<string, unknown[]> = {
+      "0": [eventRow(), ladderRow([strikeRow("0.82", 0), strikeRow("0.84", 1)])],
+      "2": [ladderRow([strikeRow("0.82", 0)]), later],
+      "4": [
+        eventRow({ ticker: "COPY15M2611140300", contracts: [contractRow(), contractRow({ instrumentSymbol: "GEMI-COPY15M2611140300-UP" })] }),
+        eventRow({ ticker: "TWIN15M2611140300" }),
+      ],
+    };
+    http.respond((call) => {
+      const offset = param(call, "offset") ?? "";
+      return { data: pages[offset] ?? [], pagination: { limit: 2, offset: Number(offset), total: 6 } };
+    });
+
+    const events = await drive(venue.listEvents(), 5_000);
+    expect(http.calls.map((call) => call.query)).toEqual([
+      "?status=active&status=approved&limit=500&offset=0",
+      "?status=active&status=approved&limit=500&offset=2",
+      "?status=active&status=approved&limit=500&offset=4",
+    ]);
+    expect(events.map((event) => [event.ticker, event.contracts.map((contract) => contract.symbol)])).toEqual([
+      [EVENT, [SYMBOL]],
+      [LADDER, [LOW, HIGH]],
+      ["DEMO15M2611140315", ["GEMI-DEMO15M2611140315-UP"]],
+      ["COPY15M2611140300", ["GEMI-COPY15M2611140300-UP"]],
+    ]);
+  });
+
+  it("stops at an empty page even when the total promises more", async () => {
+    const { venue, http } = await connected();
+    http.respond((call) => ({ data: param(call, "offset") === "0" ? [eventRow()] : [], pagination: { limit: 500, offset: 0, total: 3 } }));
+    await expect(drive(venue.listEvents(), 3_000)).resolves.toHaveLength(1);
+    expect(http.calls).toHaveLength(2);
+  });
+
+  it("answers from its last read for ten seconds, and callers that overlap share one read", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => listPage([eventRow()]));
+    const first = await drive(venue.listEvents(), 0);
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    await expect(venue.listEvents()).resolves.toBe(first);
+    expect(http.calls).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const [second, third] = await drive(Promise.all([venue.listEvents(), venue.listEvents()]), 0);
+    expect(http.calls).toHaveLength(2);
+    expect(second).toBe(third);
+    expect(second).not.toBe(first);
+  });
+
+  // Measured on the sandbox: the list comes from caches that disagree, so a read can return a
+  // page that is minutes older than the one before it.
+  it("keeps the list it holds when the venue answers with an older page, and asks again at the next call", async () => {
+    const { venue, http } = await connected();
+    const later = (minute: string): Row => {
+      const contracts = [contractRow({ instrumentSymbol: `GEMI-DEMO15M26111403${minute}-UP` })];
+      return eventRow({ ticker: `DEMO15M26111403${minute}`, createdAt: `2026-11-14T02:${minute}:00.000Z`, contracts });
+    };
+    http.respond(() => listPage([eventRow(), later("41")]));
+    const held = await drive(venue.listEvents(), 20_000);
+    expect(held).toHaveLength(2);
+
+    // A page from before the newest event it knows was listed.
+    http.respond(() => listPage([eventRow({ volume: "1" })]));
+    await expect(drive(venue.listEvents(), 5_000)).resolves.toBe(held);
+    http.respond(() => listPage([]));
+    await expect(drive(venue.listEvents(), 5_000)).resolves.toBe(held);
+    expect(http.calls).toHaveLength(3);
+
+    // A page of the same age or newer replaces it.
+    http.respond(() => listPage([eventRow({ volume: "2" }), later("41")]));
+    const same = await drive(venue.listEvents(), 20_000);
+    expect(same[0]!.volumeUnits).toBe(200n);
+    http.respond(() => listPage([eventRow({ volume: "3" }), later("41"), later("45")]));
+    await expect(drive(venue.listEvents(), 20_000)).resolves.toHaveLength(3);
+    expect(http.calls).toHaveLength(5);
+  });
+
+  it("takes an older page after five minutes without a newer one: the newest event may be gone", async () => {
+    const { venue, http } = await connected();
+    const newest = eventRow({ ticker: "DEMO15M2611140315", createdAt: "2026-11-14T02:41:00.000Z", contracts: [contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140315-UP" })] });
+    http.respond(() => listPage([eventRow(), newest]));
+    const held = await drive(venue.listEvents(), 299_999);
+
+    http.respond(() => listPage([eventRow()]));
+    await expect(drive(venue.listEvents(), 1)).resolves.toBe(held);
+    await expect(drive(venue.listEvents(), 1_000)).resolves.toHaveLength(1);
+  });
+
+  it("fails when the venue cannot be read, rather than answering from its last read", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => listPage([eventRow()]));
+    await drive(venue.listEvents(), 20_000);
+
+    http.respond(() => new Response("Bad Gateway", { status: 502 }));
+    await expect(drive(venue.listEvents(), 5_000)).rejects.toThrow(`HTTP 502 from GET ${EVENTS}`);
+    http.respond(() => ({ events: [] }));
+    await expect(drive(venue.listEvents(), 5_000)).rejects.toThrow('unexpected response: no "data" list');
+
+    http.respond(() => listPage([eventRow()]));
+    await expect(drive(venue.listEvents(), 5_000)).resolves.toHaveLength(1);
+  });
+
+  it("skips a row it cannot read, says why once, and lists the rest", async () => {
+    const lines: string[] = [];
+    const { venue, http } = await connected({ log: (line) => lines.push(line) });
+    const broken = strikeRow("0.84", 1, { priceIncrement: "?" });
+    const data = [null, eventRow({ ticker: undefined }), ladderRow([strikeRow("0.82", 0), broken]), eventRow({ ticker: "VOID15M2611140300", contracts: [] }), eventRow()];
+    http.respond(() => listPage(data));
+
+    const events = await drive(venue.listEvents(), 20_000);
+    expect(events.map((event) => [event.ticker, event.contracts.map((contract) => contract.symbol)])).toEqual([
+      [LADDER, [LOW]],
+      [EVENT, [SYMBOL]],
+    ]);
+    const reasons = [
+      "venue list: skipped event without a ticker",
+      `venue list: skipped contract ${HIGH}: unreadable priceIncrement`,
+      "venue list: skipped event VOID15M2611140300: no readable contract",
+    ];
+    expect(lines).toEqual(reasons);
+
+    // The same rows on the next read are not reported again; a new one is.
+    data.push(eventRow({ ticker: "LATE15M2611140300", expiryDate: "later", contracts: [contractRow({ instrumentSymbol: "GEMI-LATE15M2611140300-UP" })] }));
+    await expect(drive(venue.listEvents(), 20_000)).resolves.toHaveLength(2);
+    expect(lines).toEqual([...reasons, "venue list: skipped event LATE15M2611140300: unreadable expiryDate"]);
+  });
+
+  it("keeps the event ticker the list gave with each contract, whatever the symbol looks like", async () => {
+    const { venue, http } = await connected();
+    const odd = "GEMI-ODD-2611140300-AAA-BBB-M-AAA1.5";
+    const oddEvent = "ODD-2611140300-AAA-BBB";
+    http.respond((call) => {
+      if (call.path === EVENTS) return listPage([eventRow(), eventRow({ ticker: oddEvent, contracts: [contractRow({ instrumentSymbol: odd })] })]);
+      if (call.path === SETTLED) return { positions: [{ instrumentSymbol: odd, payout: "2" }] };
+      return eventRow({ ticker: oddEvent, contracts: [contractRow({ instrumentSymbol: odd })] });
+    });
+
+    const events = await drive(venue.listEvents(), 1_000);
+    expect(events[1]!.contracts[0]).toMatchObject({ symbol: odd, eventTicker: oddEvent });
+
+    // The ticker from the list wins over the one the symbol's last dash would give.
+    await expect(drive(venue.contract(odd), 1_000)).resolves.toMatchObject({ symbol: odd, eventTicker: oddEvent });
+    expect(http.calls.at(-1)!.path).toBe(`${EVENTS}/${oddEvent}`);
+    await expect(drive(venue.settledPayoutMicros(odd), 3_000)).resolves.toBe(2_000_000n);
+    expect(http.calls.at(-1)!.query).toBe(`?eventTicker=${oddEvent}&limit=100&offset=0`);
+
+    // A symbol no list has shown is split at its last dash.
+    await drive(venue.contract("GEMI-NEW-2611140300-CCC-DDD-M-CCC"), 1_000);
+    expect(http.calls.at(-1)!.path).toBe(`${EVENTS}/NEW-2611140300-CCC-DDD-M`);
+  });
+
+  it("keeps the event ticker of a symbol for a week after its contract expired: settlement asks for it then", async () => {
+    const { venue, http } = await connected();
+    const odd = "GEMI-ODD-2611140300-AAA-BBB-M-AAA1.5";
+    const oddEvent = "ODD-2611140300-AAA-BBB";
+    const longLived = eventRow({ ticker: "DEMO2612140300", contracts: [contractRow({ instrumentSymbol: "GEMI-DEMO2612140300-HI1", expiryDate: "2026-12-14T03:00:00.000Z" })] });
+    let listed = [eventRow({ ticker: oddEvent, contracts: [contractRow({ instrumentSymbol: odd })] }), longLived];
+    http.respond((call) => (call.path === EVENTS ? listPage(listed) : eventRow()));
+    await drive(venue.listEvents(), 1_000);
+
+    // Delisted at its expiry, and still known six days and more later.
+    listed = [longLived];
+    const expiryMs = Date.parse("2026-11-14T03:00:00.000Z");
+    vi.setSystemTime(expiryMs + 7 * 86_400_000 - 60_000);
+    await drive(venue.listEvents(), 1_000);
+    await drive(venue.contract(odd), 1_000);
+    expect(http.calls.at(-1)!.path).toBe(`${EVENTS}/${oddEvent}`);
+
+    // After a week it is forgotten, and the event is taken from the symbol.
+    vi.setSystemTime(expiryMs + 7 * 86_400_000);
+    await drive(venue.listEvents(), 1_000);
+    await drive(venue.contract(odd), 1_000);
+    expect(http.calls.at(-1)!.path).toBe(`${EVENTS}/ODD-2611140300-AAA-BBB-M`);
+  });
+
+  it("stays within the request budget: asked every 20 s it reads the list three times a minute, and a burst of calls costs no more than six", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => listPage([eventRow({ expiryDate: "2026-11-14T04:00:00.000Z" })]));
+    for (let call = 0; call < 30; call++) await drive(venue.listEvents(), 20_000);
+    expect(http.calls.filter((call) => call.path === EVENTS)).toHaveLength(30);
+
+    http.calls.length = 0;
+    for (let call = 0; call < 60; call++) await drive(venue.listEvents(), 1_000);
+    expect(http.calls.filter((call) => call.path === EVENTS)).toHaveLength(6);
+  });
+});
+
+/** What the venue answers for a symbol its market data routes do not know. */
+function unknownSymbol(symbol: string, json = true): Response {
+  const message = `Supplied value '${symbol}' is not a valid symbol`;
+  return new Response(json ? JSON.stringify({ result: "error", reason: "Bad Request", message }) : message, { status: 400 });
+}
+
+/** A book ticker frame: lower-case symbol, no event name, long bare integers, "" for an empty side. */
+function ticker(symbol: string, bid: [price: string, size: string] | null, ask: [price: string, size: string] | null): string {
+  const [b, B] = bid ?? ["", ""];
+  const [a, A] = ask ?? ["", ""];
+  return `{"u":1793265913394827,"E":1794693166237111319,"s":"${symbol.toLowerCase()}","b":"${b}","B":"${B}","a":"${a}","A":"${A}"}`;
+}
+
+/** A venue whose last list read showed the ladder: one strike active, one approved. */
+async function listed(extra: Partial<GeminiSandboxVenueOptions> = {}) {
+  const made = await connected(extra);
+  made.http.respond(() => listPage([ladderRow([strikeRow("0.82", 0), strikeRow("0.84", 1, { status: "approved", marketState: "post_only" })])]));
+  await drive(made.venue.listEvents(), 1_000);
+  made.http.calls.length = 0;
+  return { ...made, feed: FakeWebSocket.publicSockets().at(-1)! };
+}
+
+describe("liveTop", () => {
+  it("serves the top of book of every contract the list shows as active, from the public socket", async () => {
+    const { venue, feed, ws } = await listed();
+    expect(FakeWebSocket.instances).toEqual([ws, feed]);
+    expect(feed.streams("SUBSCRIBE")).toEqual([["contractStatus"], [`${LOW}@bookTicker`]]);
+    expect(venue.liveTop(LOW)).toBeUndefined();
+
+    feed.serverFrame(ticker(LOW, ["0.0300", "33.00"], ["0.0900", "10.00"]));
+    feed.serverFrame(ticker(HIGH, ["0.0300", "33.00"], ["0.0900", "10.00"]));
+    await vi.advanceTimersByTimeAsync(7_000);
+    expect(venue.liveTop(LOW)).toEqual({ top: { bidPx: 300n, bidUnits: 3_300n, askPx: 900n, askUnits: 1_000n }, atMs: START_MS + 8_000 });
+    expect(venue.liveTop(HIGH)).toBeUndefined();
+    expect(venue.liveTop("GEMI-NOSUCH-UP")).toBeUndefined();
+  });
+
+  it("subscribes a contract when a later list read shows it active, and drops one that closed", async () => {
+    const { venue, http, feed } = await listed();
+    feed.serverFrame(ticker(LOW, ["0.0300", "33.00"], ["0.0900", "10.00"]));
+    http.respond(() => listPage([ladderRow([strikeRow("0.82", 0, { status: "settled", marketState: "closed" }), strikeRow("0.84", 1)])]));
+    await drive(venue.listEvents(), 20_000);
+    await drive(venue.listEvents(), 1_000);
+
+    expect(feed.streams("SUBSCRIBE").at(-1)).toEqual([`${HIGH}@bookTicker`]);
+    expect(feed.streams("UNSUBSCRIBE")).toEqual([[`${LOW}@bookTicker`]]);
+    expect(venue.liveTop(LOW)).toBeUndefined();
+    feed.serverFrame(ticker(HIGH, ["0.0200", "8.34"], null));
+    expect(venue.liveTop(HIGH)?.top).toEqual({ bidPx: 200n, bidUnits: 834n, askPx: null, askUnits: 0n });
+  });
+
+  it("serves nothing after the public socket is lost, until the next list read has subscribed again", async () => {
+    const lines: string[] = [];
+    const { venue, feed } = await listed({ log: (line) => lines.push(line) });
+    feed.serverFrame(ticker(LOW, ["0.0300", "33.00"], ["0.0900", "10.00"]));
+    feed.serverClose(1006);
+    expect(venue.liveTop(LOW)).toBeUndefined();
+    expect(lines).toEqual(["market data socket closed: closed"]);
+    // Orders do not depend on it.
+    expect(venue.connected).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    FakeWebSocket.snapshots.set(`${LOW}@bookTicker`, ticker(LOW, ["0.0200", "8.34"], null));
+    await drive(venue.listEvents(), 1_000);
+    expect(FakeWebSocket.publicSockets()).toHaveLength(2);
+    expect(venue.liveTop(LOW)?.top).toEqual({ bidPx: 200n, bidUnits: 834n, askPx: null, askUnits: 0n });
+  });
+
+  it("close() closes both sockets", async () => {
+    const { venue, feed, ws } = await listed();
+    feed.serverFrame(ticker(LOW, ["0.0300", "33.00"], ["0.0900", "10.00"]));
+    venue.close();
+    expect([ws.readyState, feed.readyState]).toEqual([3, 3]);
+    expect(venue.liveTop(LOW)).toBeUndefined();
   });
 });
 
@@ -837,6 +1009,200 @@ describe("topOfBook", () => {
     const { venue, http } = await connected();
     http.respond(() => ({ bids: [], asks: [{ price: "0.17", amount: "24.0" }] }));
     await expect(drive(venue.topOfBook(SYMBOL), 1_000)).resolves.toEqual({ bidPx: null, bidUnits: 0n, askPx: 1_700n, askUnits: 2_400n });
+  });
+
+  // For its first minutes as an instrument the book route answers "not a valid symbol" for an
+  // active contract on about half the calls, while the socket has its book from the first second.
+  it("reads the book of an active contract over the public socket when the book route does not know it yet", async () => {
+    const { venue, http, feed } = await listed();
+    http.respond(() => unknownSymbol(LOW));
+    FakeWebSocket.answer = (message) =>
+      message.method === "depth" ? { status: 200, result: { lastUpdateId: "1793265913744426", bids: [["0.8800", "11.00"]], asks: [["0.9700", "21.00"]] } } : undefined;
+
+    await expect(drive(venue.topOfBook(LOW), 1_000)).resolves.toEqual({ bidPx: 8_800n, bidUnits: 1_100n, askPx: 9_700n, askUnits: 2_100n });
+    expect(http.calls.map((call) => call.path)).toEqual([`/v1/book/${LOW}`]);
+    expect(feed.sent.at(-1)).toMatchObject({ method: "depth", params: { symbol: LOW, limit: 1 } });
+
+    // A side the socket reports as empty is empty: that is the book, read now.
+    FakeWebSocket.answer = () => ({ status: 200, result: { lastUpdateId: "1793265913744427", bids: [], asks: [["0.9700", "21.00"]] } });
+    await expect(drive(venue.topOfBook(LOW), 1_000)).resolves.toEqual({ bidPx: null, bidUnits: 0n, askPx: 9_700n, askUnits: 2_100n });
+  });
+
+  it("fails, for the caller to try again, when the socket cannot answer either: it never reports an empty book", async () => {
+    const { venue, http, feed } = await listed();
+    http.respond(() => unknownSymbol(LOW));
+
+    // No answer from the socket within three seconds.
+    const silent = venue.topOfBook(LOW).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(String(await silent)).toContain("no ack for depth");
+
+    FakeWebSocket.answer = () => ({ status: 400, error: { code: -1013, msg: `Unknown symbol: ${LOW}` } });
+    await expect(drive(venue.topOfBook(LOW), 1_000)).rejects.toThrow(`the book of ${LOW} was refused with status 400`);
+
+    feed.serverClose(1006);
+    await expect(drive(venue.topOfBook(LOW), 1_000)).rejects.toThrow(`no market data connection to read the book of ${LOW}`);
+  });
+
+  it("passes the refusal on for a contract that is not active: one only listed, or one no list has shown", async () => {
+    const { venue, http, feed } = await listed();
+    FakeWebSocket.answer = () => ({ status: 200, result: { bids: [], asks: [] } });
+    for (const symbol of [HIGH, SYMBOL]) {
+      http.respond(() => unknownSymbol(symbol));
+      await expect(drive(venue.topOfBook(symbol), 1_000)).rejects.toThrow(`HTTP 400 from GET /v1/book/${symbol}`);
+    }
+    expect(feed.sent.filter((message) => message.method === "depth")).toEqual([]);
+
+    // Any other refusal of an active contract's book is passed on too.
+    http.respond(() => new Response('{"result":"error","reason":"Bad Request","message":"Invalid limit"}', { status: 400 }));
+    await expect(drive(venue.topOfBook(LOW), 1_000)).rejects.toThrow(`HTTP 400 from GET /v1/book/${LOW}`);
+    expect(feed.sent.filter((message) => message.method === "depth")).toEqual([]);
+  });
+
+  it("reads depth the same way, and answers no levels only for a contract that is not active", async () => {
+    const { venue, http } = await listed();
+    FakeWebSocket.answer = (message) =>
+      message.method === "depth" ? { status: 200, result: { bids: [["0.8800", "11.00"], ["0.8600", "11.00"]], asks: [["0.9700", "21.00"]] } } : undefined;
+    http.respond(() => unknownSymbol(LOW));
+    await expect(drive(venue.depth(LOW, 10), 1_000)).resolves.toEqual({
+      bids: [
+        { px: 8_800n, units: 1_100n },
+        { px: 8_600n, units: 1_100n },
+      ],
+      asks: [{ px: 9_700n, units: 2_100n }],
+    });
+    http.respond(() => unknownSymbol(HIGH));
+    await expect(drive(venue.depth(HIGH, 10), 1_000)).resolves.toEqual({ bids: [], asks: [] });
+
+    FakeWebSocket.answer = () => ({ status: 400, error: { code: -1013, msg: `Unknown symbol: ${LOW}` } });
+    http.respond(() => unknownSymbol(LOW));
+    await expect(drive(venue.depth(LOW, 10), 1_000)).rejects.toThrow(`the book of ${LOW} was refused with status 400`);
+  });
+});
+
+describe("depth, trades and history", () => {
+  it("reads the levels of each side of the book", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => ({
+      bids: [
+        { price: "0.03", amount: "33.0", timestamp: "1794693211" },
+        { price: "0.02", amount: "11.0", timestamp: "1794693211" },
+      ],
+      asks: [{ price: "0.1", amount: "21.89", timestamp: "1794693211" }],
+    }));
+    await expect(drive(venue.depth(SYMBOL, 10), 1_000)).resolves.toEqual({
+      bids: [
+        { px: 300n, units: 3_300n },
+        { px: 200n, units: 1_100n },
+      ],
+      asks: [{ px: 1_000n, units: 2_189n }],
+    });
+    expect(http.calls[0]).toMatchObject({ method: "GET", path: `/v1/book/${SYMBOL}`, query: "?limit_bids=10&limit_asks=10", payload: null });
+  });
+
+  it("answers an empty book, and a contract that is not an instrument yet, with no levels", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => ({ bids: [], asks: [] }));
+    await expect(drive(venue.depth(SYMBOL, 10), 1_000)).resolves.toEqual({ bids: [], asks: [] });
+    http.respond(() => unknownSymbol(SYMBOL));
+    await expect(drive(venue.depth(SYMBOL, 10), 1_000)).resolves.toEqual({ bids: [], asks: [] });
+    expect(http.calls).toHaveLength(2);
+  });
+
+  it("never asks the venue for a whole book: zero levels would mean all of them", async () => {
+    const { venue, http } = await connected();
+    await expect(venue.depth(SYMBOL, 0)).rejects.toThrow(RangeError);
+    await expect(venue.depth(SYMBOL, 2.5)).rejects.toThrow(RangeError);
+    await expect(venue.trades(SYMBOL, 0)).rejects.toThrow(RangeError);
+    expect(http.calls).toEqual([]);
+  });
+
+  it("reads the most recent trades, newest first", async () => {
+    const { venue, http } = await connected();
+    // The trade id is a bare integer of 16 digits on the wire.
+    const tape = '[{"timestamp":1794693909,"timestampms":1794693909020,"tid":1893456305647143,"price":"0.17","amount":"1","exchange":"demo","type":"buy"},{"timestamp":1794693904,"timestampms":1794693904893,"tid":1893456305647139,"price":"0.03","amount":"22.89","exchange":"demo","type":"sell"}]';
+    http.respond(() => new Response(tape, { status: 200 }));
+    await expect(drive(venue.trades(SYMBOL, 50), 1_000)).resolves.toEqual([
+      { id: "1893456305647143", atMs: 1794693909020, px: 1_700n, units: 100n, taker: "buy" },
+      { id: "1893456305647139", atMs: 1794693904893, px: 300n, units: 2_289n, taker: "sell" },
+    ]);
+    expect(http.calls[0]).toMatchObject({ method: "GET", path: `/v1/trades/${SYMBOL}`, query: "?limit_trades=50", payload: null });
+  });
+
+  it("asks for at most 500 trades and returns at most the number asked for", async () => {
+    const { venue, http } = await connected();
+    const trade = (index: number): Row => ({ timestampms: 1794693909020 - index, tid: 7_000 - index, price: "0.17", amount: "1", type: "buy" });
+    http.respond(() => [trade(0), trade(1), trade(2)]);
+    await expect(drive(venue.trades(SYMBOL, 2), 1_000)).resolves.toHaveLength(2);
+    await drive(venue.trades(SYMBOL, 5_000), 1_000);
+    expect(http.calls.map((call) => call.query)).toEqual(["?limit_trades=2", "?limit_trades=500"]);
+  });
+
+  it("answers an empty tape, and a contract the venue does not know yet, with no trades", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => []);
+    await expect(drive(venue.trades(SYMBOL, 50), 1_000)).resolves.toEqual([]);
+    http.respond(() => unknownSymbol(SYMBOL));
+    await expect(drive(venue.trades(SYMBOL, 50), 1_000)).resolves.toEqual([]);
+  });
+
+  it.each([
+    [60, "1m"],
+    [300, "5m"],
+    [900, "15m"],
+    [1_800, "30m"],
+    [3_600, "1hr"],
+    [21_600, "6hr"],
+    [86_400, "1day"],
+  ])("reads the closing prices of %i-second candles, oldest first", async (stepSecs, frame) => {
+    const { venue, http } = await connected();
+    http.respond(() => [
+      [1794693900000, 0.16, 0.17, 0.02, 0.17, 47.78],
+      [1794693840000, 0.16, 0.16, 0.16, 0.16, 0],
+    ]);
+    await expect(drive(venue.history(SYMBOL, stepSecs), 1_000)).resolves.toEqual([
+      { atMs: 1794693840000, px: 1_600n },
+      { atMs: 1794693900000, px: 1_700n },
+    ]);
+    expect(http.calls[0]).toMatchObject({ method: "GET", path: `/v2/candles/${SYMBOL}/${frame}`, query: "", payload: null });
+  });
+
+  it("answers a contract that never traded, and one the venue does not know yet, with an empty history", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => new Response('{"result":"error","reason":"NoDataFound","message":"Candles are empty for given symbol or time_frame"}', { status: 400 }));
+    await expect(drive(venue.history(SYMBOL, 60), 1_000)).resolves.toEqual([]);
+    // This route answers an unknown symbol in plain text.
+    http.respond(() => unknownSymbol(SYMBOL, false));
+    await expect(drive(venue.history(SYMBOL, 60), 1_000)).resolves.toEqual([]);
+    expect(http.calls).toHaveLength(2);
+  });
+
+  it("rejects a step the venue has no candles for, without asking", async () => {
+    const { venue, http } = await connected();
+    await expect(venue.history(SYMBOL, 120)).rejects.toThrow("no candles of 120 seconds");
+    expect(http.calls).toEqual([]);
+  });
+
+  it("passes any other refusal on as an error", async () => {
+    const { venue, http } = await connected();
+    http.respond(() => new Response('{"result":"error","reason":"InvalidParameterValue","message":"time_frame expects one of the following"}', { status: 400 }));
+    await expect(drive(venue.history(SYMBOL, 60), 1_000)).rejects.toThrow(`HTTP 400 from GET /v2/candles/${SYMBOL}/1m`);
+    http.respond(() => new Response('{"result":"error","reason":"BadRequest","message":"Invalid `limit_trades` parameter"}', { status: 400 }));
+    await expect(drive(venue.trades(SYMBOL, 50), 1_000)).rejects.toThrow(`HTTP 400 from GET /v1/trades/${SYMBOL}`);
+    await expect(drive(venue.depth(SYMBOL, 10), 1_000)).rejects.toThrow(`HTTP 400 from GET /v1/book/${SYMBOL}`);
+  });
+
+  it("sends every public read through one queue, a second apart", async () => {
+    const { venue, http } = await connected();
+    http.respond((call) => {
+      if (call.path === EVENTS) return listPage([eventRow()]);
+      if (call.path.startsWith(EVENTS)) return eventRow();
+      if (call.path.startsWith("/v1/book")) return { bids: [], asks: [] };
+      return [];
+    });
+    await drive(Promise.all([venue.listEvents(), venue.contract(SYMBOL), venue.topOfBook(SYMBOL), venue.depth(SYMBOL, 10), venue.trades(SYMBOL, 50), venue.history(SYMBOL, 60)]), 10_000);
+    expect(http.calls.map((call) => call.at - http.calls[0]!.at)).toEqual([0, 1_000, 2_000, 3_000, 4_000, 5_000]);
+    expect(http.calls.every((call) => call.payload === null)).toBe(true);
   });
 });
 
