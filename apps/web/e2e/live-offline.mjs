@@ -98,6 +98,7 @@ try {
   // Orders that expired earlier are reclaimed after it, so nothing stays held. A row that can be
   // reclaimed shows its steps open, with Reclaim among them.
   await page.locator('[data-testid="activity-order"]').first().and(page.locator('[data-stamp="EXPIRED"]')).waitFor({ timeout: 180_000 });
+  await shoot("offline-live-expired");
   const expiredRows = page.locator('[data-testid="activity-order"][data-stamp="EXPIRED"]');
   const buttons = page.locator('[data-testid="activity-steps"]').getByRole("button", { name: /^Reclaim/ });
   const refused = page.getByText(/was not reclaimed|Nothing was reclaimed/i).first();
