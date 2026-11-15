@@ -23,7 +23,7 @@ afterEach(() => {
 function relayer() {
   const clock = { ms: NOW };
   const now = () => clock.ms;
-  const venue = new RollingMockVenue({ windowSecs: 900, resolve: "yes", now, random: () => 0.5 });
+  const venue = new RollingMockVenue({ windowSecs: 900, resolve: "yes", now });
   const chain = new FakeFullChain(NOW / 1000);
   chain.marketSide.treasury = 50_000_000n;
   const journal = openJournal(":memory:");
@@ -59,12 +59,12 @@ describe("a contract of the simulated venue, from listing to settlement", () => 
   it("is discovered, created on request, traded, reconciled and settled when the venue resolves it", async () => {
     const w = relayer();
 
-    // Discovery: every event the venue lists, the soonest first.
+    // Discovery: every event the venue lists; the pick is the quarter-hour contract in its window.
     await w.daemon.tickMarkets();
-    const [event] = w.manager.eventViews();
+    const event = w.manager.eventViews().find((listed) => listed.ticker === "BTC15M2611140300");
     expect(event).toMatchObject({ ticker: "BTC15M2611140300", shape: "binary", cadence: "15m" });
     const picked = event!.markets[0]!;
-    expect(picked).toMatchObject({ tradable: true, onchain: null, book: { askPx: "5200" } });
+    expect(picked).toMatchObject({ tradable: true, onchain: null, book: { askPx: "7800" } });
     const { symbol } = picked;
 
     // Creation on request, with the names of the naming scheme.
@@ -81,19 +81,19 @@ describe("a contract of the simulated venue, from listing to settlement", () => 
       side: "YES",
       kind: "buy",
       units: 300n,
-      limitPx: 5_200n,
-      maxFeeMicros: feeCap(300n, 5_200n),
+      limitPx: 7_800n,
+      maxFeeMicros: feeCap(300n, 7_800n),
       expiresAt: NOW / 1000 + 90,
     };
     w.chain.addOrder(order);
     await w.daemon.tickOrders();
-    expect(w.chain.fills).toMatchObject([{ address: "OrderA", kind: "buy", fillUnits: 300n, amountMicros: 1_560_000n, feeMicros: takerFee(300n, 5_200n) }]);
+    expect(w.chain.fills).toMatchObject([{ address: "OrderA", kind: "buy", fillUnits: 300n, amountMicros: 2_340_000n, feeMicros: takerFee(300n, 7_800n) }]);
     expect(w.journal.get("OrderA")).toMatchObject({ state: "chain_filled", filledUnits: 300n });
 
     // The next list read carries the trade: the last price and the event's volume.
     w.at(NOW + 20_000);
     await w.daemon.tickMarkets();
-    expect(w.manager.view(symbol)).toMatchObject({ lastPx: "5200", onchain: { yesSupply: "300" } });
+    expect(w.manager.view(symbol)).toMatchObject({ lastPx: "7800", onchain: { yesSupply: "300" } });
     expect(w.manager.eventView(event!.ticker)?.volumeUnits).toBe("300");
 
     // The venue's position equals the supply.
@@ -124,7 +124,7 @@ describe("a contract of the simulated venue, from listing to settlement", () => 
       settleState: "settled",
       tradable: false,
       notTradableReason: "not_active",
-      lastPx: "5200",
+      lastPx: "7800",
       onchain: { status: "settled", yesSupply: "300", yesPayout: "10000", noPayout: "0", redeemAfter: END / 1000 + 30 },
     });
     expect(w.manager.view(symbol)?.settlementValue).toMatch(/^\d+\.\d{2}$/);

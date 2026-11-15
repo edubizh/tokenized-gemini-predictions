@@ -12,7 +12,7 @@ import { FakeMarketChain } from "./helpers/fake-market-chain.ts";
 // the manager's views and the market data, as a client of the API sees them.
 const NOW = Date.parse("2026-11-14T02:50:00Z");
 const END = Date.parse("2026-11-14T03:00:00Z");
-const BTC = "TEST-BTC15M2611140300-UP";
+const BTC = "MOCK-BTC15M2611140300-UP";
 const TICKER = "BTC15M2611140300";
 
 // The keys of each shape in `api/types.ts`.
@@ -52,7 +52,7 @@ afterEach(async () => {
 async function relayer() {
   const clock = { ms: NOW };
   const now = () => clock.ms;
-  const venue = new RollingMockVenue({ windowSecs: 900, resolve: "yes", now, random: () => 0.5 });
+  const venue = new RollingMockVenue({ windowSecs: 900, resolve: "yes", now });
   const chain = new FakeMarketChain();
   const registry = openRegistry(":memory:");
   const journal = openJournal(":memory:");
@@ -79,17 +79,19 @@ describe("the API over the simulated venue", () => {
     const { get } = await relayer();
     const { status, body } = await get<{ events: ApiEvent[] }>("/events");
     expect(status).toBe(200);
-    expect(body.events.map((event) => event.ticker)).toEqual([TICKER, "ETH15M2611140300", "SOL15M2611140300"]);
-    const [event] = body.events;
+    // Both shapes, soonest expiry first: the five-minute contracts, then those of the quarter hour.
+    expect(body.events.map((event) => event.ticker).slice(0, 5)).toEqual(["BTC05M2611140255", "ETH05M2611140255", "SOL05M2611140255", "BTC05M2611140300", TICKER]);
+    expect(new Set(body.events.map((event) => event.shape))).toEqual(new Set(["binary", "ladder"]));
+    const event = body.events.find((listed) => listed.ticker === TICKER);
     expect(keys(event!)).toEqual(EVENT_KEYS);
     expect(event).toMatchObject({
-      title: "BTC price up at 03:00 UTC? (test)",
+      title: "BTC price on November 14 at 03:00 UTC",
       category: "Crypto",
       subcategory: ["Bitcoin"],
       underlying: "BTC",
       shape: "binary",
       cadence: "15m",
-      listedAt: END - 900_000,
+      listedAt: END - 1_140_000,
       expiresAt: END,
       venueStatus: "active",
       volumeUnits: "0",
@@ -100,7 +102,7 @@ describe("the API over the simulated venue", () => {
     expect(market).toMatchObject({
       symbol: BTC,
       eventTicker: TICKER,
-      title: "BTC price up at 03:00 UTC? (test)",
+      title: "BTC price on November 14 at 03:00 UTC",
       label: "Up",
       sortOrder: 0,
       startsAt: END - 900_000,
@@ -113,7 +115,7 @@ describe("the API over the simulated venue", () => {
       tickPx: "100",
       minUnits: "1",
       unitIncrement: "1",
-      book: { bidPx: "4800", bidUnits: "20000", askPx: "5200", askUnits: "20000", at: NOW },
+      book: { bidPx: "7400", bidUnits: "2500", askPx: "7800", askUnits: "2500", at: NOW },
       lastPx: null,
       onchain: null,
       resolution: null,
@@ -125,15 +127,25 @@ describe("the API over the simulated venue", () => {
     const detail = await get<ApiEventDetail>(`/events/${TICKER}`);
     expect(detail.status).toBe(200);
     expect(keys(detail.body)).toEqual(DETAIL_KEYS);
-    expect(detail.body).toMatchObject({ ...event, description: "Simulated Bitcoin up-or-down event expiring at 03:00 UTC", source: null, termsUrl: null });
-    expect(detail.body.rules).toEqual({ [BTC]: `If the simulated price of Bitcoin (BTC) at 03:00 UTC is above $${market.strike}, this market resolves to Yes.` });
+    expect(detail.body).toMatchObject({
+      ...event,
+      description: "Simulated BTC price prediction event expiring on November 14, 2026 at 03:00 UTC",
+      source: { agency: "simulation", index: "SIM-BTCUSD" },
+      termsUrl: null,
+    });
+    expect(detail.body.rules).toEqual({
+      [BTC]:
+        "If the price of Bitcoin (BTC) on November 14, 2026 at 03:00 UTC is greater than or equal to its price at 02:45 UTC, this market will resolve to Yes. " +
+        "Otherwise, it will resolve to No. Outcome verified against the simulated SIM-BTCUSD index.",
+    });
     expect(await get("/events/BTC15M2611140315")).toMatchObject({ status: 404, body: { error: "unknown event" } });
   });
 
   it("creates a market on request, then lists it with its on-chain state and serves its market data", async () => {
     const { get, post, venue, manager, clock } = await relayer();
     expect((await get<{ markets: ApiMarket[] }>("/markets")).body).toEqual({ markets: [] });
-    expect(await get(`/markets/${BTC}/depth`)).toMatchObject({ status: 200, body: { bids: [{ px: "4800", units: "20000" }], asks: [{ px: "5200", units: "20000" }], at: NOW } });
+    const bids = [{ px: "7400", units: "2500" }, { px: "7300", units: "5000" }];
+    expect(await get(`/markets/${BTC}/depth`)).toMatchObject({ status: 200, body: { bids, asks: [{ px: "7800", units: "2500" }, { px: "7900", units: "5000" }], at: NOW } });
 
     const created = await post<ApiMarket>(`/markets/${BTC}/ensure`);
     expect(created.status).toBe(200);
@@ -156,19 +168,20 @@ describe("the API over the simulated venue", () => {
 
     // A buy at the venue shows up in the tape, the history, the last price and the volume.
     clock.ms += 20_000;
-    const bought = await venue.placeOrder({ clientOrderId: "a", symbol: BTC, outcome: "YES", units: 300n, limitPx: 5_200n, timeInForce: "FOK" });
+    const bought = await venue.placeOrder({ clientOrderId: "a", symbol: BTC, outcome: "YES", units: 300n, limitPx: 7_800n, timeInForce: "FOK" });
     if (bought.kind !== "filled") throw new Error(`expected a fill, got ${bought.kind}`);
     await manager.refresh();
-    expect((await get<ApiDepth>(`/markets/${BTC}/depth`)).body).toEqual({ bids: [{ px: "4800", units: "20000" }], asks: [{ px: "5200", units: "20000" }], at: NOW + 20_000 });
+    // What was bought is gone from the best offer until the venue's quote moves.
+    expect((await get<ApiDepth>(`/markets/${BTC}/depth`)).body).toEqual({ bids, asks: [{ px: "7800", units: "2200" }, { px: "7900", units: "5000" }], at: NOW + 20_000 });
     expect((await get<{ trades: ApiTrade[] }>(`/markets/${BTC}/trades`)).body).toEqual({
-      trades: [{ id: bought.fills[0]!.tradeId, at: NOW + 20_000, px: "5200", units: "300", taker: "buy" }],
+      trades: [{ id: bought.fills[0]!.tradeId, at: NOW + 20_000, px: "7800", units: "300", taker: "buy" }],
     });
-    expect((await get<ApiHistory>(`/markets/${BTC}/history`)).body).toEqual({ stepSecs: 60, points: [{ at: NOW, px: "5200" }] });
-    expect((await get<ApiMarket>(`/markets/${BTC}`)).body).toMatchObject({ lastPx: "5200", book: { askPx: "5200", askUnits: "20000", at: NOW + 20_000 } });
+    expect((await get<ApiHistory>(`/markets/${BTC}/history`)).body).toEqual({ stepSecs: 60, points: [{ at: NOW, px: "7800" }] });
+    expect((await get<ApiMarket>(`/markets/${BTC}`)).body).toMatchObject({ lastPx: "7800", book: { askPx: "7800", askUnits: "2200", at: NOW + 20_000 } });
     expect((await get<ApiEventDetail>(`/events/${TICKER}`)).body.volumeUnits).toBe("300");
 
     for (const data of ["depth", "trades", "history"]) {
-      expect(await get(`/markets/TEST-BTC15M2611140315-UP/${data}`)).toMatchObject({ status: 404, body: { error: "unknown market" } });
+      expect(await get(`/markets/MOCK-BTC15M2611140315-UP/${data}`)).toMatchObject({ status: 404, body: { error: "unknown market" } });
     }
   });
 
@@ -177,7 +190,9 @@ describe("the API over the simulated venue", () => {
     clock.ms = END + 10_000;
     await manager.refresh();
     const { events } = (await get<{ events: ApiEvent[] }>("/events")).body;
-    expect(events.map((event) => event.ticker)).toEqual(["BTC15M2611140315", "ETH15M2611140315", "SOL15M2611140315"]);
+    const tickers = events.map((event) => event.ticker);
+    expect(tickers).not.toContain(TICKER);
+    expect(tickers).toEqual(expect.arrayContaining(["BTC15M2611140315", "ETH15M2611140315", "SOL15M2611140315"]));
     const expired = (await get<ApiEventDetail>(`/events/${TICKER}`)).body;
     expect(expired.markets[0]).toMatchObject({ symbol: BTC, tradable: false, notTradableReason: "too_close_to_expiry", onchain: null });
     expect(await get(`/markets/${BTC}/depth`)).toMatchObject({ status: 200, body: { bids: [], asks: [] } });

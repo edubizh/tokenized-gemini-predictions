@@ -88,6 +88,15 @@ export class MockVenue implements Venue {
     });
   }
 
+  /** Forgets an event, its contracts and their books. What the account did in them stays: orders, trades, payouts. */
+  protected forget(ticker: string, symbols: string[]): void {
+    this.events.delete(ticker);
+    for (const symbol of symbols) {
+      this.contracts.delete(symbol);
+      this.books.delete(symbol);
+    }
+  }
+
   setBook(symbol: string, book: MockBook): void {
     this.books.set(symbol, {
       book: {
