@@ -238,21 +238,21 @@ Exit: with the stack running, every active sandbox event and contract appears wi
 
 - [x] Markets index for everyone: categories, search, sort, live and upcoming, quoted first
 - [x] Event page: every contract of the event with its prices
-- [ ] Market page: question and rules, resolution source and terms, close and settlement times with a countdown, price chart, order book or best bid and ask, recent trades, volume, the user's position and orders, the trade panel
-- [ ] Logged out, the trade panel asks for a login and nothing else is hidden; the login gate no longer covers the market pages
-- [ ] Portfolio, Activity, Vaults (placeholder), System, Welcome, not-found, error and offline states on the new design
-- [ ] Old components and tokens deleted; fixtures and the reference page updated or cut down
+- [x] Market page (one page per event, with the selected contract's parts): question and rules, resolution source and terms, close and settlement times with a countdown, price chart, order book or best bid and ask, recent trades, volume, the user's position and orders, the trade panel
+- [x] Logged out, the trade panel asks for a login and nothing else is hidden; the login gate no longer covers the market pages
+- [x] Portfolio, Activity, Vaults (placeholder), System, not-found, error and offline states on the new design; the welcome page is gone and first-run test funds are a step inside the trade panel and the portfolio
+- [x] Old components and tokens deleted; fixtures and the reference page updated or cut down
 
 Exit: every route is rebuilt and reviewed in screenshots at 1280 and 390; no component or token of the old theme is left; tests, the build and the browser checks pass on the new markup.
 
 ## P5. Verification
 
-- [ ] Unit tests, type-checks and builds of every package
-- [ ] Screenshots of every route and state at both widths, checked against DESIGN.md
+- [x] Unit tests, type-checks and builds of every package
+- [x] Screenshots of every route and state at both widths, checked against DESIGN.md
 - [ ] Live on devnet with the sandbox: a 15-minute contract, a strike-ladder contract and a commodity contract each bought, settled and redeemed, with reconciliation balanced
 - [ ] The wallet matrix with real extensions on the live stack
 - [ ] A run with the relayer stopped
-- [ ] An independent review of each track
+- [x] An independent review of each track
 
 ## P6. Documentation
 
@@ -262,4 +262,19 @@ Exit: every route is rebuilt and reviewed in screenshots at 1280 and 390; no com
 
 ## Phase 2 review
 
-To be written when the phase is finished.
+Not finished. State on 2026-11-15:
+
+Done and verified:
+
+- **Wallet login** is the app's own: a login entry with email, one button per detected Solana wallet and WalletConnect, and one waiting block for every wallet request that names the wallet, says where it asks (a window or its side panel), and offers Cancel and Try again. Verified with the real Phantom and MetaMask extensions (table under P1).
+- **Design**: four colours (forest `#173B2A`, jade `#0A7F56`, peach `#FEF3EB`, white), one typeface, twelve primitives, a see-through navbar; every pairing in use is checked for contrast by a unit test. Every page is rebuilt on it and nothing of the old theme is left.
+- **Every market**: the relayer lists every event of the venue with its contracts (both shapes, six durations, two categories), serves depth, trades and price history, takes the live top of book from the venue's public feed, creates a market on-chain only at a logged-in trader's first order, and settles each contract by itself. The simulated venue offers the same variety. The local end-to-end run takes a ladder contract and an up-or-down contract from buy to redemption.
+- **Pages**: markets index (filters, search, sort, cards), event page (contracts, price chart, order book, recent trades, rule, dates, on-chain accounts, position and orders), trade panel (every state, prices in cents), portfolio, activity, system, vaults placeholder.
+- **Checks**: 445 unit tests in the web app and 927 in the relayer, type-checks and the production build; two browser checks in fixtures mode drive every route and state at 1280, 390 and 360 (no page error, no overflow, no target under 44 px) and follow an order to filled; an independent review of the relayer and one of the web app, with their must-fix items fixed.
+
+Not done yet:
+
+- The live run from the browser on devnet with the sandbox (a 15-minute contract and a strike-ladder contract bought, sold, settled and redeemed), the wallet matrix on that stack, and a run with the relayer stopped. The live checks under `apps/web/e2e/live-*.mjs` follow the new pages but have not been run.
+- A commodity contract cannot be bought on the sandbox: no commodity, HYPE, ZEC, weekly or monthly contract has ever had an offer there, and one account cannot trade with itself. Those markets are listed with "No offers"; the commodity ladder trades, settles and redeems on the simulated venue.
+- README, ARCHITECTURE and SCOPE still describe the first release in places.
+- From the reviews, not yet done: contracts the venue drops from a ladder stay listed until they expire; the status rule that never moves backwards can also block a real correction; list reads share one queue with settlement reads.
