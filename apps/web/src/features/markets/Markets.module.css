@@ -1,0 +1,223 @@
+/* The markets index: filters on the page, then a grid of event cards. */
+
+.filters {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.filterLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4) var(--space-6);
+}
+
+.filterLine + .filterLine {
+  justify-content: flex-start;
+}
+
+.search {
+  flex: 0 1 22rem;
+  min-width: 0;
+}
+
+/* A choice group named as a field is: its label above it. */
+.group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.groupLabel {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-medium);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-5);
+}
+
+.grid > li {
+  display: grid;
+  min-width: 0;
+}
+
+/* The card: a Panel whose title link covers it, with the price buttons above that cover. */
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+/* The underlying, in letters, where other platforms put a logo. */
+.mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 6px;
+  border-radius: var(--rounded-sm);
+  background: var(--peach);
+  font-size: var(--text-xs);
+  line-height: 1;
+  font-weight: var(--weight-semibold);
+}
+
+.heading {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.cardTitle {
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  font-weight: var(--weight-semibold);
+}
+
+.cardLink {
+  text-decoration: none;
+}
+
+.cardLink::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--rounded-lg);
+}
+
+@media (hover: hover) {
+  .card:hover .cardLink {
+    text-decoration-line: underline;
+    text-decoration-color: var(--forest);
+  }
+}
+
+.meta,
+.caption,
+.more {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--forest-soft);
+}
+
+/* The chance of a binary event: a probability standing on its own. */
+.chance {
+  flex: none;
+  display: grid;
+  justify-items: end;
+}
+
+.figure {
+  color: var(--jade);
+  font-size: var(--text-lg);
+  line-height: var(--leading-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.none {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--forest-soft);
+}
+
+.chance .none {
+  line-height: 26px;
+}
+
+.buttons {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.buttons > * {
+  min-width: 0;
+}
+
+.contracts {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.contracts ul {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.contract {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.contract + .contract {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.contractLine {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.label {
+  font-weight: var(--weight-medium);
+  min-width: 0;
+}
+
+.contract:not([data-quoted]) .label {
+  color: var(--forest-soft);
+}
+
+.rowChance {
+  color: var(--jade);
+  font-weight: var(--weight-semibold);
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-top: auto;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 60rem) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 40rem) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+
+  .search {
+    flex-basis: 100%;
+  }
+}

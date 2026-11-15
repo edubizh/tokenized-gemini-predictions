@@ -2,7 +2,7 @@
 // Pure: no React and no clock. Prices are px in bigint (one cent per contract = 100).
 
 import type { ApiEvent, ApiMarket, Cadence } from "@outcome/relayer/api-types";
-import { formatCents } from "@/lib/format";
+import { formatCents, formatContracts } from "@/lib/format";
 import { askPx } from "./book";
 
 /** Stands where a value does not exist: a side nobody offers, a chance nothing tells. */
@@ -45,6 +45,14 @@ export function chanceText(px: bigint | null): string {
 export function volumeUnits(event: Pick<ApiEvent, "volumeUnits">): bigint | null {
   const units = BigInt(event.volumeUnits);
   return units > 0n ? units : null;
+}
+
+/** The volume as it is written beside a market, `4,940 contracts traded`; null when nothing traded. */
+export function volumeText(event: Pick<ApiEvent, "volumeUnits">): string | null {
+  const units = volumeUnits(event);
+  if (units === null) return null;
+  const contracts = formatContracts(units).replace(/\.00$/, "");
+  return `${contracts} ${contracts === "1" ? "contract" : "contracts"} traded`;
 }
 
 /** In the order the filter offers them. */
@@ -141,4 +149,20 @@ export function cardRows(event: Pick<ApiEvent, "markets">): CardRows {
 /** The contract an event page opens on: the one its link names, else the one the card ranks first. Null for an event without contracts. */
 export function selectedContract(event: Pick<ApiEvent, "markets">, symbol: string | null | undefined): ApiMarket | null {
   return event.markets.find((market) => market.symbol === symbol) ?? ranked(event)[0] ?? null;
+}
+
+export type EventPhase = { phase: "upcoming"; opensAt: number | null } | { phase: "live" } | { phase: "closed" } | { phase: "settled" };
+
+/**
+ * Where an event stands at `nowMs`: upcoming until its first contract starts (with no time while
+ * the venue has listed it without opening it), then live until it expires, then closed until the
+ * venue settles it.
+ */
+export function eventPhase(event: Pick<ApiEvent, "venueStatus" | "expiresAt" | "markets">, nowMs: number): EventPhase {
+  if (event.venueStatus === "settled") return { phase: "settled" };
+  if (event.venueStatus === "under_review" || nowMs >= event.expiresAt) return { phase: "closed" };
+  const opensAt = Math.min(...event.markets.map((market) => market.startsAt));
+  if (opensAt > nowMs) return { phase: "upcoming", opensAt };
+  if (event.venueStatus === "approved") return { phase: "upcoming", opensAt: null };
+  return { phase: "live" };
 }

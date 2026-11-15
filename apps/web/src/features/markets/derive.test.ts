@@ -8,12 +8,14 @@ import {
   centsText,
   chancePx,
   chanceText,
+  eventPhase,
   filterEvents,
   isQuoted,
   NO_VALUE,
   prices,
   selectedContract,
   sortEvents,
+  volumeText,
   volumeUnits,
 } from "./derive";
 
@@ -300,5 +302,33 @@ describe("labels", () => {
   it("has a volume only when something traded", () => {
     expect(volumeUnits(event("A", { volumeUnits: "4800" }))).toBe(4800n);
     expect(volumeUnits(event("B", { volumeUnits: "0" }))).toBeNull();
+  });
+
+  it("writes a volume in contracts, whole ones without decimals, and none for nothing traded", () => {
+    expect(volumeText(event("A", { volumeUnits: "494000" }))).toBe("4,940 contracts traded");
+    expect(volumeText(event("B", { volumeUnits: "100" }))).toBe("1 contract traded");
+    expect(volumeText(event("C", { volumeUnits: "150" }))).toBe("1.50 contracts traded");
+    expect(volumeText(event("D", { volumeUnits: "0" }))).toBeNull();
+  });
+});
+
+describe("eventPhase", () => {
+  it("is live once the first contract has started, until the event expires", () => {
+    expect(eventPhase(event("A"), NOW)).toEqual({ phase: "live" });
+  });
+
+  it("opens at the first contract's start while that is ahead", () => {
+    const later = event("B", { markets: [market({ startsAt: NOW + 5 * MINUTE }), market({ startsAt: NOW + 2 * MINUTE })] });
+    expect(eventPhase(later, NOW)).toEqual({ phase: "upcoming", opensAt: NOW + 2 * MINUTE });
+  });
+
+  it("is upcoming without a time while the venue has listed it but not opened it", () => {
+    expect(eventPhase(event("C", { venueStatus: "approved" }), NOW)).toEqual({ phase: "upcoming", opensAt: null });
+  });
+
+  it("is closed once expired or under review, and settled once the venue says so", () => {
+    expect(eventPhase(event("D", { expiresAt: NOW }), NOW)).toEqual({ phase: "closed" });
+    expect(eventPhase(event("E", { venueStatus: "under_review" }), NOW)).toEqual({ phase: "closed" });
+    expect(eventPhase(event("F", { venueStatus: "settled", expiresAt: NOW - MINUTE }), NOW)).toEqual({ phase: "settled" });
   });
 });
