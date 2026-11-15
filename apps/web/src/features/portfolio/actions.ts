@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { describeSendError } from "@/features/ticket/actions";
+import { describeSendError, sentWithoutAnswer } from "@/features/ticket/actions";
 import type { SendProgress } from "@/features/ticket/Ticket";
 import { TransactionError } from "@/lib/chain/errors";
 import { buildRedeem } from "@/lib/chain/instructions";
@@ -67,7 +67,9 @@ export function useRedeem(): Redeem {
         setState({ mint: null, progress: null, error: null });
         return signature;
       } catch (caught) {
-        setState({ mint: row.mint, progress: null, error: describeRedeemError(caught) });
+        // Sent, outcome not read: the next read of the wallet shows whether the tokens were redeemed.
+        if (sentWithoutAnswer(caught)) refresh();
+        setState({ mint: row.mint, progress: null, error: sentWithoutAnswer(caught) ? null : describeRedeemError(caught) });
         return null;
       }
     },

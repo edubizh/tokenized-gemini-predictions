@@ -38,6 +38,14 @@ export function describeSendError(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong before the transaction was sent. Nothing was held.";
 }
 
+/**
+ * True when the network took the transaction but its outcome could not be read: the order may
+ * well be placed, so it is followed like any other rather than reported as not placed.
+ */
+export function sentWithoutAnswer(error: unknown): error is TransactionError {
+  return error instanceof TransactionError && error.stage === "unknown" && error.signature !== null;
+}
+
 function progressOf(stage: SendStage): SendProgress {
   return stage === "preparing" || stage === "signing" ? "wallet" : "sending";
 }
@@ -98,7 +106,14 @@ export function usePlaceOrder(): PlaceOrder {
           nonce: trader.nextNonce,
         };
         const { order, instructions } = draft.action === "sell" ? await buildPlaceSell({ ...common, minPx: draft.limitPx }) : await buildPlaceBuy({ ...common, limitPx: draft.limitPx });
-        const signature = await send({ instructions, computeUnitLimit: PLACE_ORDER_COMPUTE_UNITS, onStage: (stage) => setProgress(progressOf(stage)) });
+        let signature: string;
+        try {
+          signature = await send({ instructions, computeUnitLimit: PLACE_ORDER_COMPUTE_UNITS, onStage: (stage) => setProgress(progressOf(stage)) });
+        } catch (caught) {
+          // Sent, outcome not read: the order's account and the relayer's record tell the rest.
+          if (!sentWithoutAnswer(caught)) throw caught;
+          signature = caught.signature as string;
+        }
         refresh();
         return {
           address: order,
@@ -154,7 +169,9 @@ export function useReclaimOrder(): ReclaimOrder {
         setState({ address: null, progress: null, error: null });
         return signature;
       } catch (caught) {
-        setState({ address: order.address, progress: null, error: describeSendError(caught) });
+        // Sent, outcome not read: the next read of the order's account shows whether it was reclaimed.
+        if (sentWithoutAnswer(caught)) refresh();
+        setState({ address: order.address, progress: null, error: sentWithoutAnswer(caught) ? null : describeSendError(caught) });
         return null;
       }
     },

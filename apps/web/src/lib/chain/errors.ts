@@ -59,7 +59,8 @@ export function describeTransactionError(err: unknown, instructionPrograms: read
   return { name: null, code: null, message: `The transaction failed: ${variantName(err)}.` };
 }
 
-export type TransactionStage = "simulate" | "sign" | "send" | "confirm" | "expired";
+/** `unknown`: sent and taken by the network, but whether it landed could not be read. */
+export type TransactionStage = "simulate" | "sign" | "send" | "confirm" | "expired" | "unknown";
 
 /** Thrown by the send helper. `stage` says how far the transaction got. */
 export class TransactionError extends Error {

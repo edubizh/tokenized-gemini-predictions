@@ -75,6 +75,7 @@ export function createFundingChain(deployment: Deployment, rpcUrl: string): Fund
       throw new Error(describeTransactionError(confirmation.err, all.map((i) => i.programAddress), deployment.programId).message);
     }
     if (confirmation.outcome === "expired") throw new Error("The transaction was not confirmed before its blockhash expired.");
+    if (confirmation.outcome === "unknown") throw new Error("The transaction was sent, but Solana did not say whether it landed.");
     return signature;
   }
 

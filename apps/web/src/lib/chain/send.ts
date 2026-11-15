@@ -105,6 +105,9 @@ export async function sendInstructions(options: SendOptions): Promise<string> {
   if (confirmation.outcome === "expired") {
     throw new TransactionError("expired", "The transaction was not confirmed before its blockhash expired. It can no longer land; try again.", { signature });
   }
+  if (confirmation.outcome === "unknown") {
+    throw new TransactionError("unknown", "The transaction was sent, but Solana did not say whether it landed. Check again in a moment before trying again.", { signature });
+  }
   return signature;
 }
 
