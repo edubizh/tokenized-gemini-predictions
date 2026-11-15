@@ -2,6 +2,10 @@
 
 Rules learned along the way. Newest first.
 
+## 2026-11-15: Bring progress back in small pieces
+
+Two hours into the second phase, long jobs were still running and nothing had been pushed: the work sat on side branches and in jobs that reported only when they were completely finished, one of them after more than two hours. The owner asked that jobs stop disappearing into long runs. A job hands back within about 45 minutes with whatever is complete and passing. Each hand-back is checked and committed, and pushed as soon as `main` is consistent. A job whose files have not changed for 15 minutes is looked at. A change reaches `main` in the smallest piece that leaves it working, instead of waiting on a long branch.
+
 ## 2026-11-14: A stand-in wallet does not prove wallet login
 
 Wallet login was checked with a test wallet injected into the page. It signs at once and has no window of its own, so it never met what real extensions do: a window to connect, a second window for the signature, a locked wallet, a wallet with no Solana account. With the owner's real wallets, Phantom hung on the signature step and MetaMask did not connect. Wallet login is done only after the real extensions have been driven through it (connect, sign, reject, locked, reload), and any step that waits on a wallet says what it is waiting for and offers a way to try again.
