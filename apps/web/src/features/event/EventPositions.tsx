@@ -26,7 +26,7 @@ const word = (row: PositionRow) => (row.side === "YES" ? "Yes" : "No");
 function value(row: PositionRow): string {
   switch (row.group) {
     case "live":
-      return row.worthMicros === null ? "no bid right now" : `about ${formatDollars(row.worthMicros)}`;
+      return row.valueMicros === null ? "no bid right now" : `about ${formatDollars(row.valueMicros)}`;
     case "awaiting":
       return `${formatDollars(row.fullPayoutMicros)} if ${word(row)}`;
     default:
