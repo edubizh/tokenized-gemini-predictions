@@ -84,6 +84,12 @@ export async function attachSidePanel(anyPage, urlPattern) {
 
   return {
     where: "panel",
+    /**
+     * "visible" or "hidden" as the panel's own page reports it: a browser window draws one side
+     * panel at a time, and a wallet's panel can be open without being the one on screen. "unknown"
+     * for a page that does not let a script be run in it.
+     */
+    visibility: async () => (await call("Runtime.evaluate", { expression: "document.visibilityState", returnByValue: true })).result?.result?.value ?? "unknown",
     /** The panel's current address; empty once the panel is closed. */
     url: async () => (await cdp.send("Target.getTargets").catch(() => ({ targetInfos: [] }))).targetInfos.find((info) => info.targetId === target.targetId)?.url ?? "",
     /** What the panel says, on one line. Read from the markup, which works on guarded pages too. */

@@ -27,8 +27,9 @@
 // Evidence: e2e/out/real-wallets/matrix-<wallet>-<case>/ (events.log and screenshots).
 import { BASE, listedWallets, loginDialog, loginStep, loginText, logOut, openApp, openLogin, pickWallet, waitForLogin, waiting, waitingSlow, waitingText } from "./lib/app.mjs";
 import { launch } from "./lib/browser.mjs";
-import { metamask } from "./lib/metamask.mjs";
-import { phantom } from "./lib/phantom.mjs";
+import { metamask, panelUrl as metamaskPanel } from "./lib/metamask.mjs";
+import { phantom, panelUrl as phantomPanel } from "./lib/phantom.mjs";
+import { attachSidePanel } from "./lib/side-panel.mjs";
 import { traceWalletCalls } from "./lib/trace.mjs";
 
 const DRIVERS = { phantom, metamask };
@@ -164,6 +165,11 @@ async function sign(s, what) {
   await s.browser.shoot(s.page, `app-waits-for-${what.replace(/\s+/g, "-")}`);
   const request = await driver.pendingRequest(s.browser, { timeout: 30_000 });
   if (!check(request?.kind === "transaction", `${driver.label} asks for the signature of the transaction${request ? ` (in its ${request.where})` : ""}`)) return;
+  await approveTransaction(s, request);
+}
+
+/** Approves a transaction request; one the wallet could not preview is pressed through its warning. */
+async function approveTransaction(s, request) {
   log("wallet-ui", `${request.approvable ? "previewed" : "NOT previewed"}: ${oneLine(await request.text()).slice(0, 140)}`);
   if (request.approvable) await request.approve();
   else await driver.confirmUnsimulated(s.browser);
@@ -426,14 +432,24 @@ const CASES = {
   async "two-wallets"() {
     const other = walletName === "phantom" ? metamask : phantom;
     const s = await start([walletName, other.name]);
+    /** Which wallet's side panel is open, and whether it is the one the window draws (meaningful in a visible window). */
+    const panels = async (when) => {
+      for (const [label, url] of [[phantom.label, phantomPanel(s.browser)], [metamask.label, metamaskPanel(s.browser)]]) {
+        const panel = await attachSidePanel(s.page, url);
+        log("panels", `${when}: ${label} ${panel ? `side panel open, ${await panel.visibility()}` : "has no side panel open"}`);
+        await panel?.detach();
+      }
+    };
     await other.openSidePanel(s.browser);
     await s.page.bringToFront();
+    await panels(`with ${other.label}'s side panel opened`);
     await openLogin(s.page);
     const listed = await listedWallets(s.page);
     check(listed.includes(phantom.label) && listed.includes(metamask.label), `the login dialog lists both wallets by name (${listed.join(", ")})`);
     await firstLogin(s);
     check(s.calls.every((call) => call.phase === "registered" || call.phase === "event" || call.wallet === driver.label), `only ${driver.label} was asked`);
     check((await other.pendingRequest(s.browser, { timeout: 2_000 })) === null, `${other.label} shows no request`);
+    await panels("after the login");
   },
 
   async live() {
@@ -471,22 +487,26 @@ const CASES = {
     const { page } = s;
     check(await logIn(s), "logged in");
     await getFunds(s);
+    const dollars = async () => /Test dollars (\$[\d,.]+)/.exec(oneLine(await header(page).innerText()))?.[1] ?? "";
+    const funded = await dollars();
     await driver.setTestnetMode?.(s.browser, true);
     await page.bringToFront();
     if (!check(await openTicket(s), "a market takes orders")) return;
     await ticket(page).getByLabel("Quantity", { exact: true }).fill("1.00");
     await placeButton(page).click();
-    check((await driver.pendingRequest(s.browser, { timeout: 30_000 }))?.kind === "transaction", "the wallet asks for the order's signature");
+    const request = await driver.pendingRequest(s.browser, { timeout: 30_000 });
+    if (!check(request?.kind === "transaction", "the wallet asks for the order's signature")) return;
     // The order must find nobody to fill it: it is signed only once the relayer is stopped.
     console.log("READY: stop the relayer now");
     if (!check(await until(() => fetch(`${RELAYER}/health`).then(() => false, () => true), 55_000), "the relayer is stopped")) return;
-    await answer(s, "approve", { kind: "transaction" });
+    await approveTransaction(s, request);
     await page.goto(`${BASE}/activity`, { waitUntil: "domcontentloaded" });
     const orders = page.locator('[data-testid="activity-order"]');
     check(await until(() => orders.first().getByText(/Expired/).first().isVisible(), 240_000), "the order is listed and expires at its deadline");
     await page.getByRole("button", { name: /^Reclaim/ }).first().click();
     await sign(s, "the reclaim");
     check(await until(async () => (await orders.filter({ hasText: /Expired/ }).count()) === 0, 120_000), "the order is reclaimed");
+    check(await until(async () => (await dollars()) === funded, 60_000), `the test dollars are back in the top bar (${funded}; now ${await dollars()})`);
     await s.browser.shoot(page, "reclaimed");
   },
 };
