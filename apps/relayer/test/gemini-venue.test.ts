@@ -720,8 +720,8 @@ describe("listEvents", () => {
     const approved = { status: "approved", marketState: "post_only" };
     http.respond(() => listPage([eventRow({ volume: "48" }), ladderRow([strikeRow("0.84", 1, approved), strikeRow("0.82", 0, approved)], { status: "approved", category: "Commodities" })]));
 
-    const events = await drive(venue.listEvents(), 1_000);
-    expect(http.calls).toHaveLength(1);
+    const events = await drive(venue.listEvents(), 2_000);
+    expect(http.calls).toHaveLength(3); // the first list is three reads
     expect(http.calls[0]).toMatchObject({ method: "GET", path: EVENTS, query: "?status=active&status=approved&limit=500&offset=0", payload: null });
     expect(events).toHaveLength(2);
     expect(events[0]).toMatchObject({ ticker: EVENT, shape: "binary", cadence: "15m", category: "Crypto", status: "active", volumeUnits: 4_800n });
@@ -751,12 +751,9 @@ describe("listEvents", () => {
       return { data: pages[offset] ?? [], pagination: { limit: 2, offset: Number(offset), total: 6 } };
     });
 
-    const events = await drive(venue.listEvents(), 5_000);
-    expect(http.calls.map((call) => call.query)).toEqual([
-      "?status=active&status=approved&limit=500&offset=0",
-      "?status=active&status=approved&limit=500&offset=2",
-      "?status=active&status=approved&limit=500&offset=4",
-    ]);
+    const events = await drive(venue.listEvents(), 8_000);
+    const read = ["?status=active&status=approved&limit=500&offset=0", "?status=active&status=approved&limit=500&offset=2", "?status=active&status=approved&limit=500&offset=4"];
+    expect(http.calls.map((call) => call.query)).toEqual([...read, ...read, ...read]); // the first list is three reads
     expect(events.map((event) => [event.ticker, event.contracts.map((contract) => contract.symbol)])).toEqual([
       [EVENT, [SYMBOL]],
       [LADDER, [LOW, HIGH]],
@@ -768,22 +765,22 @@ describe("listEvents", () => {
   it("stops at an empty page even when the total promises more", async () => {
     const { venue, http } = await connected();
     http.respond((call) => ({ data: param(call, "offset") === "0" ? [eventRow()] : [], pagination: { limit: 500, offset: 0, total: 3 } }));
-    await expect(drive(venue.listEvents(), 3_000)).resolves.toHaveLength(1);
-    expect(http.calls).toHaveLength(2);
+    await expect(drive(venue.listEvents(), 5_000)).resolves.toHaveLength(1);
+    expect(http.calls).toHaveLength(6); // two calls for each of the three reads of the first list
   });
 
   it("answers from its last read for ten seconds, and callers that overlap share one read", async () => {
     const { venue, http } = await connected();
     http.respond(() => listPage([eventRow()]));
-    const first = await drive(venue.listEvents(), 0);
+    const first = await drive(venue.listEvents(), 2_000); // three reads, the last at 2 s
 
     await vi.advanceTimersByTimeAsync(9_999);
     await expect(venue.listEvents()).resolves.toBe(first);
-    expect(http.calls).toHaveLength(1);
+    expect(http.calls).toHaveLength(3);
 
     await vi.advanceTimersByTimeAsync(1);
     const [second, third] = await drive(Promise.all([venue.listEvents(), venue.listEvents()]), 0);
-    expect(http.calls).toHaveLength(2);
+    expect(http.calls).toHaveLength(4);
     expect(second).toBe(third);
     expect(second).not.toBe(first);
   });
@@ -805,7 +802,7 @@ describe("listEvents", () => {
     await expect(drive(venue.listEvents(), 5_000)).resolves.toBe(held);
     http.respond(() => listPage([]));
     await expect(drive(venue.listEvents(), 5_000)).resolves.toBe(held);
-    expect(http.calls).toHaveLength(3);
+    expect(http.calls).toHaveLength(5); // three reads for the first list
 
     // A page of the same age or newer replaces it.
     http.respond(() => listPage([eventRow({ volume: "2" }), later("41")]));
@@ -813,41 +810,73 @@ describe("listEvents", () => {
     expect(same[0]!.volumeUnits).toBe(200n);
     http.respond(() => listPage([eventRow({ volume: "3" }), later("41"), later("45")]));
     await expect(drive(venue.listEvents(), 20_000)).resolves.toHaveLength(3);
-    expect(http.calls).toHaveLength(5);
+    expect(http.calls).toHaveLength(7);
   });
 
   it("takes an older page after five minutes without a newer one: the newest event may be gone", async () => {
     const { venue, http } = await connected();
     const newest = eventRow({ ticker: "DEMO15M2611140315", createdAt: "2026-11-14T02:41:00.000Z", contracts: [contractRow({ instrumentSymbol: "GEMI-DEMO15M2611140315-UP" })] });
     http.respond(() => listPage([eventRow(), newest]));
-    const held = await drive(venue.listEvents(), 299_999);
+    const held = await drive(venue.listEvents(), 301_999); // taken at 2 s, after its three reads
 
     http.respond(() => listPage([eventRow()]));
     await expect(drive(venue.listEvents(), 1)).resolves.toBe(held);
     await expect(drive(venue.listEvents(), 1_000)).resolves.toHaveLength(1);
   });
 
-  // Seen at a start: the first page was half an hour behind, without the newest fifteen-minute
-  // events; a minute later the list was complete.
-  it("before it holds a list, reads again while the page has no event from the last ten minutes, three reads at most, and keeps the newest", async () => {
-    const { venue, http } = await connected();
-    const listed = (minute: string): Row => {
-      const contracts = [contractRow({ instrumentSymbol: `GEMI-DEMO15M26111403${minute}-UP` })];
-      return eventRow({ ticker: `DEMO15M26111403${minute}`, createdAt: `2026-11-14T02:${minute}:00.000Z`, contracts });
-    };
-    // The clock reads 02:40:00.250.
-    const pages = [[listed("05")], [listed("05"), listed("31")], [listed("05"), listed("31"), listed("30")]];
-    http.respond((_call, index) => listPage(pages[index] ?? []));
-    const events = await drive(venue.listEvents(), 5_000);
-    expect(http.calls).toHaveLength(2); // 02:31 is within ten minutes
-    expect(events.map((event) => event.ticker)).toEqual(["DEMO15M2611140305", "DEMO15M2611140331"]);
+  // Seen at starts after a pause: the venue answers from caches of different ages, and one page
+  // can hold an event listed minutes ago while whole groups listed half an hour ago are missing.
+  describe("before it holds a list", () => {
+    const quoted = (bid: string): Row => ({ buy: {}, sell: {}, bestBid: bid });
+    const FIVE = "DEMO05M2611140245";
+    const five = (bid: string): Row =>
+      eventRow({ ticker: FIVE, createdAt: "2026-11-14T02:39:00.000Z", contracts: [contractRow({ instrumentSymbol: `GEMI-${FIVE}-UP`, prices: quoted(bid) })] });
+    const OLD = "DEMO2611200000";
+    const old = eventRow({ ticker: OLD, createdAt: "2026-11-13T01:00:00.000Z", contracts: [contractRow({ instrumentSymbol: `GEMI-${OLD}-UP` })] });
+    const shown = (events: Awaited<ReturnType<GeminiSandboxVenue["listEvents"]>>): unknown =>
+      events.map((event) => [event.ticker, event.contracts.map((contract) => [contract.symbol, contract.bestBidPx ?? null])]);
 
-    const { venue: other, http: otherHttp } = await connected();
-    const stale = [[listed("05"), listed("12")], [listed("05"), listed("20")], [listed("05")], [listed("05"), listed("29")]];
-    otherHttp.respond((_call, index) => listPage(stale[index] ?? []));
-    const best = await drive(other.listEvents(), 5_000);
-    expect(otherHttp.calls).toHaveLength(3);
-    expect(best.map((event) => event.ticker)).toEqual(["DEMO15M2611140305", "DEMO15M2611140320"]);
+    it("reads the list three times and merges the reads, the copy of the read with the newer newest event winning, the later read on a tie", async () => {
+      const { venue, http } = await connected();
+      const pages = [
+        // Recent newest event, but no fifteen-minute event and half the ladder.
+        [five("0.30"), ladderRow([strikeRow("0.82", 0, { prices: quoted("0.30") })])],
+        // Complete, with the same newest event.
+        [five("0.40"), eventRow(), ladderRow([strikeRow("0.82", 0, { prices: quoted("0.50") }), strikeRow("0.84", 1)])],
+        // A day behind and short.
+        [ladderRow([strikeRow("0.82", 0, { prices: quoted("0.05") })]), old],
+      ];
+      http.respond((_call, index) => listPage(pages[index] ?? []));
+      const events = await drive(venue.listEvents(), 5_000);
+      expect(http.calls).toHaveLength(3);
+      expect(shown(events)).toEqual([
+        [FIVE, [[`GEMI-${FIVE}-UP`, 4_000n]]],
+        [EVENT, [[SYMBOL, null]]],
+        [LADDER, [[LOW, 5_000n], [HIGH, null]]],
+        [OLD, [[`GEMI-${OLD}-UP`, null]]],
+      ]);
+    });
+
+    it("keeps what it read when a later read fails, and fails only when the first one does", async () => {
+      const { venue, http } = await connected();
+      http.respond((_call, index) => (index === 0 ? listPage([eventRow()]) : new Response("Bad Gateway", { status: 502 })));
+      expect(shown(await drive(venue.listEvents(), 20_000))).toEqual([[EVENT, [[SYMBOL, null]]]]);
+
+      const { venue: other, http: otherHttp } = await connected();
+      otherHttp.respond(() => new Response("Bad Gateway", { status: 502 }));
+      await expect(drive(other.listEvents(), 20_000)).rejects.toThrow(`HTTP 502 from GET ${EVENTS}`);
+    });
+
+    it("reads once per call once it holds a list", async () => {
+      const { venue, http } = await connected();
+      http.respond(() => listPage([eventRow()]));
+      await drive(venue.listEvents(), 20_000);
+      expect(http.calls).toHaveLength(3);
+      await drive(venue.listEvents(), 20_000);
+      expect(http.calls).toHaveLength(4);
+      await drive(venue.listEvents(), 20_000);
+      expect(http.calls).toHaveLength(5);
+    });
   });
 
   it("fails when the venue cannot be read, rather than answering from its last read", async () => {
@@ -899,7 +928,7 @@ describe("listEvents", () => {
       return eventRow({ ticker: oddEvent, contracts: [contractRow({ instrumentSymbol: odd })] });
     });
 
-    const events = await drive(venue.listEvents(), 1_000);
+    const events = await drive(venue.listEvents(), 2_000);
     expect(events[1]!.contracts[0]).toMatchObject({ symbol: odd, eventTicker: oddEvent });
 
     // The ticker from the list wins over the one the symbol's last dash would give.
@@ -920,7 +949,7 @@ describe("listEvents", () => {
     const longLived = eventRow({ ticker: "DEMO2612140300", contracts: [contractRow({ instrumentSymbol: "GEMI-DEMO2612140300-HI1", expiryDate: "2026-12-14T03:00:00.000Z" })] });
     let listed = [eventRow({ ticker: oddEvent, contracts: [contractRow({ instrumentSymbol: odd })] }), longLived];
     http.respond((call) => (call.path === EVENTS ? listPage(listed) : eventRow()));
-    await drive(venue.listEvents(), 1_000);
+    await drive(venue.listEvents(), 2_000);
 
     // Delisted at its expiry, and still known six days and more later.
     listed = [longLived];
@@ -941,7 +970,7 @@ describe("listEvents", () => {
     const { venue, http } = await connected();
     http.respond(() => listPage([eventRow({ expiryDate: "2026-11-14T04:00:00.000Z" })]));
     for (let call = 0; call < 30; call++) await drive(venue.listEvents(), 20_000);
-    expect(http.calls.filter((call) => call.path === EVENTS)).toHaveLength(30);
+    expect(http.calls.filter((call) => call.path === EVENTS)).toHaveLength(32); // the first list is three reads
 
     http.calls.length = 0;
     for (let call = 0; call < 60; call++) await drive(venue.listEvents(), 1_000);
@@ -966,7 +995,7 @@ function ticker(symbol: string, bid: [price: string, size: string] | null, ask: 
 async function listed(extra: Partial<GeminiSandboxVenueOptions> = {}) {
   const made = await connected(extra);
   made.http.respond(() => listPage([ladderRow([strikeRow("0.82", 0), strikeRow("0.84", 1, { status: "approved", marketState: "post_only" })])]));
-  await drive(made.venue.listEvents(), 1_000);
+  await drive(made.venue.listEvents(), 2_000); // the first list is three reads, a second apart
   made.http.calls.length = 0;
   return { ...made, feed: FakeWebSocket.publicSockets().at(-1)! };
 }
@@ -981,7 +1010,7 @@ describe("liveTop", () => {
     feed.serverFrame(ticker(LOW, ["0.0300", "33.00"], ["0.0900", "10.00"]));
     feed.serverFrame(ticker(HIGH, ["0.0300", "33.00"], ["0.0900", "10.00"]));
     await vi.advanceTimersByTimeAsync(7_000);
-    expect(venue.liveTop(LOW)).toEqual({ top: { bidPx: 300n, bidUnits: 3_300n, askPx: 900n, askUnits: 1_000n }, atMs: START_MS + 8_000 });
+    expect(venue.liveTop(LOW)).toEqual({ top: { bidPx: 300n, bidUnits: 3_300n, askPx: 900n, askUnits: 1_000n }, atMs: START_MS + 9_000 });
     expect(venue.liveTop(HIGH)).toBeUndefined();
     expect(venue.liveTop("GEMI-NOSUCH-UP")).toBeUndefined();
   });
@@ -1251,7 +1280,8 @@ describe("depth, trades and history", () => {
       return [];
     });
     await drive(Promise.all([venue.depth(SYMBOL, 10), venue.trades(SYMBOL, 50), venue.history(SYMBOL, 60), venue.listEvents(), venue.contract(SYMBOL), venue.topOfBook(SYMBOL)]), 10_000);
-    expect(http.calls.map((call) => call.at - http.calls[0]!.at)).toEqual([0, 1_000, 2_000, 3_000, 4_000, 5_000]);
+    // The first list is three reads.
+    expect(http.calls.map((call) => call.at - http.calls[0]!.at)).toEqual([0, 1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000]);
     expect(http.calls.every((call) => call.payload === null)).toBe(true);
   });
 });

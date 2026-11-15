@@ -32,13 +32,7 @@ const LIST_QUERY = "status=active&status=approved&limit=500";
 const LIST_CACHE_MS = 10_000;
 /** A list page older than the one held is not taken while the held one is younger than this. */
 const LIST_HOLD_MS = 300_000;
-/**
- * The venue lists a new five-minute event every five minutes, so a current page always holds an
- * event listed within the last few minutes. Ten minutes leaves room for a late listing; a page
- * without one is behind.
- */
-const FRESH_LIST_MS = 600_000;
-/** Reads of the list, at most, before the first one is held. */
+/** Reads of the list merged into the first one held. */
 const FIRST_LIST_READS = 3;
 /** A single-event read is shared for this long, so the contracts of one ladder cost one read. */
 const EVENT_CACHE_MS = 2_000;
@@ -409,17 +403,25 @@ export class GeminiSandboxVenue implements Venue {
    * held is answered again, for at most `LIST_HOLD_MS`, in case the newest event was simply
    * taken off the list.
    *
-   * Until a list is held there is nothing to compare a page with, so a page without an event
-   * listed in the last `FRESH_LIST_MS` is not taken yet: the list is read again, at most
-   * `FIRST_LIST_READS` reads in all, and the page with the newest event is kept.
+   * Until a list is held there is nothing to compare a page with, and no single page can be
+   * trusted: right after a pause most reads come from caches of different ages, and the parts of
+   * one page are not of one age either (an event listed minutes ago can sit beside gaps where
+   * events listed half an hour ago belong). So the first list is `FIRST_LIST_READS` reads in a
+   * row, merged: every event and every contract that any of them holds. Where reads disagree,
+   * the copy from the read with the newer newest event wins, and on a tie the later read. A read
+   * after the first that fails is left out; only a failed first read fails.
    */
   async #readEvents(): Promise<EventInfo[]> {
-    let read = await this.#readList();
-    for (let reads = 1; this.#listing === null && reads < FIRST_LIST_READS && read.newestMs < this.#now() - FRESH_LIST_MS; reads += 1) {
-      const next = await this.#readList();
-      if (next.newestMs >= read.newestMs) read = next;
+    const reads = [await this.#readList()];
+    while (this.#listing === null && reads.length < FIRST_LIST_READS) {
+      try {
+        reads.push(await this.#readList());
+      } catch (error) {
+        this.#log(`venue list: a read for the first list failed: ${messageOf(error)}`);
+        break;
+      }
     }
-    const { events, skipped, newestMs } = read;
+    const { events, skipped, newestMs } = reads.length === 1 ? reads[0]! : merged(reads);
 
     const now = this.#now();
     const held = this.#listing;
@@ -442,7 +444,7 @@ export class GeminiSandboxVenue implements Venue {
    * One read of the whole list, page by page, with the listing time of its newest event. Two
    * pages read a second apart can overlap, so every event and every contract is taken once.
    */
-  async #readList(): Promise<{ events: EventInfo[]; skipped: Set<string>; newestMs: number }> {
+  async #readList(): Promise<ListRead> {
     const events: EventInfo[] = [];
     const tickers = new Set<string>();
     const symbols = new Set<string>();
@@ -699,6 +701,40 @@ function lookupOf(row: Row, closed: boolean): OrderLookup {
     closed,
     filledUnits: filled === null ? 0n : parseUnits(filled),
     avgPx: wholePx(row.avgExecutionPrice),
+  };
+}
+
+type ListRead = { events: EventInfo[]; skipped: Set<string>; newestMs: number };
+
+/**
+ * Every event and contract of the reads, each taken once. The freshest read goes first: the one
+ * with the newest event, the later one on a tie. Its copy of an event or a contract is kept and
+ * the others add only what it lacks; each event's contracts stay ascending by sort order.
+ */
+function merged(reads: ListRead[]): ListRead {
+  const freshestFirst = reads
+    .map((read, index) => ({ read, index }))
+    .sort((a, b) => b.read.newestMs - a.read.newestMs || b.index - a.index)
+    .map(({ read }) => read);
+  const events = new Map<string, EventInfo>();
+  const symbols = new Set<string>();
+  for (const read of freshestFirst) {
+    for (const event of read.events) {
+      const contracts = event.contracts.filter((contract) => !symbols.has(contract.symbol));
+      for (const contract of contracts) symbols.add(contract.symbol);
+      const kept = events.get(event.ticker);
+      if (kept === undefined) {
+        if (contracts.length > 0) events.set(event.ticker, { ...event, contracts });
+      } else if (contracts.length > 0) {
+        const all = [...kept.contracts, ...contracts].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+        events.set(event.ticker, { ...kept, contracts: all });
+      }
+    }
+  }
+  return {
+    events: [...events.values()],
+    skipped: new Set(reads.flatMap((read) => [...read.skipped])),
+    newestMs: Math.max(...reads.map((read) => read.newestMs)),
   };
 }
 
