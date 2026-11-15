@@ -21,3 +21,8 @@ jobs:
         run: pnpm --filter @outcome/program-client --filter @outcome/relayer typecheck
       - name: Unit tests
         run: pnpm -r test
+      - name: Unit tests with the clock a year ahead
+        run: pnpm -r test
+        env:
+          SHIFT_DAYS: "400"
+          NODE_OPTIONS: --import ${{ github.workspace }}/scripts/shift-clock.mjs

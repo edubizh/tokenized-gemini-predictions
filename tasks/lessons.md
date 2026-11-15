@@ -2,6 +2,10 @@
 
 Rules learned along the way. Newest first.
 
+## 2026-11-15: A test that reads the clock passes today and fails tomorrow
+
+Three pushes in a row failed in CI although none of them touched the code under test. A function that decides whether orders are closed took the current time as an optional argument and read the wall clock when it was missing, and its test used a fixed "last order" time that was a quarter of an hour ahead when the test was written. The tests passed until that moment came and failed from then on, everywhere. The failures were noticed by the owner, not by whoever pushed. Logic that depends on time takes the time as a required argument and reads no clock itself. CI now runs the unit tests a second time with the clock moved a year ahead (`scripts/shift-clock.mjs`), so a test that only passes today fails at once. And the result of CI is looked at after every push, not assumed.
+
 ## 2026-11-15: Bring progress back in small pieces
 
 Two hours into the second phase, long jobs were still running and nothing had been pushed: the work sat on side branches and in jobs that reported only when they were completely finished, one of them after more than two hours. The owner asked that jobs stop disappearing into long runs. A job hands back within about 45 minutes with whatever is complete and passing. Each hand-back is checked and committed, and pushed as soon as `main` is consistent. A job whose files have not changed for 15 minutes is looked at. A change reaches `main` in the smallest piece that leaves it working, instead of waiting on a long branch.
