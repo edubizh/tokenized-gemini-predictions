@@ -3,6 +3,7 @@
 //   node --env-file=../../.env src/main.ts start            run the relayer
 //   node --env-file=../../.env src/main.ts status           print /health and /status of a running relayer
 //   node --env-file=../../.env src/main.ts pause            set both pause bits on-chain
+//   node --env-file=../../.env src/main.ts resume           clear both pause bits on-chain, signed by the admin key
 //   node --env-file=../../.env src/main.ts cancel-expired   cancel every open order past its expiry
 //   node --env-file=../../.env src/main.ts settle <symbol> <yes|no>
 //                                                           settle a market by hand (one stuck in needs_review)
@@ -14,8 +15,9 @@
 // Registers the resolver for the program client; the chain adapter is loaded after it, below.
 import "./chain/client-loader.ts";
 
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import type { KeyPairSigner } from "@solana/kit";
 import { createMarketData } from "./api/market-data.ts";
 import { createApiHandlers, createApiServer } from "./api/server.ts";
 import type { Chain, MarketChain } from "./chain/chain.ts";
@@ -34,13 +36,14 @@ import { GeminiSandboxVenue } from "./venue/gemini/venue.ts";
 import { RollingMockVenue } from "./venue/mock-feed.ts";
 import type { ContractInfo, Venue } from "./venue/venue.ts";
 
-type FullChain = Chain & MarketChain & { close(): void };
+type FullChain = Chain & MarketChain & { resume(admin: KeyPairSigner): Promise<string>; close(): void };
 
 const USAGE = `usage: node src/main.ts <command>
 
   start                     run the relayer
   status                    print /health and /status of a running relayer
   pause                     set both pause bits on-chain
+  resume                    clear both pause bits on-chain, signed by the admin key (.keys/deployer-keypair.json)
   cancel-expired            cancel every open order past its expiry
   settle <symbol> <yes|no>  settle a market by hand`;
 
@@ -284,6 +287,34 @@ async function pause(config: RelayerConfig): Promise<number> {
   }
 }
 
+/** The program's admin: the deployer key that `bootstrap` initialized the program with. */
+const ADMIN_KEY_PATH = path.join(REPO_ROOT, ".keys", "deployer-keypair.json");
+
+async function resume(config: RelayerConfig): Promise<number> {
+  if (!existsSync(ADMIN_KEY_PATH)) {
+    console.error(`the admin key is not here: ${path.relative(REPO_ROOT, ADMIN_KEY_PATH)} is missing; only the program's admin can clear the pause bits`);
+    return 1;
+  }
+  const { loadKeypairSigner } = await import("./chain/solana.ts");
+  const admin = await loadKeypairSigner(ADMIN_KEY_PATH);
+  const chain = await openChain(config);
+  try {
+    const current = await chain.config();
+    if (current.admin !== admin.address) {
+      console.error(`${path.relative(REPO_ROOT, ADMIN_KEY_PATH)} holds ${admin.address}, but the admin of program ${config.deployment.programId} is ${current.admin}`);
+      return 1;
+    }
+    console.log(
+      `about to clear both pause bits on ${config.cluster}, program ${config.deployment.programId} ` +
+        `(now place=${current.pausePlace} fill=${current.pauseFill}), signed by the admin ${admin.address}`,
+    );
+    console.log(`resumed: ${await chain.resume(admin)}`);
+    return 0;
+  } finally {
+    chain.close();
+  }
+}
+
 async function cancelExpired(config: RelayerConfig): Promise<number> {
   const chain = await openChain(config);
   try {
@@ -348,6 +379,8 @@ async function main(argv: string[]): Promise<number> {
       return printStatus();
     case "pause":
       return pause(loadConfig(process.env, REPO_ROOT));
+    case "resume":
+      return resume(loadConfig(process.env, REPO_ROOT));
     case "cancel-expired":
       return cancelExpired(loadConfig(process.env, REPO_ROOT));
     case "settle":

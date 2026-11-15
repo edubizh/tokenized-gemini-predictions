@@ -83,7 +83,12 @@ const CLOSURE_READ_DELAY_MS = 500;
 /** How many of a market's newest transactions are searched for the one that settled it. */
 const SETTLEMENT_SIGNATURES = 25;
 
-export function createSolanaChain(options: SolanaChainOptions): Chain & MarketChain & { close(): void } {
+export function createSolanaChain(options: SolanaChainOptions): Chain &
+  MarketChain & {
+    /** Clears both pause bits, signed and paid by `admin`: only the program's admin may clear them. */
+    resume(admin: KeyPairSigner): Promise<string>;
+    close(): void;
+  } {
   const rpc = createRetryingRpc(options.rpcUrl);
   const programId = address(options.programId);
   const program = { programAddress: programId };
@@ -484,6 +489,10 @@ export function createSolanaChain(options: SolanaChainOptions): Chain & MarketCh
       const current = (await fetchConfig(rpc, await configPda(), { commitment })).data.pauseFlags;
       const wanted = current | (flags.place ? PAUSE_PLACE : 0) | (flags.fill ? PAUSE_FILL : 0);
       return sender.send(relayer, [await getSetPauseInstructionAsync({ authority: relayer, flags: wanted }, program)]);
+    },
+
+    async resume(admin) {
+      return sender.send(admin, [await getSetPauseInstructionAsync({ authority: admin, flags: 0 }, program)]);
     },
 
     async treasuryMicros() {
