@@ -174,43 +174,70 @@ Findings (2026-11-14):
 
 ## P1. Wallet login with real wallets (goal 3)
 
-- [ ] Test harness: Chromium with the unpacked Phantom and MetaMask extensions (Solflare and Backpack if they load the same way), each with a wallet created by the test
-- [ ] Cause found for "Phantom waits on Sign to verify and no window opens" and for "MetaMask does not connect"
-- [ ] Fix with the smallest correct change
-- [ ] Every step that waits for a wallet says what it is waiting for and offers retry and cancel
-- [ ] A wallet that cannot sign for Solana gets a clear message instead of a dead end; the supported wallets are stated plainly
-- [ ] Matrix below filled in for each wallet
+- [x] Test harness: Chromium with the unpacked Phantom and MetaMask extensions (Solflare and Backpack if they load the same way), each with a wallet created by the test
+- [x] Cause found for "Phantom waits on Sign to verify and no window opens" and for "MetaMask does not connect"
+- [x] Fix with the smallest correct change
+- [x] Every step that waits for a wallet says what it is waiting for and offers retry and cancel
+- [x] A wallet that cannot sign for Solana gets a clear message instead of a dead end; the supported wallets are stated plainly
+- [x] Matrix below filled in for each wallet
 
 Matrix (one row per case, one column per wallet): first login (connect, then sign); the user rejects the connection; the user rejects or closes the signature; wallet locked; wallet on another network or Testnet Mode off; two wallets installed; log out and in again; switch account inside the wallet; reload, then Reconnect; first-run test funds; place an order and reach FILLED or REFUNDED; redeem; Reclaim. Email login keeps passing its checks.
+
+Result (2026-11-15), real extensions (Phantom 26.38.1, MetaMask 13.56) in a test browser with wallets made by the test, on devnet with the simulated venue. Each case is `node e2e/real-wallets/matrix.mjs <wallet> <case>` from `apps/web`.
+
+| Case | Phantom | MetaMask |
+|---|---|---|
+| First login (connect, then sign), in a window and in the side panel | pass | pass |
+| The user rejects the connection | pass | pass |
+| The user rejects the signature; closes the window; closes the side panel | pass | pass (it has no window) |
+| Wallet locked | pass | pass |
+| Other network | pass: the app names Testnet Mode; with it on the order fills | pass: the app says plainly that it cannot sign |
+| Two wallets installed | pass | pass |
+| Log out and in again | pass | pass |
+| Switch account inside the wallet | app side passes with the injected wallet; not run in the extension | pass |
+| Reload, then Reconnect | pass | pass |
+| First-run test funds | pass | pass |
+| Place an order | pass, filled | does not apply |
+| Redeem | pass | does not apply |
+| Reclaim | pass | does not apply |
+
+What is supported:
+
+- **Phantom**: login and trading. It asks in a window of its own or in its side panel; the app says so while it waits.
+- **MetaMask**: login only. MetaMask 13.56 confirms Solana mainnet transactions only (asked for devnet it still previews on mainnet and keeps its Confirm button off, and it offers no Solana test network), so it cannot sign an order here. The login entry and the trade panel say so.
+- **Solflare, Backpack**: listed when installed; not run with the real extensions.
+- **WalletConnect**: offered through the login library's own window; needs a phone wallet and was not run.
+
+Still to check by hand: Phantom with Testnet Mode on in an ordinary browser profile (in the test browser Phantom's own service refuses to preview a transaction, so the test confirms without a preview); switching between two accounts inside Phantom (its service refuses to add an account in the test browser); WalletConnect with a phone.
 
 Exit: every row passes for Phantom and for MetaMask (through its Solana account) with real extensions on a live stack; no path hangs without a message; unit tests and browser checks pass.
 
 ## P2. Design system (goal 1, first half)
 
-- [ ] The four colours chosen and every text and control pairing checked numerically against WCAG AA
-- [ ] `docs/DESIGN.md` and `docs/PRODUCT.md` rewritten for the new direction
-- [ ] Tokens, one typeface with tabular numerals, and the few primitives
-- [ ] Shell: see-through navbar (Markets, Portfolio, Activity, Vaults, the network, the wallet and its balance), a quiet devnet mark, the footer line
-- [ ] Looked at in a browser at 1280 and 390 wide before any page is built on it
+- [x] The four colours chosen and every text and control pairing checked numerically against WCAG AA
+- [x] `docs/DESIGN.md` and `docs/PRODUCT.md` rewritten for the new direction
+- [x] Tokens, one typeface with tabular numerals, and the few primitives
+- [x] Shell: see-through navbar (Markets, Portfolio, Activity, Vaults, the network, the wallet and its balance), a quiet devnet mark, the footer line
+- [x] Looked at in a browser at 1280 and 390 wide before any page is built on it
 
 Exit: the reference page shows every primitive and state at both widths; contrast figures are in DESIGN.md; nothing uses a fifth hue (one muted error tone is the single written exception).
 
 ## P3. Every market: relayer and API (goal 2, back end)
 
-- [ ] API types first: event grouping, category, description and rules, resolution source, dates, volume, image, per-contract label and strike; price history, depth and recent trades for one market
-- [ ] Discovery of every active event and contract in place of the curated series list, inside the venue's rate limits
-- [ ] A market is still created on-chain only when someone opens or trades it
-- [ ] Token names and tickers for strike contracts (32 and 10 bytes)
-- [ ] Settlement and reconciliation for strike ladders and long-dated events: early resolution, review, invalid
-- [ ] The simulated venue offers the same variety, so the demo and the tests are deterministic
+- [x] API types first: event grouping, category, description and rules, resolution source, dates, volume, per-contract label and strike (the venue's images are not loaded); price history, depth and recent trades for one market
+- [x] Discovery of every active event and contract in place of the curated series list, inside the venue's rate limits
+- [x] A market is created on-chain only when a logged-in user places the first order on it
+- [x] Token names and tickers for strike contracts (32 and 10 bytes)
+- [x] Settlement and reconciliation for strike ladders and long-dated events: early resolution, review, invalid
+- [x] The simulated venue offers the same variety, so the demo and the tests are deterministic
 - [x] Program: tick, minimum quantity, close and cutoff times confirmed against the wider set of contracts: everything fits, so it is unchanged
 
 Exit: with the stack running, every active sandbox event and contract appears within a poll or two; a contract with offers can be bought and sold and then settles and redeems; a contract without offers says so; tests cover discovery, grouping and the new settlement cases.
 
 ## P4. Web app rebuilt (goals 1 and 2, front end)
 
-- [ ] Markets index for everyone: categories, search, sort, live and upcoming, quoted first
-- [ ] Event page: every contract of the event with its prices
+- [x] Markets index for everyone: categories, search, sort, live and upcoming, quoted first
+- [x] Event page: every contract of the event with its prices
 - [ ] Market page: question and rules, resolution source and terms, close and settlement times with a countdown, price chart, order book or best bid and ask, recent trades, volume, the user's position and orders, the trade panel
 - [ ] Logged out, the trade panel asks for a login and nothing else is hidden; the login gate no longer covers the market pages
 - [ ] Portfolio, Activity, Vaults (placeholder), System, Welcome, not-found, error and offline states on the new design
