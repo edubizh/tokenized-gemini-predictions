@@ -55,12 +55,19 @@ export class MockVenue implements Venue {
   /** Client order ids `findOrder` reports as not closed yet. */
   private readonly heldOpen = new Set<string>();
   private cash = 0n;
-  private nextOrderId = 73_000_000_000_000_000n;
-  private nextTradeId = 5_000_000_000_000_000n;
+  private nextOrderId: bigint;
+  private nextTradeId: bigint;
 
   constructor(options: MockVenueOptions = {}) {
     this.feeFor = options.feeFor ?? (() => 0n);
     this.now = options.now ?? Date.now;
+    // The journal outlives the process and keeps every fill, so no id may come back after a
+    // restart. Ids start a thousand per millisecond of the start time above the base: a start
+    // reuses none of an earlier one's unless that one handed out more than a thousand ids per
+    // millisecond it ran. Order ids stay 17 or 18 digits for thousands of years.
+    const fromStart = BigInt(this.now()) * 1_000n;
+    this.nextOrderId = 73_000_000_000_000_000n + fromStart;
+    this.nextTradeId = 5_000_000_000_000_000n + fromStart;
   }
 
   /** Describes an event. Its contracts are added with `addContract`. */

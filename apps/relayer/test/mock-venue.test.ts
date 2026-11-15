@@ -186,6 +186,35 @@ describe("MockVenue.placeOrder", () => {
   });
 });
 
+describe("MockVenue ids", () => {
+  // Seen live: a restarted relayer's venue handed out the ids of the previous run again, and the
+  // journal, which keeps every fill, refused the first fill after the restart.
+  it("never repeats an order id or a trade id after a restart, however close together the starts", async () => {
+    const START = Date.parse("2026-11-15T22:09:00Z");
+    const ids = async (startMs: number, orders: number): Promise<{ orders: string[]; trades: string[] }> => {
+      const venue = venueWith(10_000_000n, { now: () => startMs });
+      venue.setBook(SYMBOL, { bids: [], asks: [[1_700n, 100_000n]] });
+      const out = { orders: [] as string[], trades: [] as string[] };
+      for (let index = 0; index < orders; index += 1) {
+        const result = await venue.placeOrder(request({ units: 100n }));
+        if (result.kind !== "filled") throw new Error(`expected filled, got ${result.kind}`);
+        out.orders.push(result.venueOrderId);
+        out.trades.push(...result.fills.map((fill) => fill.tradeId));
+      }
+      return out;
+    };
+    const first = await ids(START, 3);
+    const second = await ids(START + 1_000, 3); // started again a second later
+    const orders = [...first.orders, ...second.orders];
+    const trades = [...first.trades, ...second.trades];
+    expect(new Set(orders).size).toBe(6);
+    expect(new Set(trades).size).toBe(6);
+    expect(BigInt(second.orders[0]!)).toBeGreaterThan(BigInt(first.orders[2]!));
+    // The venue's order ids are 17 or 18 digit integers.
+    for (const id of orders) expect(id).toMatch(/^\d{17,18}$/);
+  });
+});
+
 describe("MockVenue fault injection", () => {
   it("unknown_after_fill executes the order but reports unknown", async () => {
     const venue = venueWith();
