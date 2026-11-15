@@ -133,12 +133,19 @@ async function surfaces(browser) {
 async function read(surface) {
   if (await surface.has(UNLOCK_INPUT)) return { kind: "unlock", why: "an unlock form is answered with unlock()" };
   const text = await surface.text();
+  // Phantom sometimes puts its own notice of a policy update over a request; the user continues past it.
+  if (/We've updated our (Privacy Policy|terms)/i.test(text)) {
+    await surface.click(PANEL_APPROVE);
+    return null;
+  }
   // A transaction Phantom cannot simulate gets no Confirm button, only "Confirm (unsafe)" and then
   // a screen saying the request is blocked: `approve` does not press through that. A test that
   // needs the signature says so by calling `confirmUnsimulated`.
   const unsafe = /Confirm \(unsafe\)/.test(text);
   if (!unsafe && !(await surface.has(PANEL_APPROVE))) return null;
-  const kind = /Only connect to websites you trust/.test(text) ? "connect" : /Sign Message|Sign In/.test(text) ? "message" : /transaction/i.test(text) ? "transaction" : "other";
+  const kind = /Only connect to websites you trust/.test(text) ? "connect" : /Sign Message|Sign In/.test(text) ? "message" : /transaction/i.test(text) ? "transaction" : null;
+  // A request drawn over the side panel's home screen shows its buttons before its words: read it again.
+  if (!kind) return null;
   return { kind, approve: unsafe ? null : PANEL_APPROVE, reject: PANEL_REJECT, why: 'Phantom could not simulate the request and offers only "Confirm (unsafe)", which approve() does not press' };
 }
 

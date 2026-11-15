@@ -4,7 +4,7 @@
 //   cd apps/web && pnpm exec next dev -p 3200
 //   node e2e/real-wallets/matrix.mjs <phantom|metamask> <case>
 //
-// Cases that need the web app only:
+// Cases that need the web app only (the fixtures server will do: LIVE_BASE_URL=http://localhost:3100):
 //   first-login     connect, then sign, in the wallet's default place (Phantom: a window; MetaMask: its side panel)
 //   side-panel      the same with the wallet's side panel open
 //   reject-connect  the user declines the connection: a message and Try again
@@ -15,15 +15,18 @@
 //   relogin         log out and in again, the site now trusted
 //   two-wallets     both wallets installed, the other one's side panel open
 // Cases on the live stack (also the relayer, with the simulated venue; see the README of the repo):
-//   live            first-run test funds, an order to FILLED or REFUNDED, an account switch inside the
-//                   wallet, reload then Reconnect wallet, and a settled position redeemed. MetaMask
+//   live            first-run test funds in the trade panel, an order to FILLED or REFUNDED, an account
+//                   switch inside the wallet, reload then Reconnect wallet, and a settled position
+//                   redeemed on the portfolio. MetaMask
 //                   confirms Solana mainnet transactions only: for it the run checks that the app
 //                   says so instead of asking for a signature it cannot give.
 //   reclaim         an order nobody fills is reclaimed after its deadline. The run prints READY once
-//                   the order's signature is asked for and then waits for the relayer to be stopped.
+//                   the order's signature is asked for and then waits for the relayer to be stopped;
+//                   the expired order is reclaimed on the activity page.
 //
 // Each line of a run is a PASS or a FAIL; the exit code is 0 only when every one passed.
-// LIVE_BASE_URL overrides http://localhost:3200; HEADED=1 opens real windows.
+// LIVE_BASE_URL overrides http://localhost:3200; HEADED=1 opens real windows. MARKETS overrides the
+// query of the markets index a live case picks its market from (default "?cadence=15m").
 // Evidence: e2e/out/real-wallets/matrix-<wallet>-<case>/ (events.log and screenshots).
 import { BASE, listedWallets, loginDialog, loginStep, loginText, logOut, openApp, openLogin, pickWallet, waitForLogin, waiting, waitingSlow, waitingText } from "./lib/app.mjs";
 import { launch } from "./lib/browser.mjs";
@@ -36,8 +39,9 @@ const DRIVERS = { phantom, metamask };
 const [walletName, caseName] = process.argv.slice(2);
 const driver = DRIVERS[walletName];
 const RELAYER = process.env.RELAYER_URL ?? "http://127.0.0.1:8787";
-/** How long a market of the simulated venue lasts (the relayer's MOCK_WINDOW_SECS); windows start on multiples of it. */
+/** How long a 15-minute event of the simulated venue lasts (the relayer's MOCK_WINDOW_SECS); windows start on multiples of it. */
 const MARKET_WINDOW_SECS = Number(process.env.MOCK_WINDOW_SECS ?? 180);
+const MARKETS = process.env.MARKETS ?? "?cadence=15m";
 /** MetaMask confirms Solana mainnet transactions only: it can log in, and the app refuses to ask it for a devnet signature. */
 const cannotTrade = walletName === "metamask";
 
@@ -149,8 +153,11 @@ async function upToTheSignature(s) {
 // ---- The live stack: funds, orders, redemption -------------------------------------------------
 
 const header = (page) => page.locator("header").first();
+/** The test-dollar balance in the navbar, the only dollar amount in it: "$1,000.00", or "" while it is not shown. */
+const dollars = async (page) => /\$[\d,]+\.\d\d/.exec(await header(page).innerText())?.[0] ?? "";
 const ticket = (page) => page.locator('[data-testid="ticket"]');
-const placeButton = (page) => ticket(page).getByRole("button", { name: /Place order/ });
+const placeButton = (page) => ticket(page).locator('[data-testid="place"]');
+const quantity = (page) => ticket(page).locator('[data-testid="ticket-quantity"]');
 
 /**
  * Approves the transaction the app is waiting for, checking that the app says what it waits for.
@@ -175,15 +182,17 @@ async function approveTransaction(s, request) {
   else await driver.confirmUnsimulated(s.browser);
 }
 
-/** Row 10: the welcome page's Get test funds. */
+/** Row 10: a new wallet's trade panel offers Get test funds in place of the order button. */
 async function getFunds(s) {
   const { page } = s;
-  const state = () => page.locator('[data-testid="welcome"]').getAttribute("data-state", { timeout: 2_000 });
-  if (!check(await until(async () => (await state()) === "ready", 120_000), "a new wallet is sent to the welcome page")) return;
-  await page.click('[data-testid="get-test-funds"]');
-  await until(async () => ["done", "error", "already"].includes(await state()), 150_000);
-  check((await state()) === "done", `Get test funds registers the wallet and sends funds (${await state()})`);
-  check(await until(async () => /Test dollars \$[1-9]/.test(oneLine(await header(page).innerText())), 90_000), "test dollars arrive in the wallet");
+  if (!check(await openTicket(s), "a market's trade panel is open")) return;
+  const funds = ticket(page).locator('[data-testid="get-test-funds"]');
+  if (!check(await until(() => funds.isVisible(), 90_000), "the trade panel of a new wallet offers Get test funds")) return;
+  await funds.click();
+  const refused = ticket(page).getByText("Test funds were not sent", { exact: true });
+  await until(async () => (await placeButton(page).isVisible()) || (await refused.isVisible()), 150_000);
+  if (!check(await placeButton(page).isVisible(), "Get test funds registers the wallet and sends funds: the panel offers the order")) log("app", oneLine(await ticket(page).innerText()).slice(-260));
+  check(await until(async () => /^\$[1-9]/.test(await dollars(page)), 90_000), `test dollars arrive in the wallet (${await dollars(page)})`);
   await s.browser.shoot(page, "funded");
 }
 
@@ -194,16 +203,20 @@ async function getFunds(s) {
 async function openTicket(s, side = "YES", marketUrl = null) {
   const { page } = s;
   if (marketUrl) {
-    await page.goto(`${marketUrl}?side=${side.toLowerCase()}`, { waitUntil: "domcontentloaded" });
+    const url = new URL(marketUrl);
+    url.searchParams.set("side", side.toLowerCase());
+    await page.goto(url.href, { waitUntil: "domcontentloaded" });
   } else {
-    const buy = page.getByRole("link", { name: new RegExp(`^Buy ${side}`) }).first();
-    await page.goto(`${BASE}/markets`, { waitUntil: "domcontentloaded" });
+    // A card's price button: "Yes 57 cents, buy …".
+    const buy = page.locator('[data-testid="event-card"]').getByRole("link", { name: new RegExp(`^${side === "NO" ? "No" : "Yes"}\\b`) }).first();
+    // The simulated venue's 15-minute events last one window (MARKET_WINDOW_SECS) and start on multiples of it.
+    await page.goto(`${BASE}/${MARKETS}`, { waitUntil: "domcontentloaded" });
     if (!(await until(() => buy.isVisible(), 240_000))) return false;
     await buy.click();
     await page.waitForURL(/\/markets\/.+/);
   }
   if (!(await until(() => ticket(page).isVisible(), 120_000))) return false;
-  const again = page.getByRole("button", { name: "Place another order" });
+  const again = page.locator('[data-testid="place-another"]');
   if (await until(() => again.isVisible(), 3_000)) await again.click();
   return true;
 }
@@ -212,7 +225,7 @@ async function openTicket(s, side = "YES", marketUrl = null) {
 async function placeOrder(s, what, side = "YES", marketUrl = null) {
   const { page } = s;
   if (!check((await openTicket(s, side, marketUrl)) && (await until(() => placeButton(page).isEnabled(), 15_000)), `a market takes ${side} orders`)) return null;
-  await ticket(page).getByLabel("Quantity", { exact: true }).fill("1.00");
+  await quantity(page).fill("1.00");
   await placeButton(page).click();
   await sign(s, what);
   const stamp = await until(async () => {
@@ -231,7 +244,7 @@ async function placeOrder(s, what, side = "YES", marketUrl = null) {
 async function namesTestnetMode(s) {
   const { page } = s;
   if (!check(await openTicket(s), "a market takes orders")) return;
-  await ticket(page).getByLabel("Quantity", { exact: true }).fill("1.00");
+  await quantity(page).fill("1.00");
   await placeButton(page).click();
   check(await says(page, waitingText, "Phantom previews a devnet transaction only with its Testnet Mode on (Settings, Developer Settings)", 30_000), "while it waits, the app names the setting: Testnet Mode");
   const request = await driver.pendingRequest(s.browser, { timeout: 30_000 });
@@ -246,7 +259,7 @@ async function namesTestnetMode(s) {
 async function refusesToTrade(s) {
   const { page } = s;
   if (!check(await openTicket(s), "a market takes orders")) return;
-  await ticket(page).getByLabel("Quantity", { exact: true }).fill("1.00");
+  await quantity(page).fill("1.00");
   await placeButton(page).click();
   const refusal = `${driver.label} confirms Solana mainnet transactions only, so it cannot sign in this devnet demo. Log out, then log in with another wallet or with email to trade.`;
   check(await says(page, (p) => ticket(p).innerText(), refusal, 30_000), `the ticket says: ${refusal}`);
@@ -311,17 +324,20 @@ async function reloadAndReconnect(s) {
   }
 }
 
-/** Row 12: a market the wallet holds both sides of settles; the winning side is redeemed. */
+/** Row 12: a market the wallet holds both sides of settles; the winning side is redeemed on the portfolio. */
 async function redeem(s) {
   const { page } = s;
   await page.goto(`${BASE}/portfolio`, { waitUntil: "domcontentloaded" });
-  const action = page.getByRole("button", { name: /^Redeem\b/ }).first();
+  const action = page.locator('[data-testid="position-redeem"]').first();
   if (!check(await until(() => action.isVisible(), 420_000), "once the market settles, the portfolio offers Redeem")) return;
   const balance = () => page.locator('[data-testid="portfolio-balance"]').innerText();
   const before = await balance();
+  // A redemption is listed under Settled with its transaction.
+  const receipts = page.locator('[data-testid="redemption-tx"]');
+  const receiptsBefore = await receipts.count();
   await action.click();
   await sign(s, "the redemption");
-  check(await until(() => page.locator('[data-testid="redemption-receipt"]').first().isVisible(), 120_000), "the redemption is confirmed and a receipt is shown");
+  check(await until(() => receipts.nth(receiptsBefore).isVisible(), 120_000), "the redemption is confirmed and listed with its transaction");
   check(await until(async () => (await balance()) !== before, 60_000), `the test dollars arrive (${before} -> ${await balance()})`);
   await s.browser.shoot(page, "redeemed");
 }
@@ -389,7 +405,7 @@ const CASES = {
     await pickWallet(page, driver.label);
     check(await says(page, waitingText, `Still nothing from ${driver.label}`, 40_000), "a new attempt in the same page is told the same, sooner");
     await Promise.all([page.waitForEvent("load"), waiting(page).getByRole("button", { name: "Reload page" }).click()]);
-    await page.locator('[data-testid="login"]:not([disabled])').waitFor({ timeout: 60_000 });
+    await page.locator('[data-testid="login-top"]:not([disabled])').waitFor({ timeout: 60_000 });
     check(await logIn(s), "after Reload page, the login succeeds");
   },
 
@@ -477,7 +493,7 @@ const CASES = {
       const left = MARKET_WINDOW_SECS - ((Date.now() / 1000) % MARKET_WINDOW_SECS);
       if (left < MARKET_WINDOW_SECS - 30) await sleep((left + 8) * 1000);
       if ((await placeOrder(s, "a YES order to hold")) !== "FILLED") continue;
-      both = (await placeOrder(s, "a NO order in the same market", "NO", s.page.url().split("?")[0])) === "FILLED";
+      both = (await placeOrder(s, "a NO order in the same market", "NO", s.page.url())) === "FILLED";
     }
     if (check(both, "the wallet holds both sides of one market")) await redeem(s);
   },
@@ -487,12 +503,11 @@ const CASES = {
     const { page } = s;
     check(await logIn(s), "logged in");
     await getFunds(s);
-    const dollars = async () => /Test dollars (\$[\d,.]+)/.exec(oneLine(await header(page).innerText()))?.[1] ?? "";
-    const funded = await dollars();
+    const funded = await dollars(page);
     await driver.setTestnetMode?.(s.browser, true);
     await page.bringToFront();
     if (!check(await openTicket(s), "a market takes orders")) return;
-    await ticket(page).getByLabel("Quantity", { exact: true }).fill("1.00");
+    await quantity(page).fill("1.00");
     await placeButton(page).click();
     const request = await driver.pendingRequest(s.browser, { timeout: 30_000 });
     if (!check(request?.kind === "transaction", "the wallet asks for the order's signature")) return;
@@ -501,12 +516,13 @@ const CASES = {
     if (!check(await until(() => fetch(`${RELAYER}/health`).then(() => false, () => true), 55_000), "the relayer is stopped")) return;
     await approveTransaction(s, request);
     await page.goto(`${BASE}/activity`, { waitUntil: "domcontentloaded" });
-    const orders = page.locator('[data-testid="activity-order"]');
-    check(await until(() => orders.first().getByText(/Expired/).first().isVisible(), 240_000), "the order is listed and expires at its deadline");
-    await page.getByRole("button", { name: /^Reclaim/ }).first().click();
+    // The page stamps the order EXPIRED once its deadline has passed on the cluster's clock; its steps then offer Reclaim.
+    const expired = page.locator('[data-testid="activity-order"][data-stamp="EXPIRED"]');
+    check(await until(() => expired.first().isVisible(), 240_000), "the order is listed and expires at its deadline");
+    await page.locator('[data-testid="activity-steps"]').getByRole("button", { name: /^Reclaim/ }).first().click();
     await sign(s, "the reclaim");
-    check(await until(async () => (await orders.filter({ hasText: /Expired/ }).count()) === 0, 120_000), "the order is reclaimed");
-    check(await until(async () => (await dollars()) === funded, 60_000), `the test dollars are back in the top bar (${funded}; now ${await dollars()})`);
+    check(await until(async () => (await expired.count()) === 0, 120_000), "the order is reclaimed");
+    check(await until(async () => (await dollars(page)) === funded, 60_000), `the test dollars are back in the top bar (${funded}; now ${await dollars(page)})`);
     await s.browser.shoot(page, "reclaimed");
   },
 };

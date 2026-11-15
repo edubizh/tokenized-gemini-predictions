@@ -19,15 +19,20 @@ export const waitingText = async (page) => ((await waiting(page).count()) > 0 ? 
 /** True once the wait has gone on long enough for the app to offer Try again. */
 export const waitingSlow = async (page) => (await page.locator('[data-testid="wallet-waiting"][data-slow]:visible').count()) > 0;
 
-/** Opens the app's entry page and waits until its Log in button can be used. */
+/** The navbar's Log in button, shown to a visitor once the login library is ready. */
+const LOG_IN = '[data-testid="login-top"]:not([disabled])';
+/** The navbar's account button, shown once logged in. */
+const ACCOUNT = '[data-testid="account"]';
+
+/** Opens the markets index, the entry page for everyone, and waits until the navbar offers Log in. */
 export async function openApp(page) {
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
-  await page.locator('[data-testid="login"]:not([disabled])').waitFor({ timeout: 60_000 });
+  await page.locator(LOG_IN).waitFor({ timeout: 60_000 });
 }
 
 /** Log in: leaves the login dialog on its list of ways to log in. */
 export async function openLogin(page) {
-  await page.click('[data-testid="login"]:not([disabled])');
+  await page.click(LOG_IN);
   await loginDialog(page).locator('[data-testid="login-email"]').waitFor();
 }
 
@@ -37,20 +42,17 @@ export const listedWallets = (page) => loginDialog(page).locator('[data-testid="
 /** Picks a wallet in the login dialog by the name it is listed under. */
 export const pickWallet = (page, label) => loginDialog(page).locator(`[data-testid="login-wallet"][data-wallet="${label}"]`).click();
 
-/** True once the app has left the entry page for a page behind the login. */
-export const loggedIn = (page) => /\/(welcome|markets)/.test(new URL(page.url()).pathname);
-
-/** Waits until the app is logged in; false when it is not within `timeout`. */
+/** Waits until the app is logged in (the navbar shows the account); false when it is not within `timeout`. */
 export async function waitForLogin(page, timeout = 30_000) {
-  return page.waitForURL(/\/(welcome|markets)/, { timeout }).then(
+  return page.locator(ACCOUNT).waitFor({ timeout }).then(
     () => true,
     () => false,
   );
 }
 
-/** Logs out through the account menu in the top bar. */
+/** Logs out through the account panel in the navbar. */
 export async function logOut(page) {
-  await page.getByRole("button", { name: /^Account / }).click();
-  await page.getByRole("menuitem", { name: "Log out" }).click();
-  await page.locator('[data-testid="login"]:not([disabled])').waitFor({ timeout: 30_000 });
+  await page.click(ACCOUNT);
+  await page.locator('[data-testid="account-panel"]').getByRole("button", { name: "Log out" }).click();
+  await page.locator(LOG_IN).waitFor({ timeout: 30_000 });
 }
