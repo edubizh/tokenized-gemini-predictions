@@ -2,8 +2,9 @@
 
 import { useCallback, useReducer } from "react";
 import { PageHeader } from "@/components/shell/Shell";
-import { chainNow, useHealth, useMarkets } from "@/features/markets/hooks";
+import { AccountOnly } from "@/features/account/LoggedOut";
 import { knownMarkets } from "@/features/markets/known";
+import { ChainNotice, RelayerNotice } from "@/features/markets/RelayerNotice";
 import { useReclaimOrder } from "@/features/ticket/actions";
 import { orderEntries, SETTLING_MS } from "@/features/ticket/entries";
 import { useChainMarkets, useLocalOrders, useOpenOrders, useOrders, useOrdersFinished } from "@/features/ticket/hooks";
@@ -11,16 +12,26 @@ import type { LocalOrder } from "@/features/ticket/timeline";
 import { explorerAddressUrl, explorerTxUrl, useConfig } from "@/lib/config";
 import { useAccount } from "@/lib/privy/account";
 import { useReconnect } from "@/lib/privy/use-reconnect";
+import { chainNow, useHealth, useOnchainMarkets } from "@/lib/relayer/hooks";
 import { ActivityView } from "./ActivityView";
 import { buildActivityRows, type ActivityRow } from "./rows";
 
+/** Everyone can open the page; what it shows belongs to an account. */
 export function ActivityPage() {
+  return (
+    <AccountOnly title="Activity" sentence="Every order you place is listed here once you are logged in, with each step it took and its transactions on Solana.">
+      <Activity />
+    </AccountOnly>
+  );
+}
+
+function Activity() {
   const config = useConfig();
   const { offline } = useHealth();
   const { refresh: refreshBalances } = useAccount();
   const openOrders = useOpenOrders();
   const local = useLocalOrders();
-  const markets = useMarkets("all");
+  const markets = useOnchainMarkets();
   const reclaiming = useReclaimOrder();
   const reconnect = useReconnect();
   // Drawn again when an order's countdown reaches zero, so its stamp and Reclaim appear on time.
@@ -88,6 +99,8 @@ export function ActivityPage() {
 
   return (
     <>
+      <RelayerNotice />
+      <ChainNotice />
       <PageHeader title="Activity">Your orders, newest first. Open one to see each step it took, where its test dollars went, and the transactions on Solana.</PageHeader>
       <ActivityView
         rows={rows}

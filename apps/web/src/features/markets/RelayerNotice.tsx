@@ -3,10 +3,10 @@
 import type { ApiHealth } from "@outcome/relayer/api-types";
 import { Notice } from "@/components/ui/Notice";
 import { useAccount } from "@/lib/privy/account";
-import { useHealth } from "./hooks";
+import { useHealth } from "@/lib/relayer/hooks";
 
 /** What the relayer's state means for the person looking at the page, or nothing when all is well. */
-export function RelayerNoticeView({ health, offline }: { health: ApiHealth | null; offline: boolean }) {
+function RelayerNoticeView({ health, offline }: { health: ApiHealth | null; offline: boolean }) {
   if (offline) {
     return (
       <Notice tone="caution" title="The relayer is not answering">
@@ -39,13 +39,9 @@ export function RelayerNoticeView({ health, offline }: { health: ApiHealth | nul
   return null;
 }
 
-/**
- * Sits at the top of every page that needs the relayer. The markets list and a market's page say
- * that the relayer is offline in the place of what is missing, so it is not said twice there.
- */
-export function RelayerNotice({ offlineShownInPlace = false }: { offlineShownInPlace?: boolean }) {
+/** Sits at the top of the pages of an account, which need the relayer for part of what they show. */
+export function RelayerNotice() {
   const { health, offline } = useHealth();
-  if (offline && offlineShownInPlace) return null;
   const notice = RelayerNoticeView({ health, offline });
   return notice ? <div style={{ marginBottom: "var(--space-5)" }}>{notice}</div> : null;
 }

@@ -144,7 +144,7 @@ export function SystemView({ venue, health, offline, status, markets, addresses,
           <li>
             <span className={styles.stepNumber}>5</span>
             <p className={styles.stepText}>
-              <strong>Settle and redeem.</strong> When the fifteen minutes end, the settler records the venue's result on Solana and funds the market's vault. Shortly after, redemption opens: each winning token pays $1.00 in test dollars, and tokens of the other side pay nothing.
+              <strong>Settle and redeem.</strong> When a market closes, the settler records the venue's result on Solana and funds the market's vault. Shortly after, redemption opens: each winning token pays $1.00 in test dollars, and tokens of the other side pay nothing.
             </p>
           </li>
         </ol>

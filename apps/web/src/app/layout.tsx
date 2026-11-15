@@ -1,9 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import { HealthProvider } from "@/features/markets/hooks";
 import { loadConfig } from "@/lib/config.server";
 import { Providers } from "@/lib/privy/providers";
-import { SESSION_HINT_SCRIPT } from "@/lib/privy/session-hint";
+import { HealthProvider } from "@/lib/relayer/hooks";
 import { redditSans } from "./fonts";
 import { COLORS } from "./theme";
 import "./globals.css";
@@ -23,10 +22,7 @@ export const dynamic = "force-dynamic";
 export default function RootLayout({ children }: { children: ReactNode }) {
   const config = loadConfig().public;
   return (
-    <html lang="en" className={redditSans.variable} suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: SESSION_HINT_SCRIPT }} />
-      </head>
+    <html lang="en" className={redditSans.variable}>
       <body>
         <Providers config={config}>
           {/* One poll of the relayer's health for the whole app: the footer, the clock and every page use it. */}

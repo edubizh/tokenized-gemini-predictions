@@ -12,7 +12,7 @@ import type { Balances } from "@/lib/chain/accounts";
 import { formatCents, formatContracts, formatDollars, formatPrice } from "@/lib/format";
 import type { ReconnectView } from "@/lib/privy/reconnect";
 import { ReconnectWords } from "@/lib/privy/ReconnectWords";
-import type { TicketAction } from "./intent";
+import type { TicketAction } from "@/lib/routes";
 import { orderLimits, parseContracts, parsePrice, quoteBuy, quoteSell, type QuoteError } from "./quote";
 import styles from "./Ticket.module.css";
 
@@ -31,8 +31,8 @@ export interface TicketDraft {
   holdMicros: bigint;
 }
 
-/** Where a send is: waiting for the wallet, or on its way to the network. */
-export type SendProgress = "wallet" | "sending";
+/** Where a send is: the relayer is creating the market on Solana, the wallet is asked, or it is on its way to the network. */
+export type SendProgress = "market" | "wallet" | "sending";
 
 export interface TicketProps {
   market: ApiMarket;
@@ -315,7 +315,14 @@ export function Ticket({
           Reconnect wallet
         </Button>
       ) : (
-        <Button key="place" type="submit" variant="primary" block disabled={errors.length > 0} busy={progress === "wallet" ? "Check your wallet" : progress === "sending" ? "Sending" : false}>
+        <Button
+          key="place"
+          type="submit"
+          variant="primary"
+          block
+          disabled={errors.length > 0}
+          busy={progress === "market" ? "Preparing the market" : progress === "wallet" ? "Check your wallet" : progress === "sending" ? "Sending" : false}
+        >
           {fieldsValid && !closed && !errorFor("fee") ? `Place order · hold ${holdWords}` : "Place order"}
         </Button>
       )}

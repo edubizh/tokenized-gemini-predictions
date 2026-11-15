@@ -1,22 +1,34 @@
-// The simulated relayer and chain of fixtures mode, kept in the app server's memory. An order
-// placed in the browser is recorded here and walks through the relayer's states over a few
-// seconds, so every page can be driven without a chain. Server only.
+// The simulated relayer and chain of fixtures mode, kept in the app server's memory. The events
+// and their quotes come from the fixtures, which are a pure function of the time; what a browser
+// does is recorded here: the markets it had created on-chain, the orders it placed, which walk
+// through the relayer's states over a few seconds, and the tokens it redeemed. Server only.
 
-import type { ApiMarket, ApiOrder, SideName } from "@outcome/relayer/api-types";
+import type { ApiEvent, ApiEventDetail, ApiMarket, ApiOnchainMarket, ApiOrder, SideName } from "@outcome/relayer/api-types";
 import { complementPx, cost, takerFee } from "@outcome/relayer/money";
-import { buildFixtures, buildJustSettledMarket, fixtureAddress, fixtureChainMarket, fixtureResponse, fixtureSignature, type FixtureResponse } from "@/lib/relayer/fixtures";
+import {
+  FIXTURE_ORDER_TTL_SECS,
+  fixtureAddress,
+  fixtureChainMarket,
+  fixtureDepth,
+  fixtureEvent,
+  fixtureEvents,
+  fixtureHealth,
+  fixtureHistory,
+  fixtureHoldings,
+  fixtureMarket,
+  fixtureOnchainMarkets,
+  fixtureOrders,
+  fixtureSignature,
+  fixtureStatus,
+  fixtureTrades,
+} from "@/lib/relayer/fixtures";
 import type { RelayerRoute } from "@/lib/relayer/proxy";
+import type { FundingChain } from "@/server/onboard";
 import type { FixtureChain, FixtureChainMarket, FixtureOpenOrder, MarketQuery } from "./chain-types";
-
-/** Fixture times are offsets from an anchor that moves every five minutes, so countdowns run. */
-export const FIXTURE_CYCLE_MS = 5 * 60 * 1000;
-/** Symbols carry their expiry time and so change with the anchor; older ones stay resolvable. */
-const ANCHORS_BACK = 6;
 
 const STARTING_STABLE_MICROS = 1_000_000_000n;
 const STARTING_LAMPORTS = 50_000_000n;
 const FIRST_NONCE = 16n;
-const ORDER_TTL_SECS = 45;
 /** How long the simulated relayer takes to create a market on-chain; the proxy route waits this long. */
 export const ENSURE_DELAY_MS = 1_500;
 
@@ -25,9 +37,6 @@ const SEEN_AT = 1_200;
 const SUBMITTING_AT = 2_400;
 const VENUE_AT = 3_800;
 const CHAIN_AT = 5_400;
-
-/** Base fixture orders the live app shows: one that the relayer never sends, and the finished ones. */
-const LISTED_BASE_STATES: ReadonlySet<ApiOrder["state"]> = new Set(["seen", "chain_filled", "chain_cancelled", "orphaned", "failed"]);
 
 interface SimOrder {
   address: string;
@@ -81,9 +90,12 @@ interface Redemption {
   payoutMicros: bigint;
 }
 
-function anchorOf(nowMs: number): number {
-  return Math.floor(nowMs / FIXTURE_CYCLE_MS) * FIXTURE_CYCLE_MS;
+export interface FixtureResponse {
+  status: number;
+  body: object;
 }
+
+type OnchainMarket = ApiMarket & { onchain: ApiOnchainMarket };
 
 function simState(order: SimOrder, nowMs: number): ApiOrder["state"] | null {
   const age = nowMs - order.placedAtMs;
@@ -97,20 +109,30 @@ function simState(order: SimOrder, nowMs: number): ApiOrder["state"] | null {
   return filled ? "chain_filled" : "chain_cancelled";
 }
 
+/** An event as the list gives it: without what only its own page needs. */
+function listed({ description: _description, source: _source, termsUrl: _termsUrl, rules: _rules, ...event }: ApiEventDetail): ApiEvent {
+  return event;
+}
+
+const answer = (body: object): FixtureResponse => ({ status: 200, body });
+const known = (body: object | null, what: string): FixtureResponse => (body === null ? { status: 404, body: { error: `unknown ${what}` } } : answer(body));
+
 /** Everything the world remembers. Kept apart from the class so a reload of this module keeps it. */
 interface WorldState {
   placed: Map<string, SimOrder>;
   /** Orders the user cancelled themselves, with the time of the cancel. */
   cancelled: Map<string, number>;
-  /** Markets the relayer has been asked to create on-chain. */
-  ensured: Set<string>;
+  /** Symbols of the markets that exist on-chain beyond those of the fixtures: created through the relayer, or traded. */
+  onchain: Set<string>;
   /** Every `redeem` the simulated chain has accepted. */
   redemptions: Redemption[];
+  /** Wallets the registrar has registered, where new wallets start unregistered. */
+  registered: Set<string>;
   transactions: number;
 }
 
 function emptyState(): WorldState {
-  return { placed: new Map(), cancelled: new Map(), ensured: new Set(), redemptions: [], transactions: 0 };
+  return { placed: new Map(), cancelled: new Map(), onchain: new Set(), redemptions: [], registered: new Set(), transactions: 0 };
 }
 
 export class FixtureWorld {
@@ -120,124 +142,116 @@ export class FixtureWorld {
     this.state = state;
   }
 
-  private get placed() {
-    return this.state.placed;
-  }
-
-  private get cancelled() {
-    return this.state.cancelled;
-  }
-
-  private get ensured() {
-    return this.state.ensured;
-  }
-
   nextSignature(): string {
     this.state.transactions += 1;
     return fixtureSignature(`tx:${this.state.transactions}`);
   }
 
-  /**
-   * Markets of one anchor: the fixture set plus two more contracts in the first market's window,
-   * as a venue lists several assets for the same fifteen minutes. The last of them starts without
-   * its on-chain account, so opening it shows the market being prepared. Then the market that has
-   * just settled, and the one from the cycle before, whose redemption opens during this cycle.
-   */
-  private markets(nowMs: number, anchor = anchorOf(nowMs)): ApiMarket[] {
-    const base = buildFixtures(anchor, nowMs).markets;
-    const template = base[0];
-    if (!template) return base;
-    const sibling = (underlying: string, name: string, strike: string, bidPx: string, askPx: string): ApiMarket => {
-      const series = `${underlying}15M`;
-      const eventTicker = template.eventTicker.replace(template.series, series);
-      const symbol = `GEMI-${eventTicker}-UP`;
-      const ready = underlying !== "SOL" || this.ensured.has(symbol);
-      return {
-        ...template,
-        symbol,
-        eventTicker,
-        series,
-        underlying,
-        title: `${name} up or down in 15 minutes`,
-        strike,
-        book: template.book && { ...template.book, bidPx, askPx, bidUnits: "12000", askUnits: "9500" },
-        onchain: template.onchain && ready
-          ? { ...template.onchain, market: fixtureAddress(`market:${symbol}`), yesMint: fixtureAddress(`yes:${symbol}`), noMint: fixtureAddress(`no:${symbol}`), yesSupply: "0", noSupply: "0" }
-          : null,
-      };
-    };
-    return [
-      ...base,
-      sibling("ETH", "Ether", "3415.2266666667", "3800", "4100"),
-      sibling("SOL", "Solana", "187.9104166667", "6200", "6500"),
-      buildJustSettledMarket(anchor),
-      buildJustSettledMarket(anchor - FIXTURE_CYCLE_MS),
-    ];
-  }
-
-  /** By venue symbol or by on-chain market address, across recent anchors. */
+  /** A market by its venue symbol, or by the address of its on-chain account or of one of its mints. */
   findMarket(key: string, nowMs: number): ApiMarket | undefined {
-    for (let back = 0; back < ANCHORS_BACK; back++) {
-      const found = this.markets(nowMs, anchorOf(nowMs) - back * FIXTURE_CYCLE_MS).find((market) => market.symbol === key || market.onchain?.market === key);
-      if (found) return found;
-    }
-    return undefined;
-  }
-
-  /** Every market of this and the recent anchors: what a relayer keeps, and what stays on-chain. */
-  private everyMarket(nowMs: number): ApiMarket[] {
-    const known = new Map(this.markets(nowMs).map((market) => [market.symbol, market]));
-    for (let back = 1; back < ANCHORS_BACK; back++) {
-      for (const market of this.markets(nowMs, anchorOf(nowMs) - back * FIXTURE_CYCLE_MS)) if (!known.has(market.symbol)) known.set(market.symbol, market);
-    }
-    return [...known.values()];
+    return (
+      fixtureMarket(key, nowMs, this.state.onchain) ??
+      fixtureOnchainMarkets(nowMs, this.state.onchain).find((market) => market.onchain?.market === key || market.onchain?.yesMint === key || market.onchain?.noMint === key)
+    );
   }
 
   /** The market accounts the simulated chain holds for a query, one per market. */
   chainMarkets(query: MarketQuery, nowMs: number): FixtureChainMarket[] {
-    const mints = new Set(query.mints ?? []);
-    const addresses = new Set(query.markets ?? []);
-    const symbols = new Set(query.symbols ?? []);
-    return this.everyMarket(nowMs).flatMap((market) => {
-      const onchain = market.onchain;
-      if (!onchain) return [];
-      if (!mints.has(onchain.yesMint) && !mints.has(onchain.noMint) && !addresses.has(onchain.market) && !symbols.has(market.symbol)) return [];
-      return fixtureChainMarket(market) ?? [];
-    });
+    const found = new Map<string, FixtureChainMarket>();
+    for (const key of [...(query.symbols ?? []), ...(query.markets ?? []), ...(query.mints ?? [])]) {
+      const market = this.findMarket(key, nowMs);
+      const account = market && fixtureChainMarket(market);
+      if (account) found.set(account.symbol, account);
+    }
+    return [...found.values()];
+  }
+
+  /** What the relayer would answer for an allowed route. */
+  respond(route: RelayerRoute, nowMs: number): FixtureResponse {
+    const { onchain } = this.state;
+    switch (route.kind) {
+      case "health":
+        return answer(fixtureHealth(nowMs));
+      case "status":
+        return answer(fixtureStatus(nowMs, onchain));
+      case "events":
+        return answer({ events: fixtureEvents(nowMs, onchain).map(listed) });
+      case "event":
+        return known(fixtureEvent(route.ticker, nowMs, onchain), "event");
+      case "markets":
+        return answer({ markets: fixtureOnchainMarkets(nowMs, onchain) });
+      case "market":
+        return known(fixtureMarket(route.symbol, nowMs, onchain), "market");
+      case "ensure": {
+        // The route waits `ENSURE_DELAY_MS` before asking, as creating a market takes a moment.
+        const market = fixtureMarket(route.symbol, nowMs, onchain);
+        if (market && (market.venueStatus !== "active" || nowMs >= market.expiresAt)) return { status: 409, body: { error: "market not active" } };
+        if (market) onchain.add(route.symbol);
+        return known(fixtureMarket(route.symbol, nowMs, onchain), "market");
+      }
+      case "depth":
+        return known(fixtureDepth(route.symbol, nowMs), "market");
+      case "trades": {
+        const trades = fixtureTrades(route.symbol, nowMs);
+        return known(trades && { trades }, "market");
+      }
+      case "history":
+        return known(fixtureHistory(route.symbol, nowMs), "market");
+      case "orders":
+        return answer({ orders: this.orders(route.user, nowMs) });
+      case "order": {
+        const placed = this.state.placed.get(route.address);
+        // The fixture orders are shown to whichever wallet asks; this route names none.
+        return known(placed ? this.simApiOrder(placed, nowMs) : (this.baseOrders("", nowMs).find((order) => order.address === route.address) ?? null), "order");
+      }
+    }
   }
 
   private nextNonce(user: string): bigint {
     let count = 0n;
-    for (const order of this.placed.values()) if (order.user === user) count += 1n;
+    for (const order of this.state.placed.values()) if (order.user === user) count += 1n;
     return FIRST_NONCE + count;
   }
 
-  /** Records a `place_buy`. Throws with a program error name when the program would refuse it. */
-  place(input: PlaceInput, nowMs: number): void {
-    const market = this.findMarket(input.market, nowMs);
-    if (!market?.onchain) throw new Error("MarketNotOpen");
+  /** The market an order is placed in. Throws with a program error name when the program would not take an order for it. */
+  private openMarket(address: string, nowMs: number): OnchainMarket {
+    const market = this.findMarket(address, nowMs);
+    if (!market?.onchain || market.onchain.status !== "open") throw new Error("MarketNotOpen");
     if (nowMs >= market.lastOrderAt) throw new Error("TooCloseToClose");
-    const ask = input.side === "YES" ? market.book?.askPx : market.book?.bidPx;
-    const askPx = ask == null ? null : input.side === "YES" ? BigInt(ask) : complementPx(BigInt(ask));
-    const offered = BigInt((input.side === "YES" ? market.book?.askUnits : market.book?.bidUnits) ?? "0");
-    const fills = market.tradable && askPx !== null && input.limitPx >= askPx && input.units <= offered;
-    this.placed.set(input.order, {
+    return market as OnchainMarket;
+  }
+
+  /** Records an order of either kind once the program's checks have passed. */
+  private record(input: PlaceInput, market: OnchainMarket, order: Pick<SimOrder, "kind" | "mint" | "fillPx" | "refusal">, nowMs: number): void {
+    // A traded market stays on-chain after the fixtures have forgotten its event.
+    this.state.onchain.add(market.symbol);
+    this.state.placed.set(input.order, {
+      ...order,
       address: input.order,
       user: input.user,
       symbol: market.symbol,
       market: market.onchain.market,
-      kind: "buy",
-      mint: input.side === "YES" ? market.onchain.yesMint : market.onchain.noMint,
       side: input.side,
       units: input.units,
       limitPx: input.limitPx,
       maxFeeMicros: input.maxFeeMicros,
       nonce: this.nextNonce(input.user),
       placedAtMs: nowMs,
-      expiresAt: Math.min(Math.floor(nowMs / 1000) + ORDER_TTL_SECS, market.onchain.closeTs),
-      fillPx: fills ? askPx : null,
-      refusal: null,
+      expiresAt: Math.min(Math.floor(nowMs / 1000) + FIXTURE_ORDER_TTL_SECS, market.onchain.closeTs),
     });
+  }
+
+  /**
+   * Records a `place_buy`. It fills when the offer for its side is at or below its limit and large
+   * enough. Throws with a program error name when the program would refuse it.
+   */
+  place(input: PlaceInput, nowMs: number): void {
+    const market = this.openMarket(input.market, nowMs);
+    const ask = input.side === "YES" ? market.book?.askPx : market.book?.bidPx;
+    const askPx = ask == null ? null : input.side === "YES" ? BigInt(ask) : complementPx(BigInt(ask));
+    const offered = BigInt((input.side === "YES" ? market.book?.askUnits : market.book?.bidUnits) ?? "0");
+    const fills = market.tradable && askPx !== null && input.limitPx >= askPx && input.units <= offered;
+    this.record(input, market, { kind: "buy", mint: input.side === "YES" ? market.onchain.yesMint : market.onchain.noMint, fillPx: fills ? askPx : null, refusal: null }, nowMs);
   }
 
   /**
@@ -247,11 +261,9 @@ export class FixtureWorld {
    * Throws with a program error name when the program would refuse it.
    */
   placeSell(input: PlaceSellInput, nowMs: number): void {
-    const market = this.findMarket(input.market, nowMs);
-    if (!market?.onchain) throw new Error("MarketNotOpen");
-    if (input.outcomeMint !== (input.side === "YES" ? market.onchain.yesMint : market.onchain.noMint)) throw new Error("WrongMint");
-    if (market.onchain.status !== "open") throw new Error("MarketNotOpen");
-    if (nowMs >= market.lastOrderAt) throw new Error("TooCloseToClose");
+    const onchain = this.findMarket(input.market, nowMs)?.onchain;
+    if (onchain && input.outcomeMint !== (input.side === "YES" ? onchain.yesMint : onchain.noMint)) throw new Error("WrongMint");
+    const market = this.openMarket(input.market, nowMs);
     if (input.units <= 0n) throw new Error("BadQuantity");
     if (input.maxFeeMicros > input.units * input.limitPx) throw new Error("FeeCapTooHigh");
     const held = BigInt(this.chain(input.user, nowMs).positions.find((position) => position.mint === input.outcomeMint)?.units ?? "0");
@@ -260,28 +272,12 @@ export class FixtureWorld {
     const bidPx = bid == null ? null : input.side === "YES" ? BigInt(bid) : complementPx(BigInt(bid));
     const wanted = BigInt((input.side === "YES" ? market.book?.bidUnits : market.book?.askUnits) ?? "0");
     const fills = market.tradable && bidPx !== null && input.limitPx <= bidPx && input.units <= wanted;
-    this.placed.set(input.order, {
-      address: input.order,
-      user: input.user,
-      symbol: market.symbol,
-      market: market.onchain.market,
-      kind: "sell",
-      mint: input.outcomeMint,
-      side: input.side,
-      units: input.units,
-      limitPx: input.limitPx,
-      maxFeeMicros: input.maxFeeMicros,
-      nonce: this.nextNonce(input.user),
-      placedAtMs: nowMs,
-      expiresAt: Math.min(Math.floor(nowMs / 1000) + ORDER_TTL_SECS, market.onchain.closeTs),
-      fillPx: fills ? bidPx : null,
-      refusal: input.units * input.limitPx > input.maxFeeMicros ? null : "fee_cap",
-    });
+    this.record(input, market, { kind: "sell", mint: input.outcomeMint, fillPx: fills ? bidPx : null, refusal: input.units * input.limitPx > input.maxFeeMicros ? null : "fee_cap" }, nowMs);
   }
 
   /** Records a `cancel_order` sent by the user. */
   cancel(orderAddress: string, nowMs: number): void {
-    this.cancelled.set(orderAddress, nowMs);
+    this.state.cancelled.set(orderAddress, nowMs);
   }
 
   /**
@@ -290,8 +286,7 @@ export class FixtureWorld {
    * would refuse it.
    */
   redeem(input: RedeemInput, nowMs: number): void {
-    const market = this.findMarket(input.market, nowMs);
-    const onchain = market?.onchain;
+    const onchain = this.findMarket(input.market, nowMs)?.onchain;
     if (!onchain) throw new Error("NotSettled");
     if (input.outcomeMint !== onchain.yesMint && input.outcomeMint !== onchain.noMint) throw new Error("WrongMint");
     if (onchain.status !== "settled" || onchain.redeemAfter === null) throw new Error("NotSettled");
@@ -304,7 +299,7 @@ export class FixtureWorld {
   }
 
   private wasCancelled(address: string, sinceMs: number): boolean {
-    const at = this.cancelled.get(address);
+    const at = this.state.cancelled.get(address);
     return at !== undefined && at >= sinceMs;
   }
 
@@ -340,116 +335,73 @@ export class FixtureWorld {
     };
   }
 
-  /** The base orders the live app lists. One the user cancelled reads as the relayer would record it. */
+  /** The orders of the fixtures. One the user cancelled reads as the relayer would record it. */
   private baseOrders(user: string, nowMs: number): ApiOrder[] {
-    return buildFixtures(anchorOf(nowMs), nowMs)
-      .orders.filter((order) => LISTED_BASE_STATES.has(order.state))
-      .map((order) =>
-        order.state === "seen" && this.wasCancelled(order.address, order.createdAt)
-          ? { ...order, user, state: "failed" as const, detail: "order account gone before submission" }
-          : { ...order, user },
-      );
+    return fixtureOrders(nowMs).map((order) =>
+      order.state === "seen" && this.wasCancelled(order.address, order.createdAt) ? { ...order, user, state: "failed" as const, detail: "order account gone before submission" } : { ...order, user },
+    );
   }
 
+  /** The relayer's record of a wallet's orders, newest first. */
   orders(user: string, nowMs: number): ApiOrder[] {
-    const simulated = [...this.placed.values()].filter((order) => order.user === user).flatMap((order) => this.simApiOrder(order, nowMs) ?? []);
+    const simulated = [...this.state.placed.values()].filter((order) => order.user === user).flatMap((order) => this.simApiOrder(order, nowMs) ?? []);
     return [...simulated, ...this.baseOrders(user, nowMs)].sort((a, b) => b.createdAt - a.createdAt);
   }
 
-  /** What the wallet's accounts would hold on-chain. */
-  chain(wallet: string, nowMs: number): FixtureChain {
-    const markets = buildFixtures(anchorOf(nowMs), nowMs).markets;
+  /**
+   * What the wallet's accounts would hold on-chain. With `newWallets`, a wallet has nothing, not
+   * even a Trader account, until the registrar has registered it.
+   */
+  chain(wallet: string, nowMs: number, newWallets = false): FixtureChain {
+    if (newWallets && !this.state.registered.has(wallet)) return { trader: null, balances: { lamports: "0", stableMicros: "0" }, positions: [], openOrders: [] };
+
     const positions = new Map<string, bigint>();
-    const add = (mint: string | undefined, units: bigint) => {
-      if (mint) positions.set(mint, (positions.get(mint) ?? 0n) + units);
-    };
-    // One live position, one awaiting its result, one that won and one that lost.
-    add(markets[0]?.onchain?.yesMint, 300n);
-    add(markets[3]?.onchain?.yesMint, 500n);
-    add(markets[4]?.onchain?.yesMint, 500n);
-    add(markets[5]?.onchain?.yesMint, 250n);
-    // Two that won on the NO side: one whose redemption opens soon, one from the cycle before.
-    add(buildJustSettledMarket(anchorOf(nowMs)).onchain?.noMint, 200n);
-    add(buildJustSettledMarket(anchorOf(nowMs) - FIXTURE_CYCLE_MS).onchain?.noMint, 200n);
+    const add = (mint: string, units: bigint) => positions.set(mint, (positions.get(mint) ?? 0n) + units);
+    for (const holding of fixtureHoldings(nowMs)) add(holding.mint, holding.units);
 
     let stable = STARTING_STABLE_MICROS;
     const openOrders: FixtureOpenOrder[] = [];
-    for (const order of this.placed.values()) {
-      if (order.user !== wallet) continue;
-      const state = simState(order, nowMs);
-      if (order.kind === "sell") {
-        const price = order.fillPx as bigint;
-        if (state === "chain_filled") {
-          // Burned, and the proceeds less the fee paid in test dollars.
-          add(order.mint, -order.units);
-          stable += cost(order.units, price) - takerFee(order.units, complementPx(price));
-        } else if (state !== "chain_cancelled" && !this.wasCancelled(order.address, order.placedAtMs)) {
-          // Held in the order's escrow until it fills, is cancelled or is reclaimed.
-          add(order.mint, -order.units);
-          openOrders.push({
-            address: order.address,
-            user: order.user,
-            market: order.market,
-            side: order.side === "YES" ? 0 : 1,
-            kind: 1,
-            qtyUnits: order.units.toString(),
-            limitPx: order.limitPx.toString(),
-            maxFee: order.maxFeeMicros.toString(),
-            expiresAt: order.expiresAt,
-            rentPayer: order.user,
-            nonce: order.nonce.toString(),
-          });
-        }
-        continue;
-      }
-      const hold = order.units * order.limitPx + order.maxFeeMicros;
-      if (state === "chain_filled") {
-        const price = order.fillPx as bigint;
-        stable -= cost(order.units, price) + takerFee(order.units, price);
-        const market = this.findMarket(order.market, nowMs);
-        add(order.side === "YES" ? market?.onchain?.yesMint : market?.onchain?.noMint, order.units);
-      } else if (state !== "chain_cancelled" && !this.wasCancelled(order.address, order.placedAtMs)) {
-        stable -= hold;
-        openOrders.push({
-          address: order.address,
-          user: order.user,
-          market: order.market,
-          side: order.side === "YES" ? 0 : 1,
-          kind: 0,
-          qtyUnits: order.units.toString(),
-          limitPx: order.limitPx.toString(),
-          maxFee: order.maxFeeMicros.toString(),
-          expiresAt: order.expiresAt,
-          rentPayer: order.user,
-          nonce: order.nonce.toString(),
-        });
-      }
-    }
-    // The base order the relayer never sends stays open until the user reclaims it.
-    for (const [index, order] of buildFixtures(anchorOf(nowMs), nowMs).orders.entries()) {
-      if (order.state !== "seen" || this.wasCancelled(order.address, order.createdAt)) continue;
-      const market = markets.find((candidate) => candidate.symbol === order.symbol);
-      if (!market?.onchain) continue;
+    const open = (order: Pick<ApiOrder, "address" | "kind" | "side" | "units" | "limitPx" | "maxFeeMicros" | "expiresAt">, market: string, nonce: bigint): void => {
       openOrders.push({
         address: order.address,
         user: wallet,
-        market: market.onchain.market,
+        market,
         side: order.side === "YES" ? 0 : 1,
-        kind: 0,
+        kind: order.kind === "sell" ? 1 : 0,
         qtyUnits: order.units,
         limitPx: order.limitPx,
         maxFee: order.maxFeeMicros,
         expiresAt: order.expiresAt,
         rentPayer: wallet,
-        nonce: index.toString(),
+        nonce: nonce.toString(),
       });
+    };
+    for (const order of this.state.placed.values()) {
+      if (order.user !== wallet) continue;
+      const state = simState(order, nowMs);
+      const selling = order.kind === "sell";
+      if (state === "chain_filled") {
+        const price = order.fillPx as bigint;
+        // A sale burns the tokens and pays the proceeds less the fee; a buy pays the cost and the fee, and mints.
+        add(order.mint, selling ? -order.units : order.units);
+        stable += selling ? cost(order.units, price) - takerFee(order.units, complementPx(price)) : -(cost(order.units, price) + takerFee(order.units, price));
+      } else if (state !== "chain_cancelled" && !this.wasCancelled(order.address, order.placedAtMs)) {
+        // In the order's escrow until it fills, is cancelled or is reclaimed: the tokens of a sale, the test dollars of a buy.
+        if (selling) add(order.mint, -order.units);
+        else stable -= order.units * order.limitPx + order.maxFeeMicros;
+        open({ ...order, units: order.units.toString(), limitPx: order.limitPx.toString(), maxFeeMicros: order.maxFeeMicros.toString() }, order.market, order.nonce);
+      }
+    }
+    // The fixture order the relayer never sends stays open until the user reclaims it.
+    for (const [index, order] of fixtureOrders(nowMs).entries()) {
+      const market = order.state === "seen" && !this.wasCancelled(order.address, order.createdAt) ? this.findMarket(order.symbol, nowMs)?.onchain?.market : undefined;
+      if (market) open(order, market, BigInt(index));
     }
 
     for (const redemption of this.state.redemptions) {
       if (redemption.holder !== wallet) continue;
       stable += redemption.payoutMicros;
-      const held = positions.get(redemption.mint);
-      if (held !== undefined) positions.set(redemption.mint, held - redemption.units);
+      add(redemption.mint, -redemption.units);
     }
 
     return {
@@ -460,36 +412,21 @@ export class FixtureWorld {
     };
   }
 
-  /** What the relayer would answer for an allowed route. */
-  respond(route: RelayerRoute, nowMs: number): FixtureResponse {
-    switch (route.kind) {
-      case "markets": {
-        const markets = this.markets(nowMs);
-        if (route.scope !== "all") return { status: 200, body: { markets: markets.filter((market) => market.expiresAt > nowMs && market.settleState === "open") } };
-        // A relayer keeps the markets of earlier windows, so tokens and orders from them can be named.
-        return { status: 200, body: { markets: this.everyMarket(nowMs) } };
-      }
-      case "ensure":
-      case "market": {
-        // The route waits `ENSURE_DELAY_MS` before asking, as creating a market takes a moment.
-        if (route.kind === "ensure") this.ensured.add(route.symbol);
-        const market = this.findMarket(route.symbol, nowMs);
-        return market ? { status: 200, body: market } : { status: 404, body: { error: "unknown market" } };
-      }
-      case "orders":
-        return { status: 200, body: { orders: this.orders(route.user, nowMs) } };
-      case "order": {
-        for (const order of this.placed.values()) {
-          if (order.address !== route.address) continue;
-          const view = this.simApiOrder(order, nowMs);
-          return view ? { status: 200, body: view } : { status: 404, body: { error: "unknown order" } };
-        }
-        const base = this.baseOrders("", nowMs).find((order) => order.address === route.address);
-        return base ? { status: 200, body: base } : { status: 404, body: { error: "unknown order" } };
-      }
-      default:
-        return fixtureResponse(route, anchorOf(nowMs), nowMs);
-    }
+  /**
+   * The registrar of the simulated chain, for the route that registers and funds a wallet. Unless
+   * `newWallets`, every wallet is a registered trader already.
+   */
+  funding(newWallets: boolean): FundingChain {
+    const { registered } = this.state;
+    return {
+      traderExists: async (wallet) => !newWallets || registered.has(wallet),
+      balances: async () => ({ lamports: STARTING_LAMPORTS, stableMicros: STARTING_STABLE_MICROS }),
+      registerAndFund: async (wallet) => {
+        registered.add(wallet);
+        return this.nextSignature();
+      },
+      topUp: async () => this.nextSignature(),
+    };
   }
 }
 
@@ -497,12 +434,7 @@ const holder = globalThis as { __outcomeFixtureState?: WorldState };
 
 /** One world per server process, shared by every route. */
 export function fixtureWorld(): FixtureWorld {
-  holder.__outcomeFixtureState ??= emptyState();
   // A state kept across a reload of this module may predate a field.
-  holder.__outcomeFixtureState.redemptions ??= [];
-  for (const order of holder.__outcomeFixtureState.placed.values()) {
-    order.kind ??= "buy";
-    order.refusal ??= null;
-  }
+  holder.__outcomeFixtureState = Object.assign(emptyState(), holder.__outcomeFixtureState);
   return new FixtureWorld(holder.__outcomeFixtureState);
 }

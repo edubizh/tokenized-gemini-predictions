@@ -2,22 +2,34 @@
 
 import { useCallback, useReducer, useState } from "react";
 import { PageHeader, useFaucet } from "@/components/shell/Shell";
-import { chainNow, useHealth, useMarkets } from "@/features/markets/hooks";
+import { GetTestFunds } from "@/features/account/GetTestFunds";
+import { AccountOnly } from "@/features/account/LoggedOut";
 import { knownMarkets } from "@/features/markets/known";
+import { ChainNotice, RelayerNotice } from "@/features/markets/RelayerNotice";
 import { marketTitle } from "@/features/markets/wording";
 import { useBalances, useChainMarkets, usePositions } from "@/features/ticket/hooks";
 import { explorerAddressUrl, explorerTxUrl, useConfig } from "@/lib/config";
 import { useReconnect } from "@/lib/privy/use-reconnect";
+import { chainNow, useHealth, useOnchainMarkets } from "@/lib/relayer/hooks";
 import { useRedeem } from "./actions";
 import { PortfolioView, type RedemptionReceipt } from "./PortfolioView";
 import { buildPortfolio, type PositionRow } from "./positions";
 
+/** Everyone can open the page; what it shows belongs to an account. */
 export function PortfolioPage() {
+  return (
+    <AccountOnly title="Portfolio" sentence="Your test dollars and the outcome tokens in your wallet are read from Solana once you are logged in.">
+      <Portfolio />
+    </AccountOnly>
+  );
+}
+
+function Portfolio() {
   const config = useConfig();
   const { offline } = useHealth();
   const { balances, stale } = useBalances();
   const positions = usePositions();
-  const markets = useMarkets("all");
+  const markets = useOnchainMarkets();
   const faucet = useFaucet();
   const redeeming = useRedeem();
   const reconnect = useReconnect();
@@ -56,23 +68,31 @@ export function PortfolioPage() {
 
   return (
     <>
+      <RelayerNotice />
+      <ChainNotice />
       <PageHeader title="Portfolio">Your test dollars and the outcome tokens in your wallet, read from Solana. Everything here is test money with no value.</PageHeader>
-      <PortfolioView
-        balances={balances}
-        portfolio={portfolio}
-        offline={relayerDown}
-        chainFailing={positions.error !== null && !stale}
-        faucet={{ status: faucet.status, onRequest: faucet.request }}
-        receipts={receipts}
-        redeeming={redeeming}
-        onRedeem={(row) => void onRedeem(row)}
-        reconnect={reconnect}
-        nowMs={now}
-        chainNow={chainNow}
-        onDeadline={redraw}
-        txUrl={(signature) => explorerTxUrl(config, signature)}
-        addressUrl={(address) => explorerAddressUrl(config, address)}
-      />
+      <div style={{ display: "grid", gap: "var(--space-5)" }}>
+        {/* The first-run step for a wallet that is not a trader yet; it draws nothing otherwise. */}
+        <GetTestFunds />
+        <div style={{ minWidth: 0 }}>
+          <PortfolioView
+            balances={balances}
+            portfolio={portfolio}
+            offline={relayerDown}
+            chainFailing={positions.error !== null && !stale}
+            faucet={{ status: faucet.status, onRequest: faucet.request }}
+            receipts={receipts}
+            redeeming={redeeming}
+            onRedeem={(row) => void onRedeem(row)}
+            reconnect={reconnect}
+            nowMs={now}
+            chainNow={chainNow}
+            onDeadline={redraw}
+            txUrl={(signature) => explorerTxUrl(config, signature)}
+            addressUrl={(address) => explorerAddressUrl(config, address)}
+          />
+        </div>
+      </div>
     </>
   );
 }

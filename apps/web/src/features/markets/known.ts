@@ -6,18 +6,25 @@
 
 import type { ApiMarket, ApiOnchainMarket } from "@outcome/relayer/api-types";
 import type { ChainMarket } from "@/lib/chain/reads";
-import { VENUE_NOT_KNOWN, venueKnown } from "./wording";
+import { strikeLabel, VENUE_NOT_KNOWN, venueKnown } from "./wording";
 
 export { venueKnown };
 
+/** `BTC >=64500 14Nov26 23:00 YES`, and the form of the first markets: `BTC Up 22:00Z 14 Nov YES`. */
+const TOKEN_NAMES = [/^(\S+) (.+) \d{2}[A-Z][a-z]{2}\d{2} \d{2}:\d{2} (?:YES|NO)$/, /^(\S+) (.+) \d{2}:\d{2}Z \d{1,2} [A-Z][a-z]{2} (?:YES|NO)$/];
+
 /**
- * The relayer names an outcome token `"<UNDERLYING> <Label> <HH:MM>Z <D> <Mon> <YES|NO>"`.
- * Null for a name in any other form.
+ * What the name the relayer gives an outcome token says about its contract: the subject, and the
+ * outcome as a label, with the strike of a ladder contract (`>=64500`). Null for a name in any
+ * other form.
  */
-export function parseTokenName(name: string): { underlying: string; label: string } | null {
-  const match = /^(\S+) (.+) \d{2}:\d{2}Z \d{1,2} [A-Z][a-z]{2} (?:YES|NO)$/.exec(name.trim());
+export function parseTokenName(name: string): { subject: string; label: string; strike: string | null } | null {
+  const match = TOKEN_NAMES.map((form) => form.exec(name.trim())).find((found) => found !== null);
   if (!match) return null;
-  return { underlying: match[1] as string, label: match[2] as string };
+  const [, subject = "", outcome = ""] = match;
+  const strike = /^>=(\d+(?:\.\d+)?)$/.exec(outcome)?.[1] ?? null;
+  if (strike !== null) return { subject, label: strikeLabel(strike), strike };
+  return { subject, label: /^Up \d+m$/.test(outcome) ? "Up" : outcome, strike: null };
 }
 
 function onchainOf(chain: ChainMarket, supplies: Pick<ApiOnchainMarket, "yesSupply" | "noSupply">): ApiOnchainMarket {
@@ -47,8 +54,9 @@ function resolutionOf(chain: ChainMarket): ApiMarket["resolution"] {
 /**
  * A market in the relayer's shape from what Solana alone holds. What only the venue knows is
  * left empty and `venueStatus` says so (`venueKnown` is false); supplies are not read and are
- * zero. Null when the market's token name is missing or not in the relayer's form, since then
- * nothing says what the market is about.
+ * zero. Its title is the subject alone, and its event is the middle of its symbol, which the
+ * venue writes `<PREFIX>-<EVENT>-<CONTRACT>`. Null when the market's token name is missing or not
+ * in the relayer's form, since then nothing says what the market is about.
  */
 export function marketFromChain(chain: ChainMarket): ApiMarket | null {
   const named = chain.tokenName === null ? null : parseTokenName(chain.tokenName);
@@ -56,15 +64,14 @@ export function marketFromChain(chain: ChainMarket): ApiMarket | null {
   const expiresAt = chain.closeTs * 1000;
   return {
     symbol: chain.symbol,
-    eventTicker: "",
-    series: "",
-    underlying: named.underlying,
-    title: `${named.underlying} ${named.label}`,
+    eventTicker: chain.symbol.split("-").slice(1, -1).join("-"),
+    title: named.subject,
     label: named.label,
+    strike: named.strike,
+    sortOrder: 0,
     startsAt: 0,
     expiresAt,
     lastOrderAt: (chain.closeTs - chain.placeCutoffSecs) * 1000,
-    strike: null,
     venueStatus: VENUE_NOT_KNOWN,
     marketState: VENUE_NOT_KNOWN,
     tradable: false,
@@ -73,6 +80,7 @@ export function marketFromChain(chain: ChainMarket): ApiMarket | null {
     minUnits: "1",
     unitIncrement: "1",
     book: null,
+    lastPx: null,
     onchain: onchainOf(chain, { yesSupply: "0", noSupply: "0" }),
     resolution: resolutionOf(chain),
     settlementValue: null,

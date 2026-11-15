@@ -16,7 +16,8 @@ export interface FixtureOpenOrder {
 }
 
 export interface FixtureChain {
-  trader: { address: string; nextNonce: string };
+  /** Null for a wallet that has not been registered. */
+  trader: { address: string; nextNonce: string } | null;
   balances: { lamports: string; stableMicros: string };
   positions: Array<{ mint: string; units: string }>;
   openOrders: FixtureOpenOrder[];

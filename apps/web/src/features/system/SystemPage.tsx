@@ -3,10 +3,10 @@
 import { useCallback } from "react";
 import { PageHeader } from "@/components/shell/Shell";
 import { useVenue } from "@/components/shell/NetworkStrip";
-import { useHealth, useMarkets } from "@/features/markets/hooks";
 import { explorerAddressUrl, useConfig } from "@/lib/config";
 import { usePolling } from "@/lib/polling";
 import { getStatus } from "@/lib/relayer/client";
+import { useHealth, useOnchainMarkets } from "@/lib/relayer/hooks";
 import { SystemView, type SystemAddresses } from "./SystemView";
 
 const STATUS_INTERVAL_MS = 5_000;
@@ -20,7 +20,7 @@ export function SystemPage({ addresses }: { addresses: SystemAddresses }) {
     useCallback((signal: AbortSignal) => getStatus(signal), []),
     STATUS_INTERVAL_MS,
   );
-  const markets = useMarkets("all");
+  const markets = useOnchainMarkets();
 
   return (
     <>

@@ -285,7 +285,7 @@ function fixtureReads(): ChainReads {
   return {
     async fetchTrader(wallet) {
       const { trader } = await read(wallet, "trader");
-      return { address: address(trader.address), nextNonce: BigInt(trader.nextNonce) };
+      return trader && { address: address(trader.address), nextNonce: BigInt(trader.nextNonce) };
     },
     async fetchBalances(wallet) {
       const { balances } = await read(wallet, "balances");

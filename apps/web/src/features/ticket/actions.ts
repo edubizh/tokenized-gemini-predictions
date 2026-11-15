@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import type { ApiMarket } from "@outcome/relayer/api-types";
+import type { ApiMarket, ApiOnchainMarket } from "@outcome/relayer/api-types";
 import { TransactionError } from "@/lib/chain/errors";
 import { buildCancelOrder, buildPlaceBuy, buildPlaceSell, PLACE_ORDER_COMPUTE_UNITS } from "@/lib/chain/instructions";
 import { getReads, type OpenOrder } from "@/lib/chain/reads";
@@ -10,6 +10,7 @@ import { clock } from "@/lib/clock";
 import { useConfig } from "@/lib/config";
 import { useAccount } from "@/lib/privy/account";
 import { useSendTransaction } from "@/lib/privy/wallet";
+import { ensureMarket, RelayerError } from "@/lib/relayer/client";
 import type { SendProgress, TicketDraft } from "./Ticket";
 import type { LocalOrder } from "./timeline";
 
@@ -41,6 +42,17 @@ function progressOf(stage: SendStage): SendProgress {
   return stage === "preparing" || stage === "signing" ? "wallet" : "sending";
 }
 
+/** Has the relayer create a market's account and mints on Solana, which is needed once per contract. */
+async function createMarket(symbol: string, token: string | null): Promise<ApiOnchainMarket> {
+  try {
+    const { onchain } = await ensureMarket(symbol, token ?? "");
+    if (onchain) return onchain;
+  } catch (error) {
+    if (error instanceof RelayerError && error.status === 401) throw new Error("Your login has expired. Log in again, then retry. Nothing was held.");
+  }
+  throw new Error("This market could not be prepared on Solana. Nothing was held; try again in a moment.");
+}
+
 export interface PlaceOrder {
   progress: SendProgress | null;
   error: string | null;
@@ -50,8 +62,9 @@ export interface PlaceOrder {
 }
 
 /**
- * Places an order in one transaction. A buy: the outcome token account if it is missing, then
- * `place_buy`. A sale: the test-dollar account if it is missing, then `place_sell`.
+ * Places an order. The first order for a contract has the relayer create its market on Solana;
+ * then one transaction: for a buy, the outcome token account if it is missing and `place_buy`;
+ * for a sale, the test-dollar account if it is missing and `place_sell`.
  */
 export function usePlaceOrder(): PlaceOrder {
   const config = useConfig();
@@ -60,23 +73,25 @@ export function usePlaceOrder(): PlaceOrder {
   const [progress, setProgress] = useState<SendProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const wallet = account.wallet?.address ?? null;
-  const { refresh } = account;
+  const { refresh, getAccessToken } = account;
 
   const place = useCallback<PlaceOrder["place"]>(
     async (market, draft, orderTtlSecs) => {
-      if (!wallet || !market.onchain || !config.stableMint) return null;
+      if (!wallet || !config.stableMint) return null;
       setError(null);
-      setProgress("wallet");
+      setProgress(market.onchain ? "wallet" : "market");
       try {
         // The nonce decides the order's address, so it is read at click time.
         const trader = await getReads(config).fetchTrader(wallet);
-        if (!trader) throw new Error("This wallet is not registered yet. Use Get test funds on the welcome page first.");
+        if (!trader) throw new Error("This wallet is not registered yet. Get test funds first.");
+        const onchain = market.onchain ?? (await createMarket(market.symbol, await getAccessToken()));
+        setProgress("wallet");
         const common = {
           programId: config.programId,
           user: wallet,
           stableMint: config.stableMint,
-          market: market.onchain.market,
-          outcomeMint: draft.side === "YES" ? market.onchain.yesMint : market.onchain.noMint,
+          market: onchain.market,
+          outcomeMint: draft.side === "YES" ? onchain.yesMint : onchain.noMint,
           side: draft.side,
           units: draft.units,
           maxFeeMicros: draft.maxFeeMicros,
@@ -95,7 +110,7 @@ export function usePlaceOrder(): PlaceOrder {
           limitPx: draft.limitPx.toString(),
           maxFeeMicros: draft.maxFeeMicros.toString(),
           placedAt: Date.now(),
-          expiresAt: Math.min(Math.floor(clock.chainNowMs() / 1000) + orderTtlSecs, market.onchain.closeTs),
+          expiresAt: Math.min(Math.floor(clock.chainNowMs() / 1000) + orderTtlSecs, onchain.closeTs),
         };
       } catch (caught) {
         setError(describeSendError(caught));
@@ -104,7 +119,7 @@ export function usePlaceOrder(): PlaceOrder {
         setProgress(null);
       }
     },
-    [config, refresh, send, wallet],
+    [config, getAccessToken, refresh, send, wallet],
   );
 
   return { progress, error, place, clearError: useCallback(() => setError(null), []) };

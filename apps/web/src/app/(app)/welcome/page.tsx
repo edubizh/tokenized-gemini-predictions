@@ -1,7 +1,6 @@
-import { Welcome } from "@/features/onboarding/Welcome";
+import { permanentRedirect } from "next/navigation";
 
-export const metadata = { title: "Get test funds" };
-
-export default function WelcomePage() {
-  return <Welcome />;
+/** Retired: test funds are a step where a wallet would trade, not a page. */
+export default function Page(): never {
+  permanentRedirect("/");
 }

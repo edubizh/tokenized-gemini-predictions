@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ApiHealth, ApiMarket } from "@outcome/relayer/api-types";
-import { buildFixtures } from "@/lib/relayer/fixtures";
+import { fixtureHealth, fixtureMarket } from "@/lib/relayer/fixtures";
 import { availableAt, askPx, bidPx, wantedAt } from "@/features/markets/book";
 import { MIN_LAMPORTS, parseContracts, parsePrice, quoteBuy, quoteSell, type QuoteInput, type SellQuoteInput } from "./quote";
 
-const fixtures = buildFixtures(Date.UTC(2026, 10, 15, 3, 0, 0));
-const market = fixtures.markets[0] as ApiMarket; // bid 0.55, ask 0.57, 250.00 bid, 180.00 offered
-const health = fixtures.health;
+const NOW = Date.UTC(2026, 10, 15, 3, 2, 0);
+const market = fixtureMarket("GEMI-BTC15M2611150306-UP", NOW) as ApiMarket; // bid 0.55, ask 0.57, 250.00 bid, 180.00 offered
+const health = fixtureHealth(NOW);
 const rich = { lamports: 50_000_000n, stableMicros: 1_000_000_000n };
 const input = (patch: Partial<QuoteInput> = {}): QuoteInput => ({ side: "YES", units: 200n, limitPx: 4_500n, market, health, balances: rich, ...patch });
 const codes = (patch: Partial<QuoteInput>) => quoteBuy(input(patch)).errors.map((e) => e.code);

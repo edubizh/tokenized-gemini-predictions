@@ -13,7 +13,7 @@ import { Receipt, ReceiptLine } from "@/components/ui/Receipt";
 import { Row, RowList, type Column } from "@/components/ui/RowList";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Stamp } from "@/components/ui/Stamp";
-import { marketHref } from "@/features/markets/MarketsList";
+import { marketHref } from "@/lib/routes";
 import { formatClock, marketTitle, type TimeOptions } from "@/features/markets/wording";
 import type { Balances } from "@/lib/chain/reads";
 import { formatContracts, formatDollars, formatSol, shortAddress } from "@/lib/format";
@@ -115,7 +115,7 @@ function PositionCell({ row, words }: { row: PositionRow; words: string }) {
     <div className={styles.position}>
       <p className={styles.name}>
         <span className={`${styles.side} ${row.side === "YES" ? styles.yes : styles.no}`}>{row.side}</span>
-        <Link href={marketHref(row.market.symbol)} className={styles.title}>
+        <Link href={marketHref(row.market)} className={styles.title}>
           {marketTitle(row.market)}
         </Link>
       </p>
@@ -206,7 +206,7 @@ export function PortfolioView({ balances, portfolio, offline = false, chainFaili
       </div>
     );
   } else if (portfolio.empty && receipts.length === 0) {
-    body = <EmptyState action={<ButtonLink href="/markets">See live markets</ButtonLink>}>No positions yet. Pick a market to buy your first outcome tokens.</EmptyState>;
+    body = <EmptyState action={<ButtonLink href="/">See all markets</ButtonLink>}>No positions yet. Pick a market to buy your first outcome tokens.</EmptyState>;
   } else {
     body = (
       <>
@@ -243,7 +243,7 @@ export function PortfolioView({ balances, portfolio, offline = false, chainFaili
                     closes(row),
                     // A sale goes through the relayer, so it is not offered while the relayer is away.
                     offline ? null : (
-                      <ButtonLink key="action" size="row" href={marketHref(row.market.symbol, row.side, "sell")}>
+                      <ButtonLink key="action" size="row" href={marketHref(row.market, row.side, "sell")}>
                         Sell<span className="sr-only">{` ${title(row)}`}</span>
                       </ButtonLink>
                     ),
@@ -258,7 +258,7 @@ export function PortfolioView({ balances, portfolio, offline = false, chainFaili
           id="awaiting"
           title="Awaiting result"
           count={portfolio.awaiting.length}
-          note="The fifteen minutes are over. The venue reports the result, then the market is settled on Solana, usually within a minute."
+          note="These markets have closed. The venue reports the result, then the market is settled on Solana, usually within a minute."
           empty="Nothing is waiting for a result."
         >
           {portfolio.awaiting.length > 0 && (

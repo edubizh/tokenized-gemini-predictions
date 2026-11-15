@@ -2,13 +2,20 @@ import { describe, expect, it } from "vitest";
 import type { ApiMarket } from "@outcome/relayer/api-types";
 import { knownMarkets } from "@/features/markets/known";
 import type { ChainMarket } from "@/lib/chain/reads";
-import { buildFixtures, fixtureAddress } from "@/lib/relayer/fixtures";
+import { fixtureAddress, fixtureMarket } from "@/lib/relayer/fixtures";
 import { buildPortfolio, resultWords, sideStatement } from "./positions";
 
-const NOW = Date.UTC(2026, 10, 14, 15, 0, 0);
+const NOW = Date.UTC(2026, 10, 14, 22, 14, 0);
 const CHAIN = Math.floor(NOW / 1000);
-const [btc, eth, , awaiting, settledYes, settledNo] = buildFixtures(NOW).markets as [ApiMarket, ApiMarket, ApiMarket, ApiMarket, ApiMarket, ApiMarket];
-const markets = [btc, eth, awaiting, settledYes, settledNo];
+const fixture = (symbol: string) => fixtureMarket(symbol, NOW) as ApiMarket;
+// A fifteen-minute contract that is running, one strike of the hourly ladder, a contract whose
+// result the venue has not reported, and two that settled: one Yes, one No.
+const btc = fixture("GEMI-BTC15M2611142216-UP");
+const strike = fixture("GEMI-BTC2611142218-HI104100");
+const awaiting = fixture("GEMI-XRP15M2611142209-UP");
+const settledYes = fixture("GEMI-BTC15M2611142211-UP");
+const settledNo = fixture("GEMI-BTC15M2611142206-UP");
+const markets = [btc, strike, awaiting, settledYes, settledNo];
 const at = { wallMs: NOW, chainSecs: CHAIN };
 
 const yes = (market: ApiMarket) => market.onchain!.yesMint;
@@ -137,21 +144,26 @@ describe("sideStatement", () => {
   const options = { timeZone: "UTC" };
 
   it("says what each side of an Up market pays for", () => {
-    expect(sideStatement(btc, "YES", options)).toBe("YES pays $1.00 if BTC is at or above $104,212.50 at 3:09 PM UTC.");
-    expect(sideStatement(btc, "NO", options)).toBe("NO pays $1.00 if BTC is below $104,212.50 at 3:09 PM UTC.");
+    expect(sideStatement(btc, "YES", options)).toBe("YES pays $1.00 if the price is at or above $104,212.50 at 10:16 PM UTC.");
+    expect(sideStatement(btc, "NO", options)).toBe("NO pays $1.00 if the price is below $104,212.50 at 10:16 PM UTC.");
+  });
+
+  it("says what each side of a ladder contract pays for", () => {
+    expect(sideStatement(strike, "YES", options)).toBe("YES pays $1.00 if the price is at or above $104,100.00 at 10:18 PM UTC.");
+    expect(sideStatement(strike, "NO", options)).toBe("NO pays $1.00 if the price is below $104,100.00 at 10:18 PM UTC.");
   });
 
   it("falls back to the contract label, and to the opening time before the strike is known", () => {
-    expect(sideStatement({ ...btc, label: "Rain in Lisbon" }, "YES", options)).toBe("YES pays $1.00 if: Rain in Lisbon.");
-    expect(sideStatement({ ...btc, label: "Rain in Lisbon" }, "NO", options)).toBe("NO pays $1.00 if not: Rain in Lisbon.");
-    expect(sideStatement({ ...btc, strike: null }, "NO", options)).toBe("The reference price is set when the window opens at 2:54 PM.");
+    expect(sideStatement({ ...btc, label: "Rain in Lisbon", strike: null }, "YES", options)).toBe("YES pays $1.00 if: Rain in Lisbon.");
+    expect(sideStatement({ ...btc, label: "Rain in Lisbon", strike: null }, "NO", options)).toBe("NO pays $1.00 if not: Rain in Lisbon.");
+    expect(sideStatement({ ...btc, strike: null }, "NO", options)).toBe("The reference price is set when the window opens at 10:01 PM.");
   });
 });
 
 describe("resultWords", () => {
-  it("names the side that won and the final price against the price to beat", () => {
-    expect(resultWords(settledYes, { timeZone: "UTC" })).toBe("Result: YES. ETH was at $3,404.11 at 2:31 PM UTC, at or above the $3,398.40 to beat.");
-    expect(resultWords(settledNo, { timeZone: "UTC" })).toBe("Result: NO. SOL was at $186.95 at 2:24 PM UTC, below the $187.32 to beat.");
+  it("names the side that won and the final price against the strike", () => {
+    expect(resultWords(settledYes, { timeZone: "UTC" })).toBe("Result: YES. The price was $104,243.90 at 10:11 PM UTC, at or above $104,212.50.");
+    expect(resultWords(settledNo, { timeZone: "UTC" })).toBe("Result: NO. The price was $104,180.02 at 10:06 PM UTC, below $104,212.50.");
   });
 
   it("says less when the venue gave no final price, and spells out a split settlement", () => {
@@ -213,8 +225,8 @@ describe("positions without the relayer", () => {
   });
 
   it("words a side without a price to beat", () => {
-    const btc = markets.find((market) => market.underlying === "BTC")!;
-    expect(sideStatement(btc, "NO", { timeZone: "UTC" })).toBe("NO pays $1.00 if BTC is below its price to beat at 10:00 PM UTC.");
-    expect(resultWords(markets.find((market) => market.underlying === "SOL")!, { timeZone: "UTC" })).toBe("Result: YES.");
+    const btc = markets.find((market) => market.title === "BTC")!;
+    expect(sideStatement(btc, "NO", { timeZone: "UTC" })).toBe("NO pays $1.00 if the price is below its price to beat at 10:00 PM UTC.");
+    expect(resultWords(markets.find((market) => market.title === "SOL")!, { timeZone: "UTC" })).toBe("Result: YES.");
   });
 });

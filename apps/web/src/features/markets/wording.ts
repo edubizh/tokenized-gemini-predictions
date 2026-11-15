@@ -53,14 +53,15 @@ export function formatStrike(strike: string): string {
   return `$${group(digits.slice(0, -decimals))}.${digits.slice(-decimals)}`;
 }
 
-/** The row title: `BTC Up`. */
-export function marketTitle(market: Pick<ApiMarket, "underlying" | "label">): string {
-  return `${market.underlying} ${market.label}`;
+/** The strike of a ladder contract as the venue words it, digit for digit: `$68,000 or above`. */
+export function strikeLabel(strike: string): string {
+  const [whole = "", fraction] = strike.split(".");
+  return `$${group(whole)}${fraction === undefined ? "" : `.${fraction}`} or above`;
 }
 
-/** `closes 10:00 PM`; the countdown is shown beside it. */
-export function closesLine(market: Pick<ApiMarket, "expiresAt">, options: TimeOptions = {}): string {
-  return `closes ${formatClock(market.expiresAt, options)}`;
+/** A contract by the title of its event and its own label: `BTC price on November 15 · $68,000 or above`. */
+export function marketTitle(market: Pick<ApiMarket, "title" | "label">): string {
+  return `${market.title} · ${market.label}`;
 }
 
 /** The `venueStatus` of a market read from Solana alone: nothing the venue says about it is known. */
@@ -71,16 +72,16 @@ export function venueKnown(market: { venueStatus?: string }): boolean {
   return market.venueStatus !== VENUE_NOT_KNOWN;
 }
 
-/** What YES pays for, in one or two sentences. */
-export function payoutStatement(market: Pick<ApiMarket, "underlying" | "label" | "strike" | "startsAt" | "expiresAt"> & { venueStatus?: string }, options: TimeOptions = {}): string {
-  if (market.label !== "Up") return `YES pays $1.00 if: ${market.label}.`;
-  if (market.strike === null && !venueKnown(market)) {
-    const close = formatClock(market.expiresAt, { ...options, zone: true });
-    return `YES pays $1.00 if ${market.underlying} is at or above its price to beat at ${close}. NO pays $1.00 otherwise. The price to beat is not known while the relayer is not answering.`;
-  }
-  if (market.strike === null) return `The reference price is set when the window opens at ${formatClock(market.startsAt, options)}.`;
+/**
+ * What YES pays for, in one or two sentences. A contract with a strike resolves Yes when the
+ * price is at or above it: the strike of a ladder contract, the price to beat of an Up contract.
+ */
+export function payoutStatement(market: Pick<ApiMarket, "label" | "strike" | "startsAt" | "expiresAt"> & { venueStatus?: string }, options: TimeOptions = {}): string {
   const close = formatClock(market.expiresAt, { ...options, zone: true });
-  return `YES pays $1.00 if ${market.underlying} is at or above ${formatStrike(market.strike)} at ${close}. NO pays $1.00 otherwise.`;
+  if (market.strike !== null) return `YES pays $1.00 if the price is at or above ${formatStrike(market.strike)} at ${close}. NO pays $1.00 otherwise.`;
+  if (market.label !== "Up") return `YES pays $1.00 if: ${market.label}.`;
+  if (!venueKnown(market)) return `YES pays $1.00 if the price is at or above its price to beat at ${close}. NO pays $1.00 otherwise. The price to beat is not known while the relayer is not answering.`;
+  return `The reference price is set when the window opens at ${formatClock(market.startsAt, options)}.`;
 }
 
 /** Why a contract cannot be traded now, or null when it can. */
@@ -102,19 +103,4 @@ export function notTradableWords(market: Pick<ApiMarket, "tradable" | "notTradab
     case null:
       return "Not open for orders";
   }
-}
-
-/** True once the venue's result for an expired market is known. */
-export function resultIsIn(market: Pick<ApiMarket, "resolution" | "settleState">): boolean {
-  return market.resolution !== null || market.settleState === "settled";
-}
-
-/**
- * The markets shown in the list, soonest close first. A market that has expired stays until its
- * result is in; after that it is reachable from Portfolio and Activity only.
- */
-export function listedMarkets(markets: readonly ApiMarket[], nowMs: number): ApiMarket[] {
-  return markets
-    .filter((market) => market.settleState !== "unused" && !(market.expiresAt <= nowMs && resultIsIn(market)))
-    .sort((a, b) => a.expiresAt - b.expiresAt || a.underlying.localeCompare(b.underlying));
 }

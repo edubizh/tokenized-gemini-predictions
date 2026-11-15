@@ -109,23 +109,20 @@ export function buildPortfolio(balances: readonly TokenBalance[], markets: reado
   return portfolio;
 }
 
-type Described = Pick<ApiMarket, "underlying" | "label" | "strike" | "startsAt" | "expiresAt"> & { venueStatus?: string };
+type Described = Pick<ApiMarket, "label" | "strike" | "startsAt" | "expiresAt"> & { venueStatus?: string };
 
-/** What one side of a market pays for, in one sentence. */
+/** What one side of a market pays for, in one sentence. YES wins at or above the strike, NO below it. */
 export function sideStatement(market: Described, side: SideName, options: TimeOptions = {}): string {
-  if (market.label !== "Up") return side === "YES" ? `YES pays $1.00 if: ${market.label}.` : `NO pays $1.00 if not: ${market.label}.`;
-  if (market.strike === null && !venueKnown(market)) {
-    const close = formatClock(market.expiresAt, { ...options, zone: true });
-    return `${side} pays $1.00 if ${market.underlying} is ${side === "YES" ? "at or above" : "below"} its price to beat at ${close}.`;
-  }
-  if (market.strike === null) return payoutStatement(market, options);
-  const close = formatClock(market.expiresAt, { ...options, zone: true });
   const condition = side === "YES" ? "at or above" : "below";
-  return `${side} pays $1.00 if ${market.underlying} is ${condition} ${formatStrike(market.strike)} at ${close}.`;
+  const close = formatClock(market.expiresAt, { ...options, zone: true });
+  if (market.strike !== null) return `${side} pays $1.00 if the price is ${condition} ${formatStrike(market.strike)} at ${close}.`;
+  if (market.label !== "Up") return side === "YES" ? `YES pays $1.00 if: ${market.label}.` : `NO pays $1.00 if not: ${market.label}.`;
+  if (!venueKnown(market)) return `${side} pays $1.00 if the price is ${condition} its price to beat at ${close}.`;
+  return payoutStatement(market, options);
 }
 
 /** How a settled market came out: the side that won, and the final price where the venue gave one. */
-export function resultWords(market: Pick<ApiMarket, "underlying" | "label" | "strike" | "expiresAt" | "settlementValue" | "resolution" | "onchain">, options: TimeOptions = {}): string {
+export function resultWords(market: Pick<ApiMarket, "strike" | "expiresAt" | "settlementValue" | "resolution" | "onchain">, options: TimeOptions = {}): string {
   const yesPayout = market.onchain?.yesPayout == null ? null : BigInt(market.onchain.yesPayout);
   const noPayout = market.onchain?.noPayout == null ? null : BigInt(market.onchain.noPayout);
   if (yesPayout !== null && noPayout !== null && yesPayout > 0n && noPayout > 0n) {
@@ -133,8 +130,8 @@ export function resultWords(market: Pick<ApiMarket, "underlying" | "label" | "st
   }
   const winner = yesPayout !== null ? (yesPayout > 0n ? "YES" : "NO") : market.resolution === null ? null : market.resolution === "yes" ? "YES" : "NO";
   if (winner === null) return "The result is not in yet.";
-  if (market.label !== "Up" || market.settlementValue === null || market.strike === null) return `Result: ${winner}.`;
+  if (market.settlementValue === null || market.strike === null) return `Result: ${winner}.`;
   const relation = winner === "YES" ? "at or above" : "below";
   const close = formatClock(market.expiresAt, { ...options, zone: true });
-  return `Result: ${winner}. ${market.underlying} was at ${formatStrike(market.settlementValue)} at ${close}, ${relation} the ${formatStrike(market.strike)} to beat.`;
+  return `Result: ${winner}. The price was ${formatStrike(market.settlementValue)} at ${close}, ${relation} ${formatStrike(market.strike)}.`;
 }

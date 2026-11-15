@@ -9,7 +9,7 @@ import { Receipt, ReceiptLine } from "@/components/ui/Receipt";
 import { Row, RowList, type Column } from "@/components/ui/RowList";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Stamp } from "@/components/ui/Stamp";
-import { marketHref } from "@/features/markets/MarketsList";
+import { marketHref } from "@/lib/routes";
 import { formatClock, type TimeOptions } from "@/features/markets/wording";
 import { OrderTimelineView } from "@/features/ticket/OrderTimeline";
 import type { SendProgress } from "@/features/ticket/Ticket";
@@ -167,7 +167,7 @@ export function ActivityView({ rows, offline = false, nowMs, chainNow, frozenAtM
     return <EmptyState>You have no open orders on Solana. Orders that have finished are listed again when the relayer answers.</EmptyState>;
   }
   if (rows.length === 0) {
-    return <EmptyState action={<ButtonLink href="/markets">See live markets</ButtonLink>}>No orders yet. Each order you place is listed here, with every step it took and its receipt.</EmptyState>;
+    return <EmptyState action={<ButtonLink href="/">See all markets</ButtonLink>}>No orders yet. Each order you place is listed here, with every step it took and its receipt.</EmptyState>;
   }
 
   const today = day(nowMs, timeZone);
@@ -194,7 +194,7 @@ export function ActivityView({ rows, offline = false, nowMs, chainNow, frozenAtM
                     <span className={styles.kind}>{row.kind}</span>
                     <span className={`${styles.side} ${timeline.side === "YES" ? styles.yes : styles.no}`}>{timeline.side}</span>
                     {row.market && row.title ? (
-                      <Link href={marketHref(row.market.symbol)} className={styles.title}>
+                      <Link href={marketHref(row.market)} className={styles.title}>
                         {row.title}
                       </Link>
                     ) : (

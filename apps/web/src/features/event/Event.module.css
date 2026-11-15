@@ -1,0 +1,62 @@
+/* A main column and the trade panel beside it, which stays in view. */
+.columns {
+  display: grid;
+  gap: var(--space-7);
+  align-items: start;
+}
+
+.main {
+  display: grid;
+  gap: var(--space-7);
+  min-width: 0;
+}
+
+.aside {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+@media (min-width: 60rem) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr) var(--aside);
+    column-gap: var(--space-6);
+  }
+
+  .aside {
+    grid-column: 2;
+    grid-row: 1;
+    position: sticky;
+    top: calc(var(--nav-height) + var(--space-5));
+  }
+}
+
+/* On a narrow screen the trade panel comes first. */
+@media (max-width: 59.99rem) {
+  .aside {
+    order: -1;
+  }
+}
+
+.section h2 {
+  margin-bottom: var(--space-5);
+}
+
+.selected {
+  font-weight: var(--weight-semibold);
+}
+
+.orders {
+  border-top: 1px solid var(--line);
+}
+
+.note {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--forest-soft);
+}
+
+.more {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+}

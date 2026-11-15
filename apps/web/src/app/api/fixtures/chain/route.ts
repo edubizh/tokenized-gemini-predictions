@@ -19,8 +19,9 @@ function list(value: string | null, pattern: RegExp): string[] {
  */
 export function GET(request: Request): Response {
   if (!fixturesMode()) return Response.json({ error: "not_found" }, { status: 404 });
+  const switches = fixtureSwitches(request.headers.get("cookie"));
   // The switch that makes every read fail as a rate-limited RPC endpoint does.
-  if (fixtureSwitches(request.headers.get("cookie")).chainFailing) return Response.json({ error: "too_many_requests" }, { status: 429 });
+  if (switches.chainFailing) return Response.json({ error: "too_many_requests" }, { status: 429 });
   const query = new URL(request.url).searchParams;
   if (query.get("read") === "clock") return Response.json({ chainTime: Math.floor(Date.now() / 1000) });
   if (query.get("read") === "markets") {
@@ -32,5 +33,5 @@ export function GET(request: Request): Response {
   }
   const wallet = query.get("wallet");
   if (wallet === null || !ADDRESS.test(wallet)) return Response.json({ error: "bad_request" }, { status: 400 });
-  return Response.json(fixtureWorld().chain(wallet, Date.now()));
+  return Response.json(fixtureWorld().chain(wallet, Date.now(), switches.newWallet));
 }

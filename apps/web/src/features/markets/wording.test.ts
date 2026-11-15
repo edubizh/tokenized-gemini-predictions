@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { ApiMarket } from "@outcome/relayer/api-types";
-import { buildFixtures } from "@/lib/relayer/fixtures";
-import { closesLine, formatClock, formatStrike, listedMarkets, marketTitle, notTradableWords, payoutStatement } from "./wording";
+import { fixtureMarket } from "@/lib/relayer/fixtures";
+import { formatClock, formatStrike, marketTitle, notTradableWords, payoutStatement, strikeLabel } from "./wording";
 
 const NY = { timeZone: "America/New_York" };
 // 2026-11-14 22:00:00 EST
 const CLOSE = Date.UTC(2026, 10, 15, 3, 0, 0);
-const base = buildFixtures(CLOSE).markets[0] as ApiMarket;
-const market = (patch: Partial<ApiMarket>): ApiMarket => ({ ...base, underlying: "BTC", label: "Up", startsAt: CLOSE - 15 * 60_000, expiresAt: CLOSE, strike: "67410.73", ...patch });
+const base = fixtureMarket("GEMI-BTC15M2611150301-UP", CLOSE) as ApiMarket;
+const market = (patch: Partial<ApiMarket>): ApiMarket => ({ ...base, title: "BTC price today at 10pm EST", label: "Up", startsAt: CLOSE - 15 * 60_000, expiresAt: CLOSE, strike: "67410.73", ...patch });
 
 describe("formatStrike", () => {
   it("uses two decimals at 100 and above, with grouping", () => {
@@ -35,6 +35,15 @@ describe("formatStrike", () => {
   });
 });
 
+describe("strikeLabel", () => {
+  it("words the strike of a ladder contract as the venue does, digit for digit", () => {
+    expect(strikeLabel("68000")).toBe("$68,000 or above");
+    expect(strikeLabel("1250000")).toBe("$1,250,000 or above");
+    expect(strikeLabel("3.575")).toBe("$3.575 or above");
+    expect(strikeLabel("0.84")).toBe("$0.84 or above");
+  });
+});
+
 describe("formatClock", () => {
   it("writes a twelve-hour time with plain spaces, and the zone when asked", () => {
     expect(formatClock(CLOSE, NY)).toBe("10:00 PM");
@@ -45,21 +54,20 @@ describe("formatClock", () => {
 });
 
 describe("market wording", () => {
-  it("titles a row with the underlying and the label, never the venue symbol", () => {
-    expect(marketTitle(market({}))).toBe("BTC Up");
+  it("titles a contract with the title of its event and its own label, never the venue symbol", () => {
+    expect(marketTitle(market({}))).toBe("BTC price today at 10pm EST · Up");
+    expect(marketTitle(market({ title: "BTC price on November 15", label: "$68,000 or above" }))).toBe("BTC price on November 15 · $68,000 or above");
     expect(marketTitle(market({}))).not.toContain(base.symbol);
   });
-  it("gives the closing time", () => {
-    expect(closesLine(market({}), NY)).toBe("closes 10:00 PM");
-  });
-  it("states what YES pays for when the strike is known", () => {
-    expect(payoutStatement(market({}), NY)).toBe("YES pays $1.00 if BTC is at or above $67,410.73 at 10:00 PM EST. NO pays $1.00 otherwise.");
+  it("states what YES pays for from the strike: the price to beat, or the strike of a ladder contract", () => {
+    expect(payoutStatement(market({}), NY)).toBe("YES pays $1.00 if the price is at or above $67,410.73 at 10:00 PM EST. NO pays $1.00 otherwise.");
+    expect(payoutStatement(market({ label: "$68,000 or above", strike: "68000" }), NY)).toBe("YES pays $1.00 if the price is at or above $68,000.00 at 10:00 PM EST. NO pays $1.00 otherwise.");
   });
   it("says when the reference price is set before the strike is known", () => {
     expect(payoutStatement(market({ strike: null }), NY)).toBe("The reference price is set when the window opens at 9:45 PM.");
   });
-  it("falls back to the label for a contract that is not an Up contract", () => {
-    expect(payoutStatement(market({ label: "Above 70,000" }), NY)).toBe("YES pays $1.00 if: Above 70,000.");
+  it("falls back to the label for a contract that has no strike and is not an Up contract", () => {
+    expect(payoutStatement(market({ label: "Rain in Lisbon", strike: null }), NY)).toBe("YES pays $1.00 if: Rain in Lisbon.");
   });
   it("gives the reason a contract cannot be traded in words", () => {
     expect(notTradableWords(market({ tradable: true, notTradableReason: null }), NY)).toBeNull();
@@ -70,22 +78,5 @@ describe("market wording", () => {
     expect(notTradableWords(market({ tradable: false, notTradableReason: "paused" }), NY)).toBe("Trading is paused");
     expect(notTradableWords(market({ tradable: false, notTradableReason: "venue_offline" }), NY)).toBe("The venue is offline");
     expect(notTradableWords(market({ tradable: false, notTradableReason: "not_active" }), NY)).toBe("Not open for orders");
-  });
-});
-
-describe("listedMarkets", () => {
-  const now = CLOSE - 60_000;
-  it("keeps an expired market until its result is in, then drops it", () => {
-    const open = market({ symbol: "A" });
-    const awaiting = market({ symbol: "B", expiresAt: now - 1_000, settleState: "awaiting_result", resolution: null });
-    const resolved = market({ symbol: "C", expiresAt: now - 1_000, settleState: "awaiting_result", resolution: "yes" });
-    const settled = market({ symbol: "D", expiresAt: now - 1_000, settleState: "settled", resolution: "no" });
-    expect(listedMarkets([open, awaiting, resolved, settled], now).map((m) => m.symbol)).toEqual(["B", "A"]);
-  });
-  it("orders by closing time, then underlying", () => {
-    const later = market({ symbol: "L", expiresAt: CLOSE + 1 });
-    const eth = market({ symbol: "E", underlying: "ETH" });
-    const btc = market({ symbol: "B", underlying: "BTC" });
-    expect(listedMarkets([later, eth, btc], now).map((m) => m.symbol)).toEqual(["B", "E", "L"]);
   });
 });

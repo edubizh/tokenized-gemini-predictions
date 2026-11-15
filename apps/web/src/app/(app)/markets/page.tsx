@@ -1,7 +1,6 @@
-import { MarketsPage } from "@/features/markets/MarketsPage";
+import { permanentRedirect } from "next/navigation";
 
-export const metadata = { title: "Markets" };
-
-export default function Page() {
-  return <MarketsPage />;
+/** The markets are the start page. */
+export default function Page(): never {
+  permanentRedirect("/");
 }
