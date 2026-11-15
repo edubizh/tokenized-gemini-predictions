@@ -249,7 +249,8 @@ Exit: every route is rebuilt and reviewed in screenshots at 1280 and 390; no com
 
 - [x] Unit tests, type-checks and builds of every package
 - [x] Screenshots of every route and state at both widths, checked against DESIGN.md
-- [ ] Live on devnet with the sandbox: a 15-minute contract, a strike-ladder contract and a commodity contract each bought, settled and redeemed, with reconciliation balanced
+- [x] Live on devnet with the sandbox, from the command line: a 15-minute contract and a strike-ladder contract bought, settled and redeemed, with reconciliation balanced (a commodity contract cannot be bought there: none has ever had an offer)
+- [ ] The same from the browser, with a sale
 - [ ] The wallet matrix with real extensions on the live stack
 - [ ] A run with the relayer stopped
 - [x] An independent review of each track
@@ -272,9 +273,12 @@ Done and verified:
 - **Pages**: markets index (filters, search, sort, cards), event page (contracts, price chart, order book, recent trades, rule, dates, on-chain accounts, position and orders), trade panel (every state, prices in cents), portfolio, activity, system, vaults placeholder.
 - **Checks**: 445 unit tests in the web app and 927 in the relayer, type-checks and the production build; two browser checks in fixtures mode drive every route and state at 1280, 390 and 360 (no page error, no overflow, no target under 44 px) and follow an order to filled; an independent review of the relayer and one of the web app, with their must-fix items fixed.
 
+- **First live run** of the new relayer on devnet with the sandbox, from the command line (2026-11-15, 01:10 to 02:01 UTC): it served all 110 events and 370 contracts the venue listed, and the twelve markets of the first release were still there after the database was brought to the new tables. On an hourly ladder (XRP at $0.84 or above) one Yes contract was bought at 97 cents and half of it sold back at 88; on a 15-minute contract one No was bought and a Yes order below the offer was refunded in full. Fills landed 1 to 3 seconds after placement. Both markets settled on-chain 31 and 38 seconds after expiry from the venue's results and the winning tokens redeemed for a dollar each. Reconciliation stayed balanced throughout.
+
 Not done yet:
 
-- The live run from the browser on devnet with the sandbox (a 15-minute contract and a strike-ladder contract bought, sold, settled and redeemed), the wallet matrix on that stack, and a run with the relayer stopped. The live checks under `apps/web/e2e/live-*.mjs` follow the new pages but have not been run.
+- The same live run from the browser, the wallet matrix on the sandbox stack, and a run with the relayer stopped. The live checks under `apps/web/e2e/live-*.mjs` follow the new pages but have not been run.
+- Found by the live run, not fixed: token supplies shown for a market stop updating once it is settled; an event keeps the status "active" after its contracts have settled; the first listing after a start can be incomplete for under a minute; an alert that says "fetch failed" without saying what was being fetched.
 - A commodity contract cannot be bought on the sandbox: no commodity, HYPE, ZEC, weekly or monthly contract has ever had an offer there, and one account cannot trade with itself. Those markets are listed with "No offers"; the commodity ladder trades, settles and redeems on the simulated venue.
 - README, ARCHITECTURE and SCOPE still describe the first release in places.
 - From the reviews, not yet done: contracts the venue drops from a ladder stay listed until they expire; the status rule that never moves backwards can also block a real correction; list reads share one queue with settlement reads.
