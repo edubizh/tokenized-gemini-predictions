@@ -16,6 +16,7 @@ import type { ReconnectView } from "@/lib/privy/reconnect";
 import { ReconnectWords } from "@/lib/privy/ReconnectWords";
 import type { TicketAction } from "@/lib/routes";
 import { orderLimits, parseCents, parseContracts, quoteBuy, quoteSell, type QuoteError } from "./quote";
+import { fixPrice, movedReference, priceText as cents, quantityText as plain, ticketDefaults } from "./defaults";
 import { closedReason } from "./reasons";
 import styles from "./Ticket.module.css";
 
@@ -54,6 +55,8 @@ export interface TicketProps {
   /** Why the last attempt did not place an order. */
   error?: string | null;
   onSubmit(draft: TicketDraft): void;
+  /** Called when a field is edited, so a failed attempt's error can be cleared. */
+  onEdit?(): void;
   onGetTestFunds?(): void;
   /** The faucet's answer, shown under the button. */
   fundsNote?: string | null;
@@ -68,8 +71,6 @@ export interface TicketProps {
 }
 
 const word = (side: SideName) => (side === "YES" ? "Yes" : "No");
-const cents = (px: bigint) => formatCents(px).replace("¢", "");
-const plain = (units: bigint) => formatContracts(units).replace(/,/g, "");
 
 function clamp(value: bigint, low: bigint, high: bigint | null): bigint {
   if (value < low) return low;
@@ -93,6 +94,7 @@ export function Ticket({
   progress = null,
   error = null,
   onSubmit,
+  onEdit,
   onGetTestFunds,
   fundsNote,
   reconnect = null,
@@ -101,9 +103,12 @@ export function Ticket({
 }: TicketProps) {
   const [action, setAction] = useState<TicketAction>(initialAction);
   const [side, setSide] = useState<SideName>(initialSide);
-  // Until they are edited, the quantity and the price follow the chosen action and side.
+  // Until they are edited, the quantity and the price follow the chosen action and side. The price
+  // follows the market only until the panel is first touched; then it is fixed as if typed.
   const [typedQuantity, setTypedQuantity] = useState<string | null>(initialQuantity ?? null);
   const [typedPrice, setTypedPrice] = useState<string | null>(initialPrice ?? null);
+  const [fixedPrice, setFixedPrice] = useState<string | null>(null);
+  const [touched, setTouched] = useState(false);
 
   const selling = action === "sell";
   const heldUnits = held ? held[side] : null;
@@ -111,8 +116,9 @@ export function Ticket({
   // A buy is priced off the offer of its side, a sale off the bid.
   const reference = selling ? bidPx(market, side) : askPx(market, side);
   const price = typedPrice ?? (reference === null ? "" : cents(reference));
-  const sellAll = heldUnits !== null && heldUnits > 0n ? plain(clamp(heldUnits, 1n, limits.maxUnits)) : "1.00";
-  const quantity = typedQuantity ?? (selling ? sellAll : "1.00");
+  const { quantity: defaultQuantity, leastUnits, mostUnits } = ticketDefaults({ selling, heldUnits, limits });
+  const quantity = typedQuantity ?? defaultQuantity;
+  const moved = movedReference({ typed: typedPrice, fixed: fixedPrice }, reference);
   const units = parseContracts(quantity);
   const limitPx = parseCents(price);
   const buy = quoteBuy({ side, units, limitPx, market, health, balances, timeZone });
@@ -120,7 +126,7 @@ export function Ticket({
   const errors = selling ? sell.errors : buy.errors;
 
   const errorFor = (field: QuoteError["field"]) => errors.find((entry) => entry.field === field);
-  const reason = closedReason(market, health, { timeZone });
+  const reason = closedReason(market, health, { timeZone, now: Date.now() });
   // The chosen side has nobody on the other end: an order could only be refunded.
   const noOffer = reason === null && reference === null;
   const blocker = errorFor("fee") ?? errorFor("funds") ?? errorFor("sol");
@@ -133,16 +139,17 @@ export function Ticket({
   let priceWarning: string | undefined;
   if (reachable !== null && reference !== null) {
     if (reachable === 0n) {
-      priceWarning = selling ? `Nobody bids this much. The highest bid is ${formatCents(reference)}.` : `Nothing is offered at this price. The best offer is ${formatCents(reference)}.`;
+      // When the price was fixed from a reference that has since moved, the line under the field says so instead.
+      if (moved === null) {
+        priceWarning = selling ? `Nobody bids this much. The highest bid is ${formatCents(reference)}.` : `Nothing is offered at this price. The best offer is ${formatCents(reference)}.`;
+      }
     } else if (units !== null && units > reachable) {
       priceWarning = `Only ${formatContracts(reachable)} ${selling ? "wanted" : "available"} at this price. The order fills in full or not at all.`;
     } else {
-      priceHelper = `${formatContracts(reachable)} ${selling ? "wanted" : "available"} at this price.`;
+      priceHelper = `${formatContracts(reachable)} contracts ${selling ? "wanted" : "available"} at this price.`;
     }
   }
 
-  const mostUnits = selling && heldUnits !== null && (limits.maxUnits === null || heldUnits < limits.maxUnits) ? heldUnits : limits.maxUnits;
-  const leastUnits = selling ? 1n : limits.minUnits;
   const stepQuantity = (direction: 1n | -1n) => setTypedQuantity(plain(clamp((units ?? 0n) + direction * QUANTITY_STEP, leastUnits, mostUnits)));
   const highestPx = ((10_000n - 1n) / limits.tickPx) * limits.tickPx;
   const stepPrice = (direction: 1n | -1n) => {
@@ -151,10 +158,20 @@ export function Ticket({
     setTypedPrice(cents(clamp(onTick + direction * limits.tickPx, limits.tickPx, highestPx)));
   };
 
+  const fix = (next: string | null) => {
+    setTypedPrice(next);
+    setFixedPrice(next);
+  };
+  const touch = () => {
+    if (touched) return;
+    setTouched(true);
+    if (typedPrice === null) fix(fixPrice(null, reference));
+  };
   const choose = (next: TicketAction) => {
     setAction(next);
+    onEdit?.();
     setTypedQuantity(null);
-    setTypedPrice(null);
+    fix(fixPrice(null, next === "sell" ? bidPx(market, side) : askPx(market, side)));
   };
 
   const blocked = errors.length > 0 || noOffer || reason !== null;
@@ -165,13 +182,19 @@ export function Ticket({
   };
 
   const amount = (micros: bigint) => (fieldsValid ? formatDollars(micros) : "–");
-  const sideOption = (which: SideName) => ({ value: which, label: word(which), detail: centsText(selling ? bidPx(market, which) : askPx(market, which)), tone: which === "YES" ? ("yes" as const) : ("no" as const) });
+  // An unchosen side is a plain outline; only the chosen one is filled, Yes in jade and No in forest.
+  const sideOption = (which: SideName) => ({
+    value: which,
+    label: word(which),
+    detail: centsText(selling ? bidPx(market, which) : askPx(market, which)),
+    tone: which !== side ? undefined : which === "YES" ? ("yes" as const) : ("no" as const),
+  });
   const ready = fieldsValid && !blocked;
   const label = `${selling ? "Sell" : "Buy"} ${word(side)}${ready && units !== null ? (selling ? ` · ${formatContracts(units)} contracts` : ` · hold ${formatDollars(buy.holdMicros)}`) : ""}`;
 
   return (
     <Panel>
-      <form className={styles.ticket} onSubmit={submit} noValidate aria-label="Trade" data-testid="ticket" data-action={action}>
+      <form className={styles.ticket} onSubmit={submit} onFocus={touch} onPointerDown={touch} onChange={onEdit} noValidate aria-label="Trade" data-testid="ticket" data-action={action}>
         <div className={styles.head}>
           <h2 className={styles.contract}>{market.label}</h2>
           {selling ? (
@@ -203,7 +226,8 @@ export function Ticket({
             value={side}
             onChange={(next) => {
               setSide(next);
-              setTypedPrice(null);
+              onEdit?.();
+              fix(fixPrice(null, selling ? bidPx(market, next) : askPx(market, next)));
               if (selling) setTypedQuantity(null);
             }}
             disabled={busy}
@@ -248,6 +272,14 @@ export function Ticket({
             canIncrement: limitPx === null || limitPx < highestPx,
           }}
         />
+        {moved !== null && !off && (
+          <p className={styles.moved} data-testid="ticket-moved">
+            {`Best ${selling ? "bid" : "offer"} is now ${formatCents(moved)}.`}
+            <Button variant="quiet" size="row" onClick={() => fix(cents(moved))}>
+              {`Use ${formatCents(moved)}`}
+            </Button>
+          </p>
+        )}
 
         <h3 className="sr-only">Order summary</h3>
         {selling ? (

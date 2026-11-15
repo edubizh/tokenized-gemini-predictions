@@ -10,13 +10,21 @@ export interface Reason {
 
 const PAUSED: Reason = { title: "Trading is paused", text: "Orders already placed are still filled or refunded." };
 
+const TOO_LATE: Reason = { title: "Orders closed", text: "It is too close to the end of this contract for an order to be filled in time." };
+
 /**
  * Null when the contract takes orders. The relayer and a pause come first, because they hold for
- * every contract; then the contract's own reason.
+ * every contract; then the last order time, which the last poll may not have caught yet; then the
+ * contract's own reason.
  */
-export function closedReason(market: Pick<ApiMarket, "tradable" | "notTradableReason" | "startsAt">, health: Pick<ApiHealth, "paused"> | null, options: TimeOptions = {}): Reason | null {
+export function closedReason(
+  market: Pick<ApiMarket, "tradable" | "notTradableReason" | "startsAt" | "lastOrderAt">,
+  health: Pick<ApiHealth, "paused"> | null,
+  options: TimeOptions & { now?: number } = {},
+): Reason | null {
   if (health === null) return { title: "The relayer is not answering", text: "A new order would not reach the venue until it is back." };
   if (health.paused.place) return PAUSED;
+  if ((options.now ?? Date.now()) >= market.lastOrderAt) return TOO_LATE;
   if (market.tradable) return null;
   switch (market.notTradableReason) {
     case "not_started":
@@ -24,7 +32,7 @@ export function closedReason(market: Pick<ApiMarket, "tradable" | "notTradableRe
     case "not_active":
       return { title: "Not trading yet", text: "The venue has listed this contract but does not take orders on it yet." };
     case "too_close_to_expiry":
-      return { title: "Orders closed", text: "It is too close to the end of this contract for an order to be filled in time." };
+      return TOO_LATE;
     case "market_not_open":
       return { title: "Orders closed", text: "The venue is not taking orders on this contract right now." };
     case "no_offers":

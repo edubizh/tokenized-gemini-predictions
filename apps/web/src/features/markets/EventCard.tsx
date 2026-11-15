@@ -80,7 +80,7 @@ export function EventCard({ event }: { event: ApiEvent }) {
             <Badge tone="positive" dot>
               Live
             </Badge>
-            <Countdown to={event.expiresAt} label="closes in" />
+            <Countdown to={event.expiresAt} label="closes in" calm />
           </>
         ) : phase.phase === "upcoming" ? (
           <>

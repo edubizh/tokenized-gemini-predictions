@@ -1,7 +1,8 @@
-import { fixturesMode } from "@/lib/config.server";
+import { fixturesMode, loadConfig } from "@/lib/config.server";
 import { ENSURE_DELAY_MS, fixtureWorld } from "@/lib/fixtures/world";
 import { fixtureSwitches, type RelayerRoute } from "@/lib/relayer/proxy";
 import { verifyLogin } from "@/server/privy";
+import { createFundingChain } from "@/server/registrar";
 import { handleRelayer } from "@/server/relayer";
 
 export const dynamic = "force-dynamic";
@@ -33,10 +34,18 @@ async function upstream(route: RelayerRoute, method: string): Promise<Response> 
   }
 }
 
+/** Whether the wallet has a Trader account: the same read `/api/onboard` makes. */
+async function isTrader(wallet: string, request: Request): Promise<boolean> {
+  if (fixturesMode()) return fixtureWorld().funding(fixtureSwitches(request.headers.get("cookie")).newWallet).traderExists(wallet);
+  const { public: publicConfig, deployment } = loadConfig();
+  return deployment ? createFundingChain(deployment, publicConfig.rpcUrl).traderExists(wallet) : false;
+}
+
 async function proxy(request: Request, context: Context): Promise<Response> {
   const { path } = await context.params;
   return handleRelayer(request, path, {
     verify: verifyLogin,
+    isTrader: (wallet) => isTrader(wallet, request),
     answer: (route) => (fixturesMode() ? simulated(route, request) : upstream(route, request.method)),
   });
 }

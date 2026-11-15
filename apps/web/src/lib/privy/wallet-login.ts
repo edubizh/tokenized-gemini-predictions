@@ -38,12 +38,30 @@ export function walletFailure(error: unknown, declined: LoginFailure): LoginFail
   return code === 4001 || /reject|declin|denied/i.test(words) ? declined : "wallet_error";
 }
 
+/** How long the login provider has to verify a signature before the login ends in a network error. */
+export const VERIFY_TIMEOUT_MS = 20_000;
+
+/** The step's answer, or a rejection once `ms` have passed without one. */
+function within<T>(step: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("no answer in time")), ms);
+  });
+  return Promise.race([step, late]).finally(() => clearTimeout(timer));
+}
+
 /**
  * Runs one login with the wallet named `wallet`, reporting each state through `show`. Stops
  * without a word once `abandoned()` is true (the user closed the dialog): nothing more is asked of
  * the wallet and no session is started with an answer that arrives late.
  */
-export async function logInWithWallet(wallet: string, steps: WalletLoginSteps, show: (state: WalletLoginState) => void, abandoned: () => boolean = () => false): Promise<void> {
+export async function logInWithWallet(
+  wallet: string,
+  steps: WalletLoginSteps,
+  show: (state: WalletLoginState) => void,
+  abandoned: () => boolean = () => false,
+  verifyTimeoutMs = VERIFY_TIMEOUT_MS,
+): Promise<void> {
   const fail = (reason: LoginFailure) => show({ step: "failed", wallet, reason });
   /** Runs one step. Null when the login does not go on, and the state then already says why. */
   const attempt = async <T>(step: () => Promise<T>, reason: (error: unknown) => LoginFailure): Promise<{ answer: T } | null> => {
@@ -73,7 +91,7 @@ export async function logInWithWallet(wallet: string, steps: WalletLoginSteps, s
   if (!signature) return;
 
   show({ step: "verifying", wallet });
-  if (await attempt(() => steps.verify(message.answer, signature.answer), byNetwork)) show({ step: "done" });
+  if (await attempt(() => within(steps.verify(message.answer, signature.answer), verifyTimeoutMs), byNetwork)) show({ step: "done" });
 }
 
 /** One sentence for a failed login: what happened, and what to do next. */

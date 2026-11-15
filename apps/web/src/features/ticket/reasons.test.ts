@@ -3,8 +3,9 @@ import type { ApiHealth, ApiMarket, NotTradableReason } from "@outcome/relayer/a
 import { closedReason } from "./reasons";
 
 const OPENS = Date.UTC(2026, 10, 15, 1, 10);
+const LAST_ORDER = Date.UTC(2026, 10, 15, 2, 0);
 const market = (notTradableReason: NotTradableReason | null, tradable = notTradableReason === null) =>
-  ({ tradable, notTradableReason, startsAt: OPENS }) as Pick<ApiMarket, "tradable" | "notTradableReason" | "startsAt">;
+  ({ tradable, notTradableReason, startsAt: OPENS, lastOrderAt: LAST_ORDER }) as Pick<ApiMarket, "tradable" | "notTradableReason" | "startsAt" | "lastOrderAt">;
 const health = (patch: Partial<ApiHealth> = {}) => ({ paused: { place: false, fill: false }, ...patch }) as Pick<ApiHealth, "paused">;
 const UTC = { timeZone: "UTC" };
 
@@ -30,5 +31,10 @@ describe("closedReason", () => {
     const reasons: NotTradableReason[] = ["not_started", "too_close_to_expiry", "market_not_open", "not_active", "no_offers", "paused", "venue_offline"];
     for (const reason of reasons) expect(closedReason(market(reason), health(), UTC)?.text).toMatch(/\.$/);
     expect(closedReason(market(null, false), health(), UTC)?.title).toBe("Not open for orders");
+  });
+
+  it("is closed from the last order time on, whatever the last poll said", () => {
+    expect(closedReason(market(null), health(), { ...UTC, now: LAST_ORDER - 1 })).toBeNull();
+    expect(closedReason(market(null), health(), { ...UTC, now: LAST_ORDER })?.title).toBe("Orders closed");
   });
 });

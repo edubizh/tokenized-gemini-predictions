@@ -65,6 +65,14 @@
   color: var(--forest-soft);
 }
 
+/* On a touch screen each link of the path takes a 44px-high target; the line looks the same. */
+@media (max-width: 40rem) {
+  .path a {
+    padding-block: 12px;
+    margin-block: -12px;
+  }
+}
+
 .title {
   margin-top: var(--space-2);
 }
@@ -276,4 +284,46 @@
 .orders {
   display: grid;
   gap: var(--space-4);
+}
+
+/*
+ * In a narrow list the contracts stay one line each (the label, its chance, then Yes and No at the
+ * right; a long label wraps) and the order book keeps its four columns, instead of stacking into cards. The cells'
+ * own labels are left out: the line reads without them.
+ */
+@container (max-width: 40rem) {
+  .ladder [role="row"]:has([role="cell"]) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .ladder [role="cell"]:nth-child(2) > span:first-child {
+    display: none;
+  }
+
+  .ladder .rowActions > * {
+    min-width: 0;
+    padding-inline: 10px;
+  }
+
+
+  .book [role="row"] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) repeat(3, max-content);
+    align-items: center;
+    gap: var(--space-4);
+    min-height: 44px;
+    padding: var(--space-2) var(--space-4);
+  }
+
+  .book [role="cell"]:not(:first-child) {
+    text-align: right;
+  }
+
+  .book [role="cell"]:not(:first-child) > span:first-child {
+    display: none;
+  }
 }

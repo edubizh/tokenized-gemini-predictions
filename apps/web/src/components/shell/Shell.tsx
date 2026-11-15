@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useCallback, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { useConfig } from "@/lib/config";
 import { formatDollars, formatSol } from "@/lib/format";
@@ -13,14 +13,33 @@ import { Navbar } from "./Navbar";
 import { WalletWaiting } from "./WalletWaiting";
 import styles from "./Shell.module.css";
 
+export interface Faucet {
+  status: FaucetStatus;
+  /** Ignored while a request is on its way. */
+  request(): void;
+}
+
+const FaucetContext = createContext<Faucet | null>(null);
+
+/** The faucet, one for the whole app: the navbar and a page show the same request and answer. */
+export function useFaucet(): Faucet {
+  const faucet = useContext(FaucetContext);
+  if (!faucet) throw new Error("useFaucet needs the Shell");
+  return faucet;
+}
+
 /** Asks the faucet for a top-up and turns the answer into one plain sentence. */
-export function useFaucet(): { status: FaucetStatus; request(): void } {
+function FaucetProvider({ children }: { children: ReactNode }) {
   const config = useConfig();
   const account = useAccount();
   const [status, setStatus] = useState<FaucetStatus>({ kind: "idle" });
+  const working = useRef(false);
   const { getAccessToken, refresh, wallet } = account;
+  // An answer is about the wallet that asked; another wallet starts afresh.
+  const address = wallet?.address ?? null;
+  useEffect(() => setStatus({ kind: "idle" }), [address]);
 
-  const request = useCallback(async () => {
+  const ask = useCallback(async () => {
     if (!wallet) return;
     if (config.fixtures) {
       setStatus({ kind: "done", text: "Fixtures mode: balances are simulated, so nothing was sent." });
@@ -50,7 +69,7 @@ export function useFaucet(): { status: FaucetStatus; request(): void } {
       } else if (response.status === 503) {
         setStatus({ kind: "error", text: "The demo is not set up yet, so there are no test funds to send." });
       } else if (response.status === 409) {
-        setStatus({ kind: "error", text: "This wallet is not registered yet. Use Get test funds first." });
+        setStatus({ kind: "error", text: "This wallet is not registered yet. Open any market: its trade panel starts with the Get test funds step." });
       } else if (response.status === 401) {
         setStatus({ kind: "error", text: "Your login has expired. Log in again, then retry." });
       } else {
@@ -61,7 +80,15 @@ export function useFaucet(): { status: FaucetStatus; request(): void } {
     }
   }, [config.fixtures, getAccessToken, refresh, wallet]);
 
-  return { status, request: () => void request() };
+  const request = useCallback(() => {
+    if (working.current) return;
+    working.current = true;
+    void ask().finally(() => {
+      working.current = false;
+    });
+  }, [ask]);
+  const faucet = useMemo(() => ({ status, request }), [status, request]);
+  return <FaucetContext.Provider value={faucet}>{children}</FaucetContext.Provider>;
 }
 
 /** The navbar wired to the login state and the wallet's balances. */
@@ -97,7 +124,7 @@ function ConnectedNavbar() {
 /** The frame of every page: the see-through navbar, the page column, the footer. */
 export function Shell({ children }: { children: ReactNode }) {
   return (
-    <>
+    <FaucetProvider>
       <a className={styles.skip} href="#content">
         Skip to content
       </a>
@@ -108,7 +135,7 @@ export function Shell({ children }: { children: ReactNode }) {
       </main>
       <Footer />
       <LoginDialog />
-    </>
+    </FaucetProvider>
   );
 }
 

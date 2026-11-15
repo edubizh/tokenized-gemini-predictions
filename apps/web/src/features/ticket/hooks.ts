@@ -34,6 +34,31 @@ export function useBalances(): { balances: Balances | null; stale: boolean; refr
   return { balances, stale, refresh };
 }
 
+/**
+ * Polls a read of one wallet. A poll keeps its last value across a change of wallet, so each
+ * value is tagged with the wallet it is about and left out until it is about the current one.
+ */
+function useWalletPolling<T>(wallet: string | null, read: (wallet: string, signal: AbortSignal) => Promise<T>, intervalMs: number): Polled<T> {
+  const tagged = useCallback(
+    async (signal: AbortSignal) => {
+      if (!wallet) throw new Error("no wallet");
+      return { wallet, value: await read(wallet, signal) };
+    },
+    [wallet, read],
+  );
+  const polled = usePolling(tagged, wallet ? intervalMs : null);
+  const { refresh } = polled;
+  // Another wallet is read at once, not at the next turn of the interval.
+  const asked = useRef(wallet);
+  useEffect(() => {
+    if (wallet && wallet !== asked.current) refresh();
+    asked.current = wallet;
+  }, [wallet, refresh]);
+  const current = wallet !== null && polled.data?.wallet === wallet;
+  const waiting = wallet !== null && !current && polled.error === null;
+  return { data: current ? polled.data?.value : undefined, error: polled.error, loading: polled.loading || waiting, refresh };
+}
+
 export interface OpenOrdersRead {
   orders: OpenOrder[];
   /** When the read began, unix milliseconds. An order placed after this may be missing from it. */
@@ -49,42 +74,37 @@ export function useOpenOrders(): Polled<OpenOrdersRead> {
   const config = useConfig();
   const wallet = useAccount().wallet?.address ?? null;
   const [busy, setBusy] = useState(false);
-  const read = useCallback(async (): Promise<OpenOrdersRead> => {
-    if (!wallet) throw new Error("no wallet");
-    const startedAt = Date.now();
-    const orders = await getReads(config).fetchOpenOrders(wallet);
-    const chainSecs = clock.chainNowMs() / 1000;
-    setBusy(orders.some((order) => order.expiresAt >= chainSecs));
-    return { orders, startedAt };
-  }, [config, wallet]);
-  return usePolling(read, wallet ? (busy ? OPEN_ORDERS_FAST_MS : OPEN_ORDERS_INTERVAL_MS) : null);
+  const read = useCallback(
+    async (owner: string): Promise<OpenOrdersRead> => {
+      const startedAt = Date.now();
+      const orders = await getReads(config).fetchOpenOrders(owner);
+      const chainSecs = clock.chainNowMs() / 1000;
+      setBusy(orders.some((order) => order.expiresAt >= chainSecs));
+      return { orders, startedAt };
+    },
+    [config],
+  );
+  return useWalletPolling(wallet, read, busy ? OPEN_ORDERS_FAST_MS : OPEN_ORDERS_INTERVAL_MS);
 }
 
 /** The relayer's record of the wallet's orders, newest first. Polls faster while any is in progress. */
 export function useOrders(hurry = false): Polled<ApiOrder[]> {
   const wallet = useAccount().wallet?.address ?? null;
   const [working, setWorking] = useState(false);
-  const read = useCallback(
-    async (signal: AbortSignal) => {
-      if (!wallet) throw new Error("no wallet");
-      const orders = await getOrders(wallet, signal);
-      setWorking(orders.some(relayerIsWorking));
-      return orders;
-    },
-    [wallet],
-  );
-  return usePolling(read, wallet ? (working || hurry ? ORDERS_FAST_MS : ORDERS_INTERVAL_MS) : null);
+  const read = useCallback(async (owner: string, signal: AbortSignal) => {
+    const orders = await getOrders(owner, signal);
+    setWorking(orders.some(relayerIsWorking));
+    return orders;
+  }, []);
+  return useWalletPolling(wallet, read, working || hurry ? ORDERS_FAST_MS : ORDERS_INTERVAL_MS);
 }
 
 /** The wallet's outcome-token balances, read every ten seconds. */
 export function usePositions(): Polled<Position[]> {
   const config = useConfig();
   const wallet = useAccount().wallet?.address ?? null;
-  const read = useCallback(async () => {
-    if (!wallet) throw new Error("no wallet");
-    return getReads(config).fetchPositions(wallet);
-  }, [config, wallet]);
-  return usePolling(read, wallet ? POSITIONS_INTERVAL_MS : null);
+  const read = useCallback((owner: string) => getReads(config).fetchPositions(owner), [config]);
+  return useWalletPolling(wallet, read, POSITIONS_INTERVAL_MS);
 }
 
 export interface ChainMarketsRead {

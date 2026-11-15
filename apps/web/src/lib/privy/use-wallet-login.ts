@@ -87,7 +87,11 @@ export function useWalletLogin(): WalletLogin {
       const wallet = listed.find((candidate) => candidate.name === name && isLoginWallet(candidate));
       const connecting = wallet?.features["standard:connect"];
       const signing = wallet?.features["solana:signMessage"];
-      if (!wallet || !connecting || !signing) return;
+      // A wallet that has left the list since it was drawn: say so rather than do nothing.
+      if (!wallet || !connecting || !signing) {
+        last.current = null;
+        return setState({ step: "failed", wallet: name, reason: "wallet_error" });
+      }
       start({
         name,
         // The names the login provider's own window files an extension under.
@@ -140,7 +144,8 @@ export function useWalletLogin(): WalletLogin {
 
   const retry = useCallback(() => {
     if (last.current) start(last.current);
-  }, [start]);
+    else back();
+  }, [back, start]);
   const wallets = useMemo(() => listed.filter(isLoginWallet).map(({ name, icon }) => ({ name, icon })), [listed]);
 
   return { open: loginOpen, state, wallets, withWallet, withEmail, withWalletConnect, retry, back, close };

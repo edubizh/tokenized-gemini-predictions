@@ -34,6 +34,8 @@ import { formatWhen } from "./when";
 import styles from "./Event.module.css";
 
 const LISTED_ORDERS = 3;
+// A timer further out than this fires at once; a page is not left open that long anyway.
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 const CONTRACTS: Column[] = [
   { id: "contract", header: "Contract", primary: true },
@@ -89,7 +91,7 @@ function Head({ event, market, phase, onDeadline }: { event: ApiEventDetail; mar
           )}
         </p>
         <StatusBadge phase={phase} event={event} />
-        {phase.phase === "live" && <Countdown to={event.expiresAt} label="closes in" announce onClosed={onDeadline} />}
+        {phase.phase === "live" && <Countdown to={event.expiresAt} label="closes in" calm announce onClosed={onDeadline} />}
         <span className={styles.soft}>{`${cadenceLabel(event.cadence)}${volume ? ` · ${volume}` : ""}`}</span>
       </div>
     </header>
@@ -99,41 +101,43 @@ function Head({ event, market, phase, onDeadline }: { event: ApiEventDetail; mar
 /** The contracts of the event as rows: label, chance or result, and Yes and No at their prices. */
 function Contracts({ event, selected, open }: { event: ApiEventDetail; selected: ApiMarket; open: boolean }) {
   return (
-    <RowList label="Contracts of this event" columns={CONTRACTS}>
-      {event.markets.map((market) => {
-        const { yes, no } = prices(market);
-        const chosen = market.symbol === selected.symbol;
-        const quoted = isQuoted(market);
-        const result = resultWord(market);
-        return (
-          <Row
-            key={market.symbol}
-            cells={[
-              <Link
-                key="contract"
-                href={marketHref(market)}
-                scroll={false}
-                className={[styles.contract, chosen ? styles.selected : "", quoted || result ? "" : styles.dim].join(" ")}
-                aria-current={chosen ? "true" : undefined}
-                data-testid="contract-row"
-                data-symbol={market.symbol}
-              >
-                {market.label}
-              </Link>,
-              <span key="chance" className={result || quoted ? styles.chanceCell : styles.soft}>
-                {result ?? (!open ? "Awaiting result" : quoted ? chanceText(chancePx(market)) : "No offers")}
-              </span>,
-              open ? (
-                <span key="buy" className={styles.rowActions}>
-                  <PriceButton side="YES" px={yes} href={marketHref(market, "YES")} subject={market.label} />
-                  <PriceButton side="NO" px={no} href={marketHref(market, "NO")} subject={market.label} />
-                </span>
-              ) : null,
-            ]}
-          />
-        );
-      })}
-    </RowList>
+    <div className={styles.ladder}>
+      <RowList label="Contracts of this event" columns={CONTRACTS}>
+        {event.markets.map((market) => {
+          const { yes, no } = prices(market);
+          const chosen = market.symbol === selected.symbol;
+          const quoted = isQuoted(market);
+          const result = resultWord(market);
+          return (
+            <Row
+              key={market.symbol}
+              cells={[
+                <Link
+                  key="contract"
+                  href={marketHref(market)}
+                  scroll={false}
+                  className={[styles.contract, chosen ? styles.selected : "", quoted || result ? "" : styles.dim].join(" ")}
+                  aria-current={chosen ? "true" : undefined}
+                  data-testid="contract-row"
+                  data-symbol={market.symbol}
+                >
+                  {market.label}
+                </Link>,
+                <span key="chance" className={result || quoted ? styles.chanceCell : styles.soft}>
+                  {result ?? (!open ? "Awaiting result" : quoted ? chanceText(chancePx(market)) : "No offers")}
+                </span>,
+                open ? (
+                  <span key="buy" className={styles.rowActions}>
+                    <PriceButton side="YES" px={yes} href={marketHref(market, "YES")} subject={market.label} />
+                    <PriceButton side="NO" px={no} href={marketHref(market, "NO")} subject={market.label} />
+                  </span>
+                ) : null,
+              ]}
+            />
+          );
+        })}
+      </RowList>
+    </div>
   );
 }
 
@@ -216,7 +220,9 @@ export function EventPage({ ticker, contract, initialSide, initialAction = "buy"
   const now = Date.now();
   const recentlyPlaced = Object.values(local.orders).some((order) => now - order.placedAt < SETTLING_MS);
   const orders = useOrders((openOrders.data?.orders.length ?? 0) > 0 || recentlyPlaced);
-  const relayerDown = offline || eventPoll.error !== null;
+  // Down is the relayer's health alone; a failed read of the event leaves its last prices on show.
+  const relayerDown = offline;
+  const stale = eventPoll.error !== null;
   const event = eventPoll.data;
   const txUrl = useCallback((signature: string) => explorerTxUrl(config, signature), [config]);
   // The tab is named after the event once it is known.
@@ -224,6 +230,19 @@ export function EventPage({ ticker, contract, initialSide, initialAction = "buy"
   useEffect(() => {
     if (pageTitle) document.title = `${pageTitle} · Outcome Tokens`;
   }, [pageTitle]);
+  const selected = event ? selectedContract(event, contract) : undefined;
+  const selectedSymbol = selected?.symbol;
+  const lastOrderAt = selected?.lastOrderAt;
+  // The panel closes at the last order time, not only at the close: draw again at that moment.
+  useEffect(() => {
+    const wait = lastOrderAt === undefined ? 0 : lastOrderAt - Date.now();
+    if (wait <= 0 || wait > MAX_TIMER_MS) return;
+    const timer = setTimeout(redraw, wait);
+    return () => clearTimeout(timer);
+  }, [lastOrderAt]);
+  // A failed placement belongs to the contract it was tried on.
+  const { clearError } = placing;
+  useEffect(() => clearError(), [selectedSymbol, clearError]);
   const { refresh: refreshPositions } = positions;
   // A fill or a refund has just changed the wallet: read it again now, not at the next turn.
   useOrdersFinished(
@@ -236,7 +255,7 @@ export function EventPage({ ticker, contract, initialSide, initialAction = "buy"
   );
 
   if (event === undefined) {
-    return relayerDown ? (
+    return relayerDown || stale ? (
       <Notice title="The relayer is not answering" action={<ButtonLink href="/portfolio" size="row">Open Portfolio</ButtonLink>}>
         This market cannot be shown without it, and the page retries on its own. Your tokens are still in Portfolio.
       </Notice>
@@ -250,7 +269,7 @@ export function EventPage({ ticker, contract, initialSide, initialAction = "buy"
       </div>
     );
   }
-  const market = event && selectedContract(event, contract);
+  const market = selected;
   if (!event || !market) {
     return (
       <Notice title="No such market" action={<ButtonLink href="/" size="row">See all markets</ButtonLink>}>
@@ -380,6 +399,7 @@ export function EventPage({ ticker, contract, initialSide, initialAction = "buy"
         reconnect={gate ? null : reconnect}
         progress={placing.progress}
         error={placing.error}
+        onEdit={placing.error ? clearError : undefined}
         gate={gate}
         onSubmit={(draft) => void place(draft)}
         onGetTestFunds={faucet.request}
@@ -392,6 +412,11 @@ export function EventPage({ ticker, contract, initialSide, initialAction = "buy"
     <div className={styles.page}>
       <Head event={event} market={market} phase={phase} onDeadline={redraw} />
       <aside className={styles.aside} aria-label="Trade">
+        {stale && (
+          <p className={styles.note} role="status" data-testid="prices-stale">
+            Prices may be out of date. The page keeps trying.
+          </p>
+        )}
         {panel}
       </aside>
       <div className={styles.main}>

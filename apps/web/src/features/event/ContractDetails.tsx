@@ -37,13 +37,15 @@ function Book({ depth }: { depth: ApiDepth | null | undefined }) {
   const rows = Math.max(bids.length, asks.length);
   if (rows === 0) return <p className={styles.note}>{depth === undefined ? "Reading the order book." : "Nobody bids or offers on this contract right now."}</p>;
   return (
-    <RowList label="Order book, in prices of Yes" columns={BOOK}>
-      {Array.from({ length: rows }, (_, index) => {
-        const bid = bids[index];
-        const ask = asks[index];
-        return <Row key={index} cells={[px(bid?.px), bid ? formatContracts(BigInt(bid.units)) : NO_VALUE, px(ask?.px), ask ? formatContracts(BigInt(ask.units)) : NO_VALUE]} />;
-      })}
-    </RowList>
+    <div className={styles.book}>
+      <RowList label="Order book, in prices of Yes" columns={BOOK}>
+        {Array.from({ length: rows }, (_, index) => {
+          const bid = bids[index];
+          const ask = asks[index];
+          return <Row key={index} cells={[px(bid?.px), bid ? formatContracts(BigInt(bid.units)) : NO_VALUE, px(ask?.px), ask ? formatContracts(BigInt(ask.units)) : NO_VALUE]} />;
+        })}
+      </RowList>
+    </div>
   );
 }
 
@@ -53,7 +55,7 @@ function Trades({ trades }: { trades: ApiTrade[] | null | undefined }) {
   return (
     <RowList label="Recent trades" columns={TRADE}>
       {recent.map((trade) => (
-        <Row key={trade.id} cells={[formatClock(trade.at, { seconds: true }), trade.taker === "buy" ? "Bought Yes" : "Sold Yes", px(trade.px), formatContracts(BigInt(trade.units))]} />
+        <Row key={trade.id} cells={[formatClock(trade.at), trade.taker === "buy" ? "Bought Yes" : "Sold Yes", px(trade.px), formatContracts(BigInt(trade.units))]} />
       ))}
     </RowList>
   );

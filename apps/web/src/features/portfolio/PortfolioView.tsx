@@ -150,7 +150,7 @@ export function PortfolioView({
         <Figure label="Test dollars" testId="portfolio-balance">
           {balances === null ? <Skeleton width="6rem" /> : formatDollars(balances.stableMicros)}
         </Figure>
-        <Figure label="Value of positions" testId="portfolio-value">
+        <Figure label="Value at current prices" testId="portfolio-value">
           {summary === null ? <Skeleton width="5rem" /> : summary.valueMicros === 0n && !summary.priced ? NO_VALUE : formatDollars(summary.valueMicros)}
         </Figure>
         <Figure label="Open orders" testId="portfolio-open-orders">
@@ -207,7 +207,7 @@ export function PortfolioView({
                   formatContracts(row.units),
                   money(row.valueMicros),
                   row.group === "live" ? (
-                    <Countdown key="status" to={row.market.expiresAt} label="closes in" closedText="closed" onClosed={onDeadline} />
+                    <Countdown key="status" to={row.market.expiresAt} label="closes in" closedText="closed" calm onClosed={onDeadline} />
                   ) : (
                     <Badge key="status">Awaiting result</Badge>
                   ),
@@ -296,14 +296,15 @@ export function PortfolioView({
                     SIDE_WORD[row.side],
                     formatContracts(row.units),
                     money(row.payoutMicros),
-                    row.group === "opening" ? (
-                      <Countdown key="status" to={(row.redeemAfter ?? 0) * 1000} now={chainNow} label="redeem in" closedText="opening" calm onClosed={onDeadline} />
-                    ) : won ? (
-                      <Badge key="status" tone="positive">
-                        Won
-                      </Badge>
-                    ) : (
+                    // A position that pays nothing is lost at once; only a winner waits for the redeem window.
+                    row.payoutMicros === 0n ? (
                       <Badge key="status">Lost</Badge>
+                    ) : row.group === "opening" ? (
+                      <Countdown key="status" to={(row.redeemAfter ?? 0) * 1000} now={chainNow} label="redeem in" closedText="opening" calm onClosed={onDeadline} />
+                    ) : (
+                      <Badge key="status" tone={won ? "positive" : undefined}>
+                        {won ? "Won" : "Lost"}
+                      </Badge>
                     ),
                     action,
                   ]}

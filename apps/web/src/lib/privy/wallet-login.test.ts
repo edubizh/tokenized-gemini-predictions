@@ -91,6 +91,13 @@ describe("logInWithWallet", () => {
     expect(states.at(-1)).toEqual({ step: "failed", wallet: "Phantom", reason: "network_error" });
   });
 
+  it("ends in a network error when the verification never answers", async () => {
+    const states: WalletLoginState[] = [];
+    const steps: WalletLoginSteps = { connect: async () => ADDRESS, message: async () => "sign in", sign: async () => SIGNATURE, verify: () => new Promise(() => {}) };
+    await logInWithWallet("Phantom", steps, (state) => states.push(state), () => false, 10);
+    expect(states.at(-1)).toEqual({ step: "failed", wallet: "Phantom", reason: "network_error" });
+  });
+
   it("goes back to the list when the user cancels while connecting", async () => {
     const { steps, calls } = await run({ connect: () => Promise.reject(new WalletCancelled()) });
     expect(steps).toEqual(["connecting", "choose"]);

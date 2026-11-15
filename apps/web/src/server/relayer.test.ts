@@ -5,7 +5,9 @@ import { handleRelayer, type RelayerProxyDeps } from "./relayer";
 
 const SYMBOL = "GEMI-BTC2611142300-HI64500";
 
-function setup(verify: RelayerProxyDeps["verify"] = async () => ({ userId: "did:privy:test" })) {
+const TRADER = "Trader1111111111111111111111111111111111111";
+
+function setup(verify: RelayerProxyDeps["verify"] = async () => ({ userId: "did:privy:test", wallets: ["Other111111111111111111111111111111111111111", TRADER] }), traders: string[] = [TRADER]) {
   const answered: RelayerRoute[] = [];
   const verified: Request[] = [];
   const deps: RelayerProxyDeps = {
@@ -13,6 +15,7 @@ function setup(verify: RelayerProxyDeps["verify"] = async () => ({ userId: "did:
       verified.push(request);
       return verify(request);
     },
+    isTrader: async (wallet) => traders.includes(wallet),
     answer: async (route) => {
       answered.push(route);
       return Response.json({ route: route.kind });
@@ -60,6 +63,14 @@ describe("the relayer proxy", () => {
     expect(response.status).toBe(200);
     expect(answered).toEqual([{ kind: "ensure", symbol: SYMBOL, upstream: `/markets/${SYMBOL}/ensure` }]);
     expect(verified.map((request) => request.headers.get("authorization"))).toEqual(["Bearer good"]);
+  });
+
+  it("refuses to create a market for a login none of whose wallets is a registered trader", async () => {
+    const { answered, call } = setup(undefined, []);
+    const response = await call("POST", `markets/${SYMBOL}/ensure`, { authorization: "Bearer good" });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "not_a_trader" });
+    expect(answered).toEqual([]);
   });
 
   it("does not mistake a failing login provider for a missing login", async () => {
