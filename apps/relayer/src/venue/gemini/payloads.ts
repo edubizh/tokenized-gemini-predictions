@@ -74,6 +74,20 @@ export function toEvent(row: unknown, skipped: (reason: string) => void): EventI
 }
 
 /**
+ * The venue writes the strike in a ladder label without its trailing zeros (`$6.1 or above` for
+ * the strike `6.10`). A label that states the strike's number is written again with the strike's
+ * own digits and thousands separators (`$6.10 or above`); any other label is kept as written.
+ */
+function strikeLabel(label: string, strike: string | null): string {
+  const stated = /^\$([\d,]+(?:\.\d+)?) or above$/.exec(label)?.[1];
+  if (stated === undefined || strike === null || !/^\d+(?:\.\d+)?$/.test(strike)) return label;
+  const short = (decimal: string): string => (decimal.includes(".") ? decimal.replace(/\.?0+$/, "") : decimal);
+  if (short(stated.replaceAll(",", "")) !== short(strike)) return label;
+  const [whole = "", fraction] = strike.split(".");
+  return `$${whole.replace(/\B(?=(\d{3})+$)/g, ",")}${fraction === undefined ? "" : `.${fraction}`} or above`;
+}
+
+/**
  * One contract of an event. Throws with the reason when the row has no symbol, a date that
  * cannot be read, or a price and quantity grid that cannot be traded on in px and units: none of
  * these is guessed. States and the resolution side are read leniently (unknown values pass
@@ -95,6 +109,7 @@ export function toContract(row: unknown, eventTicker: string): ContractInfo {
   const side = lower(row.resolutionSide);
   const rules = plainText(row.description).replace(MARKDOWN_LINK, "$1").trim();
   const prices = row.prices;
+  const strike = isRecord(row.strike) ? text(row.strike.value) : null;
   return {
     symbol,
     eventTicker,
@@ -106,10 +121,10 @@ export function toContract(row: unknown, eventTicker: string): ContractInfo {
     unitIncrement: grid("quantityIncrement", 2),
     minUnits: grid("quantityMinimum", 2),
     resolutionSide: side === "yes" || side === "no" ? side : null,
-    ...(typeof row.label === "string" ? { label: row.label } : {}),
+    ...(typeof row.label === "string" ? { label: strikeLabel(row.label, strike) } : {}),
     ...(typeof row.sortOrder === "number" && Number.isInteger(row.sortOrder) ? { sortOrder: row.sortOrder } : {}),
     ...(rules === "" ? {} : { rules }),
-    strike: isRecord(row.strike) ? text(row.strike.value) : null,
+    strike,
     settlementValue: text(row.settlementValue),
     ...(isRecord(prices) ? { bestBidPx: wholePx(prices.bestBid), bestAskPx: wholePx(prices.bestAsk), lastPx: wholePx(prices.lastTradePrice) } : {}),
   };

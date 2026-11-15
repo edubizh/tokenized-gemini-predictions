@@ -209,6 +209,22 @@ describe("toContract", () => {
     expect(toContract(contractRow({ settlementValue: 64100.125 }), EVENT).settlementValue).toBe("64100.125");
   });
 
+  // Served by the venue: strike "6.10" labelled "$6.1 or above", "3.600" labelled "$3.6 or above".
+  it("writes the label of a strike contract with the digits of its strike, and leaves any other label as the venue wrote it", () => {
+    const label = (strike: string, venueLabel: string, fields: Row = {}): unknown =>
+      toContract(strikeRow(strike, 0, { label: venueLabel, ...fields }), LADDER).label;
+    expect(label("6.10", "$6.1 or above")).toBe("$6.10 or above");
+    expect(label("3.600", "$3.6 or above")).toBe("$3.600 or above");
+    expect(label("63700", "$63,700 or above")).toBe("$63,700 or above");
+    expect(label("1234567.50", "$1,234,567.5 or above")).toBe("$1,234,567.50 or above");
+    expect(label("0.84", "$0.84 or above")).toBe("$0.84 or above");
+    // A label that is not the strike's number is the venue's own wording.
+    expect(label("6.10", "$6.2 or above")).toBe("$6.2 or above");
+    expect(label("6.10", "Above $6.1")).toBe("Above $6.1");
+    expect(label("6.10", "$6.1 or above", { strike: { type: "reference", availableAt: "2026-11-14T02:45:00.000Z" } })).toBe("$6.1 or above");
+    expect(toContract(contractRow({ strike: { type: "reference", value: "64000.10" } }), EVENT).label).toBe("Up");
+  });
+
   it("passes unknown states through and reads the resolution side leniently", () => {
     expect(toContract(contractRow({ status: "invalid", marketState: 7, resolutionSide: "void" }), EVENT)).toMatchObject({
       status: "invalid",
