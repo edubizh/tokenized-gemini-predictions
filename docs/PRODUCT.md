@@ -51,7 +51,7 @@ Calm, plain, exact.
 1. **Few parts.** Start from the fewest components that do the job. Add one only when a screen cannot work without it.
 2. **The market is the content.** Question, price, Yes and No, time left, volume. Nothing on a screen is larger than the number that matters.
 3. **Show the mechanism.** Every order shows where it is: held on Solana, sent to the venue, filled or not, minted or refunded, each with its time and its transaction.
-4. **Open to look, log in to trade.** Every market is visible to everyone. Only the trade panel asks for a login.
+4. **Open to look, log in to trade.** Every market is visible to everyone. On a market, only the trade panel asks for a login; the portfolio and the activity ask in place.
 5. **Honest and quiet about test money.** The notice is always present and never loud.
 6. **Failure is a normal state.** An order that does not fill is refunded, and the screen says so calmly, in the same visual language as a fill.
 7. **Never a silent wait.** Anything that waits on a wallet, the chain or the relayer says so and can be retried or cancelled.
@@ -62,14 +62,12 @@ The details of each page are specified separately. This is the inventory.
 
 | Page | Route | Who | What it is for |
 | --- | --- | --- | --- |
-| Markets | `/` and `/markets` | Everyone | The entry. Every event the venue lists, by category, with prices, time left and volume. No marketing page in front. |
-| Event | under `/markets` | Everyone | One event and all of its contracts, each with its Yes and No prices. |
-| Market | under `/markets` | Everyone | One contract: question and rules, price, time left, volume, the user's position and orders, and the trade panel. Logged out, the trade panel asks for a login; nothing else is hidden. |
-| Portfolio | `/portfolio` | Logged in | Balances, positions, what can be sold, redeemed or cleared. |
-| Activity | `/activity` | Logged in | Every order with each step it took and its transactions. |
+| Markets | `/` (`/markets` leads there) | Everyone | The entry. Every event the venue lists, as cards, with search, sort, and category and timeframe filters; prices, time left and volume. No marketing page in front. |
+| Event | `/markets/<event>` | Everyone | One event on one page: its contracts with their Yes and No prices, the selected contract's price chart, order book and recent trades, the rule (with the price to beat for an up-or-down contract), dates, on-chain accounts, the user's position and orders, and the trade panel. Logged out, the trade panel asks for a login; nothing else is hidden. First-run test funds are a step inside the panel. |
+| Portfolio | `/portfolio` | Logged in (asks for a login in place) | Balances, positions, what can be sold, redeemed or cleared, and first-run test funds. |
+| Activity | `/activity` | Logged in (asks for a login in place) | Every order with each step it took and its transactions. |
 | Vaults | `/vaults` | Everyone | A placeholder: vaults come later. |
-| System | `/system` | Everyone | How it works: the program, the relayer, the venue, the addresses, and whether everything balances. |
-| Welcome | `/welcome` | Logged in, first run | Get test funds. |
+| How it works | `/system` | Everyone | How it works: the program, the relayer, the venue, the addresses, and whether everything balances. |
 
 Not found and error pages use the same shell, one sentence and one way back.
 

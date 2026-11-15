@@ -2,19 +2,20 @@
 
 Not legal advice. This page records what the project is, what it deliberately is not, and the published rules that shape it. Quotes were read from the primary sources on 2026-11-13 and 2026-11-14; terms change, so re-check before relying on any of it.
 
-## What v1 is
+## What this project is
 
 - A simulation on **Solana devnet** and the **Gemini sandbox** (Gemini's demo environment). No production Gemini account, API key or market data. No real money. No mainnet.
 - One demo operator sandbox account holds the sandbox positions. Logged-in testers pay a test stablecoin and receive transferable test YES/NO tokens after the matching sandbox fill, and receive a test payout after the sandbox market settles.
+- Every event the sandbox lists is shown, with its contracts. Contracts the sandbox's market makers never quote are listed with "No offers"; they trade only on the simulated venue.
 - The tokens are test tokens with no value. They mirror positions in a sandbox account. They are not event contracts.
 
-## What v1 is not
+## What it is not
 
 Mainnet. Real funds. Production keys or production market data. Fees or revenue. KYC. Listing on any exchange or AMM. A hosted public site that shows Gemini market data.
 
 ## Why the pooled model stays on the sandbox
 
-The v1 shape (one account holds the positions, other people hold transferable tokens on them) is not something an ordinary member may run on the live exchange.
+This shape (one account holds the positions, other people hold transferable tokens on them) is not something an ordinary member may run on the live exchange.
 
 Gemini Titan Rulebook v1.14, effective 2026-08-07 (these rules are unchanged from v1.13):
 
@@ -40,13 +41,13 @@ A different architecture, not a configuration change:
 - Tokens are non-transferable receipts of that user's own position.
 - CFTC Staff Letter 26-25 (2026-09-17) sets out when a "passive software provider" front end need not register as an introducing broker. Among its conditions: users are direct members of the exchange, orders are entered from the user's own device, the provider never holds user assets, the provider and the exchange sign a joint-and-several-liability undertaking, and the provider files a notice with the CFTC's Market Participants Division. The letter does not mention tokens.
 
-The v1 escrow, fill and redemption program does not carry over to that design. The web shell, login, venue read adapter and settlement watcher do.
+This project's escrow, fill and redemption program does not carry over to that design. The web shell, login, venue read adapter and settlement watcher do.
 
 ## Guardrails
 
-Requirements of the build, each backed by a test from the first slice that runs code:
+Requirements of the build:
 
-- Services refuse to start unless the Solana cluster is devnet and the venue hosts are the sandbox hosts.
+- Services refuse to start unless the Solana cluster is devnet (or a local validator) and the venue is the sandbox, on the sandbox hosts only, or the simulated venue.
 - The program build rejects real stablecoin mints.
 - Token names, token symbols and the app title do not use the Gemini name. Gemini is named only descriptively, to identify the API the software is tested against.
 - Sandbox market data is shown in local runs. Any hosted demo runs on the mock venue or behind an allow-list.

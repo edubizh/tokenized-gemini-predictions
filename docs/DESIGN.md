@@ -60,7 +60,7 @@ It still has to read as a prediction market at a glance. Every market shows its 
 
 There is no motif and no decoration. No tickets, receipts or stamps, no illustrations, no gradients, no icons beyond the three small marks the components need (a check, a caret, an arrow). The whole product is built from twelve components and four colours.
 
-Tokens are CSS custom properties on `:root` in `apps/web/src/app/globals.css`, named exactly as in the front matter (`--forest`, `--jade-tint`, `--text-sm`, `--space-4`, `--rounded-md`). Components use CSS Modules. There is no utility framework and no icon library. `/dev/gallery` shows every part in every state and is the visual reference for this file.
+Tokens are CSS custom properties on `:root` in `apps/web/src/app/globals.css`, named exactly as in the front matter (`--forest`, `--jade-tint`, `--text-sm`, `--space-4`, `--rounded-md`). Components use CSS Modules. There is no utility framework and no icon library. `/dev/gallery`, served by the development server only, shows every component in its states inside the real shell and is the visual reference for this file.
 
 ### Layout
 
