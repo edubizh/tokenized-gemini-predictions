@@ -320,7 +320,7 @@
   }
 
   .contractCell > .contract {
-    min-width: 0;
+    min-width: 44px;
     margin-block: -12px;
     padding-block: 12px;
   }
