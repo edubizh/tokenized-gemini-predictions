@@ -175,13 +175,13 @@ describe("refresh", () => {
     expect(manager.view("TEST-NOPE")).toBeUndefined();
   });
 
-  it("reads the venue list once per list interval, and again at once after a read that failed", async () => {
-    const { venue, manager, clock } = world({ listRefreshMs: 15_000 });
+  it("reads the venue list once per list interval, twenty seconds unless told otherwise, and again at once after a read that failed", async () => {
+    const { venue, manager, clock } = world({ listRefreshMs: undefined }); // the manager's own interval
     venue.addContract(info(BTC));
     const list = vi.spyOn(venue, "listEvents");
 
     await manager.refresh();
-    clock.ms += 14_999;
+    clock.ms += 19_999;
     await manager.refresh();
     expect(list).toHaveBeenCalledTimes(1);
     clock.ms += 1;
@@ -189,7 +189,7 @@ describe("refresh", () => {
     expect(list).toHaveBeenCalledTimes(2);
 
     list.mockRejectedValueOnce(new Error("venue down"));
-    clock.ms += 15_000;
+    clock.ms += 20_000;
     await expect(manager.refresh()).rejects.toThrow("venue_list: venue down");
     await manager.refresh(); // no wait after a failure
     expect(list).toHaveBeenCalledTimes(4);
@@ -364,7 +364,7 @@ describe("refresh", () => {
 });
 
 describe("book", () => {
-  it("is the venue's live top while that is at least as new as the list quote, with its sizes", async () => {
+  it("is the venue's live top whenever the venue holds one, with its sizes", async () => {
     const { venue, manager, clock } = await listed();
     expect(manager.view(BTC)?.book).toEqual({ bidPx: "4000", bidUnits: "500", askPx: "4500", askUnits: "700", at: NOW });
 
@@ -378,34 +378,34 @@ describe("book", () => {
   const listWith = async (venue: MockVenue, bestBidPx: bigint, bestAskPx: bigint): Promise<EventInfo[]> =>
     (await venue.listEvents()).map((event) => ({ ...event, contracts: event.contracts.map((contract) => ({ ...contract, bestBidPx, bestAskPx })) }));
 
-  it("is the list quote, sizes unknown, once the list shows prices the live top does not have", async () => {
+  it("stays the live top when a later list read shows other prices: the list lags the book and carries no sizes", async () => {
     const { venue, manager, clock } = await listed();
-    const askMoved = await listWith(venue, 4_000n, 4_600n);
-    const bidMoved = await listWith(venue, 4_200n, 4_600n);
-    vi.spyOn(venue, "listEvents").mockResolvedValueOnce(askMoved).mockResolvedValueOnce(bidMoved);
-    clock.ms += 15_000;
+    vi.spyOn(venue, "listEvents").mockResolvedValueOnce(await listWith(venue, 4_000n, 4_600n));
+    clock.ms += 20_000;
     await manager.refresh();
-    expect(manager.view(BTC)?.book).toEqual({ bidPx: "4000", bidUnits: "0", askPx: "4600", askUnits: "0", at: NOW + 15_000 });
-    expect(manager.view(BTC)).toMatchObject({ tradable: true, notTradableReason: null });
-    clock.ms += 15_000;
-    await manager.refresh();
-    expect(manager.view(BTC)?.book).toEqual({ bidPx: "4200", bidUnits: "0", askPx: "4600", askUnits: "0", at: NOW + 30_000 });
+    expect(manager.view(BTC)?.book).toEqual({ bidPx: "4000", bidUnits: "500", askPx: "4500", askUnits: "700", at: NOW });
 
-    // The book moves after that: the live top is the newer one again.
     clock.ms += 2_000;
     venue.setBook(BTC, { bids: [[4_300n, 40n]], asks: [[4_700n, 50n]] });
-    expect(manager.view(BTC)?.book).toEqual({ bidPx: "4300", bidUnits: "40", askPx: "4700", askUnits: "50", at: NOW + 32_000 });
+    expect(manager.view(BTC)?.book).toEqual({ bidPx: "4300", bidUnits: "40", askPx: "4700", askUnits: "50", at: NOW + 22_000 });
   });
 
-  it("dates a list quote from the read that first showed it: a list that repeats old prices does not hide a newer live top", async () => {
-    const { venue, manager, clock } = await listed();
-    const lagging = await listWith(venue, 4_000n, 4_500n); // what the list said before the book moved
-    clock.ms += 4_000;
-    venue.setBook(BTC, { bids: [[4_100n, 10n]], asks: [[4_400n, 20n]] });
-    vi.spyOn(venue, "listEvents").mockResolvedValue(lagging);
-    clock.ms += 11_000;
+  it("is the list quote, sizes unknown, while the venue holds no live top, dated from the read that first showed it", async () => {
+    const { venue, manager, clock } = world();
+    venue.addContract(info(BTC)); // no book, so no live top
+    const first = await listWith(venue, 4_000n, 4_500n);
+    const askMoved = await listWith(venue, 4_000n, 4_600n);
+    vi.spyOn(venue, "listEvents").mockResolvedValueOnce(first).mockResolvedValueOnce(first).mockResolvedValueOnce(askMoved);
     await manager.refresh();
-    expect(manager.view(BTC)?.book).toEqual({ bidPx: "4100", bidUnits: "10", askPx: "4400", askUnits: "20", at: NOW + 4_000 });
+    expect(manager.view(BTC)?.book).toEqual({ bidPx: "4000", bidUnits: "0", askPx: "4500", askUnits: "0", at: NOW });
+    expect(manager.view(BTC)).toMatchObject({ tradable: true, notTradableReason: null });
+
+    clock.ms += 20_000;
+    await manager.refresh(); // the list repeats the quote
+    expect(manager.view(BTC)?.book?.at).toBe(NOW);
+    clock.ms += 20_000;
+    await manager.refresh();
+    expect(manager.view(BTC)?.book).toEqual({ bidPx: "4000", bidUnits: "0", askPx: "4600", askUnits: "0", at: NOW + 40_000 });
   });
 
   it("keeps the last listed prices when the venue list fails", async () => {
@@ -509,6 +509,82 @@ describe("views", () => {
       [BTC, `market:${BTC}`],
     ]);
     expect(manager.views()[1]).toEqual(manager.view(BTC));
+  });
+});
+
+describe("eventView of an expired event", () => {
+  /** The ladder half a minute after its expiry: the registry still holds its three contracts as active. */
+  async function expired() {
+    const w = await listed();
+    w.addLadder({});
+    await w.manager.refresh();
+    w.clock.ms = EXPIRY + HOUR + 30_000;
+    const contract = vi.spyOn(w.venue, "contract");
+    const shown = (): unknown => w.manager.eventView(LADDER)?.markets.map((market) => [market.venueStatus, market.resolution]);
+    return { ...w, contract, shown };
+  }
+  /** Lets the reads that run in the background finish. */
+  const background = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+  it("asks the venue about its contracts in the background and shows the answer in the next view", async () => {
+    const { venue, contract, shown } = await expired();
+    venue.resolve(RUNGS[0], "yes");
+    venue.resolve(RUNGS[1], "no");
+
+    expect(shown()).toEqual([["active", null], ["active", null], ["active", null]]);
+    await background();
+    expect(contract.mock.calls.map(([symbol]) => symbol)).toEqual([...RUNGS]);
+    expect(shown()).toEqual([["settled", "yes"], ["settled", "no"], ["active", null]]);
+  });
+
+  it("asks at most once in ten seconds per event, and then only about the contracts that are not settled", async () => {
+    const { venue, manager, clock, contract } = await expired();
+    venue.resolve(RUNGS[0], "yes");
+    manager.eventView(LADDER);
+    await background();
+    clock.ms += 9_999;
+    manager.eventView(LADDER);
+    await background();
+    expect(contract).toHaveBeenCalledTimes(3);
+
+    clock.ms += 1;
+    manager.eventView(LADDER);
+    manager.eventView("BTC15M2611140300"); // another expired event is asked about on its own account
+    await background();
+    expect(contract.mock.calls.slice(3).map(([symbol]) => symbol)).toEqual([RUNGS[1], RUNGS[2], BTC]);
+  });
+
+  it("answers without waiting for the venue, and puts up with a read that fails", async () => {
+    const { venue, manager, clock, contract, shown } = await expired();
+    for (const symbol of RUNGS) venue.resolve(symbol, "yes");
+    contract.mockReturnValueOnce(new Promise(() => {})).mockRejectedValueOnce(new Error("venue down"));
+
+    expect(shown()).toEqual([["active", null], ["active", null], ["active", null]]);
+    await background();
+    expect(shown()).toEqual([["active", null], ["active", null], ["settled", "yes"]]);
+
+    clock.ms += 10_000;
+    manager.eventView(LADDER);
+    await background();
+    expect(shown()).toEqual([["settled", "yes"], ["settled", "yes"], ["settled", "yes"]]);
+  });
+
+  it("leaves the venue alone for an event that has not expired or whose contracts are all settled", async () => {
+    const { venue, manager, clock, contract } = await expired();
+    clock.ms = EXPIRY + HOUR - 1;
+    manager.eventView(LADDER);
+    await background();
+    expect(contract).not.toHaveBeenCalled();
+
+    clock.ms = EXPIRY + HOUR;
+    for (const symbol of RUNGS) venue.resolve(symbol, "no");
+    manager.eventView(LADDER);
+    await background();
+    expect(contract).toHaveBeenCalledTimes(3);
+    clock.ms += 10_000;
+    manager.eventView(LADDER);
+    await background();
+    expect(contract).toHaveBeenCalledTimes(3);
   });
 });
 

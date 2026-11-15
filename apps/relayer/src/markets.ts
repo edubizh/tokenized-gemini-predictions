@@ -1,6 +1,6 @@
 // Market manager: keeps the registry in step with the venue's event list, caches the list quotes
 // and the on-chain state per market, builds the API views from those caches, and creates on-chain
-// markets on request.
+// markets on request. An event that has left the list is read again when someone asks to see it.
 
 import type { ApiBook, ApiEvent, ApiEventDetail, ApiMarket, ApiOnchainMarket, NotTradableReason } from "./api/types.ts";
 import type { ChainMarket, MarketChain } from "./chain/chain.ts";
@@ -27,7 +27,7 @@ export interface MarketManagerOptions {
 export const DEFAULT_MARKET_OPTIONS = {
   maxSupplyUnits: 1_000_000n,
   cutoffBufferSecs: 30,
-  listRefreshMs: 15_000,
+  listRefreshMs: 20_000,
   chainRefreshMs: 15_000,
 } as const satisfies Partial<MarketManagerOptions>;
 
@@ -39,7 +39,11 @@ export interface MarketManager {
   refresh(): Promise<void>;
   /** Every listed event that has not expired, soonest expiry first. Built from cached data only, like every view. */
   eventViews(): ApiEvent[];
-  /** Any event the registry knows, expired or not. */
+  /**
+   * Any event the registry knows, expired or not. Asking for an expired event whose contracts are
+   * not all settled also starts a read of those contracts from the venue; the view does not wait
+   * for it.
+   */
   eventView(ticker: string): ApiEventDetail | undefined;
   /** The markets that exist on-chain, newest expiry first. */
   views(): ApiMarket[];
@@ -82,6 +86,8 @@ export class RefreshError extends Error {
 const ONCHAIN_LIMIT = 500;
 /** Chain reads per refresh spent on markets that are neither live nor awaiting settlement. */
 const CATCH_UP_READS = 10;
+/** The contracts of an expired event are asked of the venue at most this often, however often its view is asked for. */
+const EXPIRED_READ_MS = 10_000;
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -170,22 +176,21 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
   const chainMarkets = new Map<string, ChainMarket>();
   /** When each market's on-chain state was last read, unix milliseconds. */
   const chainReadAt = new Map<string, number>();
+  /** The expired events whose contracts were asked of the venue within the last `EXPIRED_READ_MS`, and when. */
+  const expiredReadAt = new Map<string, number>();
   const flights = new Map<string, Promise<ApiMarket>>();
   let venueOnline = true;
   let paused = false;
 
-  /**
-   * The venue's live top of book while it is at least as new as the quote that came with the
-   * list; otherwise that quote, which carries no sizes.
-   */
+  /** The venue's live top of book when it holds one; otherwise the quote that came with the list, which carries no sizes. */
   function bookOf(symbol: string): ApiBook | null {
-    const quote = quotes.get(symbol);
-    const live = o.venue.liveTop(symbol);
     const px = (value: bigint | null): string | null => (value === null ? null : value.toString());
-    if (live !== undefined && (quote === undefined || live.atMs >= quote.at)) {
+    const live = o.venue.liveTop(symbol);
+    if (live !== undefined) {
       const { top } = live;
       return { bidPx: px(top.bidPx), bidUnits: top.bidUnits.toString(), askPx: px(top.askPx), askUnits: top.askUnits.toString(), at: live.atMs };
     }
+    const quote = quotes.get(symbol);
     if (quote === undefined) return null;
     return { bidPx: px(quote.bidPx), bidUnits: "0", askPx: px(quote.askPx), askUnits: "0", at: quote.at };
   }
@@ -284,8 +289,7 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
       }
       const bidPx = info.bestBidPx ?? null;
       const askPx = info.bestAskPx ?? null;
-      // The list lags the book: prices it only repeats were learned when they first came, so
-      // that they do not pass for newer than a live top that has moved since.
+      // Prices the list only repeats were learned when they first came.
       const known = quotes.get(info.symbol);
       const at = known !== undefined && known.bidPx === bidPx && known.askPx === askPx ? known.at : now;
       quotes.set(info.symbol, { bidPx, askPx, at, expiresAt: info.expiresAt.getTime() });
@@ -326,6 +330,31 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
       } catch (error) {
         failures.push({ part: "chain", error });
       }
+    }
+  }
+
+  /**
+   * An expired event has left the venue's list, so the registry learns how its contracts ended
+   * only by asking for them. This asks in the background for those it does not hold as settled,
+   * at most every `EXPIRED_READ_MS` per event; a view built after the answers shows them.
+   */
+  function readExpired(event: RegistryEvent): void {
+    const now = o.now();
+    const unsettled = event.markets.filter((market) => market.venueStatus !== "settled");
+    if (!(event.expiresAt <= now) || unsettled.length === 0) return;
+    for (const [ticker, at] of expiredReadAt) if (now - at >= EXPIRED_READ_MS) expiredReadAt.delete(ticker);
+    if (expiredReadAt.has(event.ticker)) return;
+    expiredReadAt.set(event.ticker, now);
+    // Asked together, so that the adapter answers them from one read of the event.
+    for (const { symbol } of unsettled) {
+      void Promise.resolve()
+        .then(() => o.venue.contract(symbol))
+        .then((info) => {
+          if (info !== null) o.registry.updateContract(info, o.now());
+        })
+        .catch(() => {
+          // Display data only: asked again by a request after the interval.
+        });
     }
   }
 
@@ -370,6 +399,7 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
     eventView(ticker) {
       const event = o.registry.event(ticker);
       if (event === undefined) return undefined;
+      readExpired(event);
       return {
         ...toEventView(event),
         description: event.description,

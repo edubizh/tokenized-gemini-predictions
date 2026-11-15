@@ -162,7 +162,7 @@ async function start(config: RelayerConfig): Promise<void> {
     const mock = new RollingMockVenue({ windowSecs: config.mock.windowSecs, resolve: config.mock.resolve, now: Date.now });
     await adoptEarlierMarkets(mock, chain, registry, journal);
     venue = mock;
-    log(`venue: mock, ${config.mock.windowSecs} s contracts, resolution ${config.mock.resolve}`);
+    log(`venue: mock, 15-minute window of ${config.mock.windowSecs} s, up-or-down contracts resolve ${config.mock.resolve}`);
   } else {
     const sandbox = new GeminiSandboxVenue({
       // Checked by `assertVenueAllowed`.

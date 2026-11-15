@@ -283,6 +283,19 @@ describe("updateContract", () => {
     expect(registry.get(SYMBOL)?.updatedAt).toBe(3_000);
   });
 
+  it("keeps a strike, a resolution and a settlement value that a later read, single or list, comes without", () => {
+    const registry = memory();
+    registry.storeEvents([event()], 1);
+    registry.updateContract(info({ status: "settled", marketState: "closed", resolutionSide: "yes", settlementValue: "64100.125" }), 2);
+    const known = { strike: "64000.50", venueStatus: "settled", resolution: "yes", settlementValue: "64100.125" };
+
+    // The venue answers from caches: an older answer knows neither the strike nor the result.
+    const older = info({ strike: null, resolutionSide: null, settlementValue: null });
+    expect(registry.updateContract(older, 3)).toMatchObject(known);
+    registry.storeEvents([event({ contracts: [older] })], 4);
+    expect(registry.get(SYMBOL)).toMatchObject({ ...known, updatedAt: 4 });
+  });
+
   it("throws for a contract that is not in the registry or whose dates cannot be read", () => {
     const registry = memory();
     expect(() => registry.updateContract(info(), 1)).toThrow(`unknown market ${SYMBOL}`);

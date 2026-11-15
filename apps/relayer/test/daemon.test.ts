@@ -283,7 +283,7 @@ describe("market tick", () => {
     expect(list).not.toHaveBeenCalled();
     expect(w.daemon.health()).toMatchObject({ ok: true, venueConnected: true });
 
-    w.clock.ms += 15_000;
+    w.clock.ms += 20_000;
     await w.daemon.tickMarkets();
     expect(w.manager.view(SYMBOL)).toMatchObject({ tradable: false, notTradableReason: "venue_offline" });
     expect(w.daemon.health()).toMatchObject({ ok: false, venueConnected: false });
@@ -297,7 +297,7 @@ describe("market tick", () => {
     // The list works; a chain read does not. That is not the venue being away.
     await w.manager.ensureOnchain(SYMBOL);
     w.chain.marketSide.fail("market", 1);
-    w.clock.ms += 15_000;
+    w.clock.ms += 20_000;
     await w.daemon.tickMarkets();
     expect(w.manager.view(SYMBOL)?.notTradableReason).toBeNull();
     expect(w.daemon.health()).toMatchObject({ ok: true, venueConnected: true });
