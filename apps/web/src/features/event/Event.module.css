@@ -286,29 +286,60 @@
   gap: var(--space-4);
 }
 
+/* The contract's link keeps the taller target the list gives a row's main link. */
+.contractCell > .contract {
+  display: inline-block;
+  margin-block: -6px;
+  padding-block: 6px;
+}
+
+.chanceInline {
+  display: none;
+}
+
 /*
- * In a narrow list the contracts stay one line each (the label, its chance, then Yes and No at the
- * right; a long label wraps) and the order book keeps its four columns, instead of stacking into cards. The cells'
- * own labels are left out: the line reads without them.
+ * A narrow list: each contract takes two lines, its label and chance on the first and Yes and No
+ * on the second, half the width each. The order book keeps its four columns instead of stacking;
+ * its cells' own labels are left out, the header names them.
  */
 @container (max-width: 40rem) {
-  .ladder [role="row"]:has([role="cell"]) {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-  }
-
-  .ladder [role="cell"]:nth-child(2) > span:first-child {
+  .ladder [role="cell"]:has(> .chance) {
     display: none;
   }
 
-  .ladder .rowActions > * {
-    min-width: 0;
-    padding-inline: 10px;
+  .contractCell {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
   }
 
+  /* A 44px target that stops short of the buttons under it. */
+  .ladder [role="row"] {
+    row-gap: 12px;
+  }
+
+  .contractCell > .contract {
+    min-width: 0;
+    margin-block: -12px;
+    padding-block: 12px;
+  }
+
+  .chanceInline {
+    display: inline;
+    flex: none;
+  }
+
+  .rowActions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .rowActions > * {
+    min-width: 0;
+    min-height: 44px;
+  }
 
   .book [role="row"] {
     display: grid;

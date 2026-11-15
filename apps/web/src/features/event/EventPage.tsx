@@ -108,23 +108,28 @@ function Contracts({ event, selected, open }: { event: ApiEventDetail; selected:
           const chosen = market.symbol === selected.symbol;
           const quoted = isQuoted(market);
           const result = resultWord(market);
+          const chance = result ?? (!open ? "Awaiting result" : quoted ? chanceText(chancePx(market)) : "No offers");
+          const chanceStyle = result || quoted ? styles.chanceCell : styles.soft;
           return (
             <Row
               key={market.symbol}
               cells={[
-                <Link
-                  key="contract"
-                  href={marketHref(market)}
-                  scroll={false}
-                  className={[styles.contract, chosen ? styles.selected : "", quoted || result ? "" : styles.dim].join(" ")}
-                  aria-current={chosen ? "true" : undefined}
-                  data-testid="contract-row"
-                  data-symbol={market.symbol}
-                >
-                  {market.label}
-                </Link>,
-                <span key="chance" className={result || quoted ? styles.chanceCell : styles.soft}>
-                  {result ?? (!open ? "Awaiting result" : quoted ? chanceText(chancePx(market)) : "No offers")}
+                // A narrow list shows the chance beside the label instead of in a column of its own.
+                <span key="contract" className={styles.contractCell}>
+                  <Link
+                    href={marketHref(market)}
+                    scroll={false}
+                    className={[styles.contract, chosen ? styles.selected : "", quoted || result ? "" : styles.dim].join(" ")}
+                    aria-current={chosen ? "true" : undefined}
+                    data-testid="contract-row"
+                    data-symbol={market.symbol}
+                  >
+                    {market.label}
+                  </Link>
+                  <span className={`${styles.chanceInline} ${chanceStyle}`}>{chance}</span>
+                </span>,
+                <span key="chance" className={`${styles.chance} ${chanceStyle}`}>
+                  {chance}
                 </span>,
                 open ? (
                   <span key="buy" className={styles.rowActions}>
