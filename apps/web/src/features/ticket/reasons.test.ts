@@ -7,7 +7,8 @@ const LAST_ORDER = Date.UTC(2026, 10, 15, 2, 0);
 const market = (notTradableReason: NotTradableReason | null, tradable = notTradableReason === null) =>
   ({ tradable, notTradableReason, startsAt: OPENS, lastOrderAt: LAST_ORDER }) as Pick<ApiMarket, "tradable" | "notTradableReason" | "startsAt" | "lastOrderAt">;
 const health = (patch: Partial<ApiHealth> = {}) => ({ paused: { place: false, fill: false }, ...patch }) as Pick<ApiHealth, "paused">;
-const UTC = { timeZone: "UTC" };
+// A minute before the last order time, so only the tests about that time move the clock.
+const UTC = { timeZone: "UTC", now: LAST_ORDER - 60_000 };
 
 describe("closedReason", () => {
   it("is nothing for a contract that takes orders", () => {

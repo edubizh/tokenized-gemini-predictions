@@ -15,16 +15,16 @@ const TOO_LATE: Reason = { title: "Orders closed", text: "It is too close to the
 /**
  * Null when the contract takes orders. The relayer and a pause come first, because they hold for
  * every contract; then the last order time, which the last poll may not have caught yet; then the
- * contract's own reason.
+ * contract's own reason. `now` is unix milliseconds and is always passed in: this module reads no clock.
  */
 export function closedReason(
   market: Pick<ApiMarket, "tradable" | "notTradableReason" | "startsAt" | "lastOrderAt">,
   health: Pick<ApiHealth, "paused"> | null,
-  options: TimeOptions & { now?: number } = {},
+  options: TimeOptions & { now: number },
 ): Reason | null {
   if (health === null) return { title: "The relayer is not answering", text: "A new order would not reach the venue until it is back." };
   if (health.paused.place) return PAUSED;
-  if ((options.now ?? Date.now()) >= market.lastOrderAt) return TOO_LATE;
+  if (options.now >= market.lastOrderAt) return TOO_LATE;
   if (market.tradable) return null;
   switch (market.notTradableReason) {
     case "not_started":
