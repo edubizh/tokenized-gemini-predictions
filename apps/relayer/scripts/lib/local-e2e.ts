@@ -57,7 +57,6 @@ import { bootstrap, LOCALNET_RPC_URL } from "./bootstrap.ts";
 const SYMBOL = "TEST-BTC15M-UP";
 /** The short-lived market the settlement watcher settles. */
 const FAST_SYMBOL = "TEST-FAST3M-UP";
-const FAST_SERIES = "FAST3M";
 /** Seconds from its creation to its expiry, and how long before that it "started". */
 const FAST_EXPIRES_IN_SECS = 150;
 const FAST_STARTED_AGO_SECS = 60;
@@ -389,8 +388,6 @@ async function run(): Promise<void> {
   venue.addContract({
     symbol: FAST_SYMBOL,
     eventTicker: "TEST-FAST3M",
-    series: FAST_SERIES,
-    title: "Fast test market",
     label: "Up",
     status: "active",
     marketState: "open",
@@ -403,10 +400,12 @@ async function run(): Promise<void> {
   });
   venue.setBook(FAST_SYMBOL, { bids: [[4_000n, 1_000_000n]], asks: [[4_500n, 1_000_000n]] });
   const registry = openRegistry(":memory:");
-  const manager = createMarketManager({ venue, chain, registry, series: [FAST_SERIES], now: () => Date.now() });
+  const manager = createMarketManager({ venue, chain, registry, now: () => Date.now() });
   await manager.refresh();
-  assert.equal(registry.get(SYMBOL), undefined, "only the curated series is in the registry");
-  const fastOnchain = (await manager.ensureOnchain(FAST_SYMBOL)).onchain;
+  // Every event the venue lists is offered; the fast market is the one that expires first.
+  const listed = manager.eventViews().flatMap((event) => event.markets);
+  assert.deepEqual(listed.map((view) => view.symbol), [FAST_SYMBOL, SYMBOL], "both listed contracts are offered, soonest expiry first");
+  const fastOnchain = (await manager.ensureOnchain(listed[0]!.symbol)).onchain;
   assert.ok(fastOnchain !== null, "the fast market exists on-chain");
   assert.equal(fastOnchain.status, "open");
   assert.equal(fastOnchain.closeTs, fastExpiresAt);

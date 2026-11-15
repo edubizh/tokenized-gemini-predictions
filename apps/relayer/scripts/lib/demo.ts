@@ -38,7 +38,7 @@ import {
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 import { fetchMaybeToken as fetchMaybeOutcomeToken, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-import type { ApiHealth, ApiMarket, ApiOrder } from "../../src/api/types.ts";
+import type { ApiEvent, ApiHealth, ApiMarket, ApiOrder } from "../../src/api/types.ts";
 import { ensureKeypairFile, loadKeypairSigner } from "../../src/chain/keys.ts";
 import { createRetryingRpc } from "../../src/chain/rpc.ts";
 import { createSender } from "../../src/chain/send.ts";
@@ -58,7 +58,7 @@ const TERMINAL = new Set(["chain_filled", "chain_cancelled", "orphaned", "failed
 const USAGE = `usage: node scripts/demo.ts <command>
 
   setup                                          create the test user, register it, send starter funds
-  markets                                        list the live markets the relayer offers
+  markets                                        list the contracts of every event the relayer lists
   buy  <symbol|auto> <yes|no> <contracts> [limit]    place a buy and follow it (limit in dollars, default: the ask)
   sell <symbol> <yes|no> <contracts> [minimum]       sell tokens back (minimum in dollars, default: the bid)
   redeem <symbol>                                redeem every token of a settled market
@@ -158,15 +158,15 @@ export async function runCli(argv: readonly string[], env: Record<string, string
   }
 
   if (command === "markets") {
-    const { markets } = await api<{ markets: ApiMarket[] }>(relayerUrl, "/markets?scope=live");
-    for (const market of markets) say(describeMarket(market));
-    if (markets.length === 0) say("the relayer lists no live market right now");
+    const { events } = await api<{ events: ApiEvent[] }>(relayerUrl, "/events");
+    for (const market of events.flatMap((event) => event.markets)) say(describeMarket(market));
+    if (events.length === 0) say("the relayer lists no event right now");
     return 0;
   }
 
   if (command === "status") {
     await printBalances();
-    const { markets } = await api<{ markets: ApiMarket[] }>(relayerUrl, "/markets?scope=all");
+    const { markets } = await api<{ markets: ApiMarket[] }>(relayerUrl, "/markets");
     for (const market of markets) {
       if (market.onchain === null) continue;
       const yes = await outcomeBalance(address(market.onchain.yesMint));
@@ -259,9 +259,10 @@ export async function runCli(argv: readonly string[], env: Record<string, string
     outcomeMint = side === Side.Yes ? account.data.yesMint : account.data.noMint;
   } else {
     if (symbol === "auto") {
-      const { markets } = await api<{ markets: ApiMarket[] }>(relayerUrl, "/markets?scope=live");
-      const pick = markets.find((candidate) => candidate.tradable);
-      if (!pick) throw new Error("no tradable market right now: try again when a 15-minute window is open and has offers");
+      // The soonest-expiring contract that takes orders right now.
+      const { events } = await api<{ events: ApiEvent[] }>(relayerUrl, "/events");
+      const pick = events.flatMap((event) => event.markets).find((candidate) => candidate.tradable);
+      if (!pick) throw new Error("no tradable market right now: try again when a contract is open and has offers");
       symbol = pick.symbol;
     }
     market = await api<ApiMarket>(relayerUrl, `/markets/${symbol}`);
@@ -358,7 +359,7 @@ function describeMarket(market: ApiMarket): string {
   const book = market.book;
   const price = (px: string | null | undefined): string => (px ? `$${formatPx(BigInt(px))}` : "-");
   const left = Math.round((market.lastOrderAt - Date.now()) / 1000);
-  return `${market.symbol}  ${market.underlying} ${market.label}  strike ${market.strike ?? "-"}  bid ${price(book?.bidPx)} ask ${price(book?.askPx)}  ${
+  return `${market.symbol}  ${market.title}: ${market.label}  strike ${market.strike ?? "-"}  bid ${price(book?.bidPx)} ask ${price(book?.askPx)}  ${
     market.tradable ? `tradable, orders close in ${left} s` : `not tradable (${market.notTradableReason})`
   }  ${market.onchain ? `on-chain ${market.onchain.status}` : "not on-chain yet"}  ${market.settleState}`;
 }

@@ -32,9 +32,7 @@ function info(overrides: Partial<ContractInfo> = {}): ContractInfo {
     unitIncrement: 1n,
     minUnits: 1n,
     resolutionSide: null,
-    title: "BTC price at 3am",
     label: "Up",
-    series: "BTC15M",
     ...overrides,
   };
 }
@@ -86,7 +84,9 @@ afterEach(() => {
 });
 
 function world() {
-  const venue = new MockVenue();
+  const clock = { ms: NOW };
+  const now = () => clock.ms;
+  const venue = new MockVenue({ now });
   venue.addContract(info());
   venue.setBook(SYMBOL, { bids: [[4_000n, 5_000n]], asks: [[4_500n, 5_000n]] });
   venue.setCash(1_000_000_000n);
@@ -95,12 +95,10 @@ function world() {
   const journal = openJournal(":memory:");
   const registry = openRegistry(":memory:");
   closers.push(journal, registry);
-  const clock = { ms: NOW };
-  const now = () => clock.ms;
   const logs: string[] = [];
   const log = (line: string) => logs.push(line);
   const alerts = createAlertLog({ log, now });
-  const manager = createMarketManager({ venue, chain, registry, series: ["BTC15M"], now });
+  const manager = createMarketManager({ venue, chain, registry, now });
   const settlement = createSettlementWatcher({ venue, chain, registry, journal, now, alert: alerts.alert });
   const reconciler = createReconciler({ venue, chain, registry, journal, alert: alerts.alert });
   const timers = manualTimers();
@@ -280,16 +278,30 @@ describe("market tick", () => {
     expect(w.manager.view(SYMBOL)).toMatchObject({ tradable: true, book: { bidPx: "4000", askPx: "4500" } });
     expect(w.daemon.health()).toMatchObject({ venueConnected: true });
 
-    vi.spyOn(w.venue, "listContracts").mockRejectedValueOnce(new Error("venue down"));
+    const list = vi.spyOn(w.venue, "listEvents").mockRejectedValueOnce(new Error("venue down"));
+    await w.daemon.tickMarkets(); // four seconds later the list is not asked for again
+    expect(list).not.toHaveBeenCalled();
+    expect(w.daemon.health()).toMatchObject({ ok: true, venueConnected: true });
+
+    w.clock.ms += 15_000;
     await w.daemon.tickMarkets();
     expect(w.manager.view(SYMBOL)).toMatchObject({ tradable: false, notTradableReason: "venue_offline" });
     expect(w.daemon.health()).toMatchObject({ ok: false, venueConnected: false });
     expect(w.alerts.recent()).toMatchObject([{ kind: "tick_error", detail: "markets: market refresh failed: venue_list: venue down" }]);
 
-    vi.spyOn(w.venue, "topOfBook").mockRejectedValueOnce(new Error("book down"));
-    await w.daemon.tickMarkets(); // the list works again; a book does not
+    await w.daemon.tickMarkets(); // asked again on the very next tick
     expect(w.manager.view(SYMBOL)?.notTradableReason).toBeNull();
     expect(w.daemon.health()).toMatchObject({ ok: true, venueConnected: true });
+    expect(w.logs).toContainEqual("markets tick recovered");
+
+    // The list works; a chain read does not. That is not the venue being away.
+    await w.manager.ensureOnchain(SYMBOL);
+    w.chain.marketSide.fail("market", 1);
+    w.clock.ms += 15_000;
+    await w.daemon.tickMarkets();
+    expect(w.manager.view(SYMBOL)?.notTradableReason).toBeNull();
+    expect(w.daemon.health()).toMatchObject({ ok: true, venueConnected: true });
+    expect(w.alerts.recent()[0]).toMatchObject({ kind: "tick_error", detail: "markets: market refresh failed: chain: injected failure: market" });
     expect(w.kinds()).toEqual(["tick_error", "tick_error"]);
   });
 

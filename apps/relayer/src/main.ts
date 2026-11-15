@@ -16,6 +16,7 @@ import "./chain/client-loader.ts";
 
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { createMarketData } from "./api/market-data.ts";
 import { createApiHandlers, createApiServer } from "./api/server.ts";
 import type { Chain, MarketChain } from "./chain/chain.ts";
 import { assertClusterAllowed, assertDeploymentMatches, assertVenueAllowed, loadConfig, relayerPort } from "./config.ts";
@@ -31,7 +32,7 @@ import type { Registry, RegistryMarket } from "./registry.ts";
 import { createSettlementWatcher } from "./settlement.ts";
 import { GeminiSandboxVenue } from "./venue/gemini/venue.ts";
 import { RollingMockVenue } from "./venue/mock-feed.ts";
-import type { Venue } from "./venue/venue.ts";
+import type { ContractInfo, Venue } from "./venue/venue.ts";
 
 type FullChain = Chain & MarketChain & { close(): void };
 
@@ -106,7 +107,7 @@ async function openChain(config: RelayerConfig): Promise<FullChain> {
 }
 
 /** A registry row as the contract the mock venue listed in an earlier run. */
-function contractOf(market: RegistryMarket) {
+function contractOf(market: RegistryMarket): ContractInfo {
   return {
     symbol: market.symbol,
     eventTicker: market.eventTicker,
@@ -118,9 +119,9 @@ function contractOf(market: RegistryMarket) {
     unitIncrement: market.unitIncrement,
     minUnits: market.minUnits,
     resolutionSide: null,
-    title: market.title,
     label: market.label,
-    series: market.series,
+    sortOrder: market.sortOrder,
+    rules: market.rules,
     strike: market.strike,
   };
 }
@@ -191,7 +192,7 @@ async function start(config: RelayerConfig): Promise<void> {
   }
 
   const now = Date.now;
-  const manager = createMarketManager({ venue, chain, registry, series: config.series, now });
+  const manager = createMarketManager({ venue, chain, registry, now });
   const settlement = createSettlementWatcher({ venue, chain, registry, journal, now, alert: alerts.alert });
   const reconciler = createReconciler({ venue, chain, registry, journal, alert: alerts.alert });
   const daemon = createDaemon({
@@ -212,7 +213,8 @@ async function start(config: RelayerConfig): Promise<void> {
     log,
     ...(venueConnected === undefined ? {} : { venueConnected }),
   });
-  const server = createApiServer({ port: config.port, handlers: createApiHandlers({ daemon, manager, journal }), log });
+  const marketData = createMarketData({ venue, registry, now });
+  const server = createApiServer({ port: config.port, handlers: createApiHandlers({ daemon, manager, marketData, journal }), log });
 
   const closeAll = (): void => {
     clearInterval(reconnect);
@@ -250,7 +252,7 @@ async function start(config: RelayerConfig): Promise<void> {
   await daemon.start();
   log(
     `relayer started: cluster ${config.cluster}, program ${config.deployment.programId}, relayer ${config.deployment.relayer}, ` +
-      `series ${config.series.join(",")}, api http://127.0.0.1:${port}`,
+      `api http://127.0.0.1:${port}`,
   );
 }
 

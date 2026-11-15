@@ -9,7 +9,6 @@ export const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG
 export const MAINNET_GENESIS_HASH = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 export const LOCALNET_RPC_URL = "http://127.0.0.1:8899";
 
-const DEFAULT_SERIES = "BTC15M,ETH15M,SOL15M,XRP15M";
 const DEFAULT_PORT = 8787;
 const MOCK_WINDOW_SECS_DEFAULT = 900;
 const MOCK_WINDOW_SECS_MIN = 180;
@@ -42,8 +41,6 @@ export interface RelayerConfig {
   geminiEnv: string | undefined;
   geminiApiKey: string | undefined;
   geminiApiSecret: string | undefined;
-  /** Curated market series. */
-  series: string[];
   port: number;
   dbPath: string;
   relayerKeyPath: string;
@@ -66,13 +63,6 @@ export function loadConfig(env: Record<string, string | undefined>, repoRoot: st
   const venue = value("VENUE") ?? "sandbox";
   if (venue !== "sandbox" && venue !== "mock") throw new Error('VENUE must be "sandbox" or "mock"');
 
-  const series = (value("MARKET_SERIES") ?? DEFAULT_SERIES)
-    .split(",")
-    .map((name) => name.trim().toUpperCase())
-    .filter((name) => name !== "");
-  if (series.length === 0) throw new Error("MARKET_SERIES names no series");
-  if (!series.every((name) => /^[A-Z0-9]{1,32}$/.test(name))) throw new Error("MARKET_SERIES: not a series name");
-
   const mockResolve = value("MOCK_RESOLVE") ?? "random";
   if (mockResolve !== "yes" && mockResolve !== "no" && mockResolve !== "random") {
     throw new Error('MOCK_RESOLVE must be "yes", "no" or "random"');
@@ -91,7 +81,6 @@ export function loadConfig(env: Record<string, string | undefined>, repoRoot: st
     geminiEnv: value("GEMINI_ENV"),
     geminiApiKey: value("GEMINI_API_KEY"),
     geminiApiSecret: value("GEMINI_API_SECRET"),
-    series,
     port,
     dbPath: value("RELAYER_DB") ?? path.join(repoRoot, ".data", `relayer-${cluster}-${venue}.sqlite`),
     relayerKeyPath: value("RELAYER_KEYPAIR") ?? path.join(repoRoot, ".keys", "relayer-keypair.json"),

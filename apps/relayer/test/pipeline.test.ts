@@ -360,7 +360,7 @@ describe("on-chain failures", () => {
     expect(w.chain.fills).toEqual([]);
     expect(w.journal.get(order.address)?.state).toBe("orphaned");
     expect(w.journal.houseInventoryUnits(SYMBOL)).toBe(300n);
-    expect(await w.venue.netPosition(SYMBOL)).toBe(300n);
+    expect((await w.venue.positions()).get(SYMBOL)).toBe(300n);
     expect(w.alerts).toMatchObject([{ kind: "orphaned_fill", orderAddress: order.address }]);
   });
 

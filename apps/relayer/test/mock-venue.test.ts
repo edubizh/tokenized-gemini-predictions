@@ -30,6 +30,11 @@ function venueWith(cash = 10_000_000n, options?: ConstructorParameters<typeof Mo
   return venue;
 }
 
+/** The account's signed position in a contract; zero when it holds none. */
+async function position(venue: MockVenue, symbol: string): Promise<bigint> {
+  return (await venue.positions()).get(symbol) ?? 0n;
+}
+
 let nextId = 0;
 function request(overrides: Partial<VenueOrderRequest> = {}): VenueOrderRequest {
   nextId += 1;
@@ -59,7 +64,7 @@ describe("MockVenue.placeOrder", () => {
     expect(result.filledUnits).toBe(300n);
     expect(result.costMicros).toBe(500_000n);
     expect(result.feeMicros).toBe(0n);
-    expect(await venue.netPosition(SYMBOL)).toBe(300n);
+    expect(await position(venue, SYMBOL)).toBe(300n);
     expect(await venue.cashMicros()).toBe(10_000_000n - 500_000n);
     // The book was consumed: 300 left at 1_700.
     expect(await venue.topOfBook(SYMBOL)).toEqual({ bidPx: null, bidUnits: 0n, askPx: 1_700n, askUnits: 300n });
@@ -70,7 +75,7 @@ describe("MockVenue.placeOrder", () => {
     venue.setBook(SYMBOL, { bids: [], asks: [[1_600n, 100n], [1_700n, 100n], [1_800n, 500n]] });
     const result = await venue.placeOrder(request());
     expect(result.kind).toBe("not_filled");
-    expect(await venue.netPosition(SYMBOL)).toBe(0n);
+    expect(await position(venue, SYMBOL)).toBe(0n);
     expect(await venue.cashMicros()).toBe(10_000_000n);
     expect(await venue.topOfBook(SYMBOL)).toMatchObject({ askPx: 1_600n, askUnits: 100n });
   });
@@ -82,7 +87,7 @@ describe("MockVenue.placeOrder", () => {
     if (result.kind !== "filled") throw new Error(`expected filled, got ${result.kind}`);
     expect(result.filledUnits).toBe(200n);
     expect(result.costMicros).toBe(100n * 1_600n + 100n * 1_700n);
-    expect(await venue.netPosition(SYMBOL)).toBe(200n);
+    expect(await position(venue, SYMBOL)).toBe(200n);
 
     const none = await venue.placeOrder(request({ timeInForce: "IOC", limitPx: 1_000n }));
     expect(none.kind).toBe("not_filled");
@@ -99,7 +104,7 @@ describe("MockVenue.placeOrder", () => {
       [100n, 9_700n],
     ]);
     expect(result.costMicros).toBe(100n * 9_600n + 100n * 9_700n);
-    expect(await venue.netPosition(SYMBOL)).toBe(-200n);
+    expect(await position(venue, SYMBOL)).toBe(-200n);
     expect(await venue.cashMicros()).toBe(10_000_000n - 1_930_000n);
     expect(await venue.topOfBook(SYMBOL)).toMatchObject({ bidPx: 200n, bidUnits: 500n });
 
@@ -112,12 +117,12 @@ describe("MockVenue.placeOrder", () => {
     const venue = venueWith();
     venue.setBook(SYMBOL, { bids: [[300n, 300n]], asks: [[1_700n, 300n]] });
     expect((await venue.placeOrder(request())).kind).toBe("filled");
-    expect(await venue.netPosition(SYMBOL)).toBe(300n);
+    expect(await position(venue, SYMBOL)).toBe(300n);
     const cashBefore = await venue.cashMicros();
 
     const result = await venue.placeOrder(request({ outcome: "NO", units: 100n, limitPx: 9_700n }));
     expect(result.kind).toBe("filled");
-    expect(await venue.netPosition(SYMBOL)).toBe(200n);
+    expect(await position(venue, SYMBOL)).toBe(200n);
     expect(await venue.cashMicros()).toBe(cashBefore - 100n * 9_700n + 100n * 10_000n);
   });
 
@@ -127,7 +132,7 @@ describe("MockVenue.placeOrder", () => {
     await venue.placeOrder(request({ units: 100n }));
     const cashBefore = await venue.cashMicros();
     await venue.placeOrder(request({ outcome: "NO", units: 300n, limitPx: 9_700n }));
-    expect(await venue.netPosition(SYMBOL)).toBe(-200n);
+    expect(await position(venue, SYMBOL)).toBe(-200n);
     expect(await venue.cashMicros()).toBe(cashBefore - 300n * 9_700n + 100n * 10_000n);
   });
 
@@ -165,7 +170,7 @@ describe("MockVenue.placeOrder", () => {
       expect(result.message).toMatch(message);
     }
     expect(await venue.cashMicros()).toBe(400_000n);
-    expect(await venue.netPosition(SYMBOL)).toBe(0n);
+    expect(await position(venue, SYMBOL)).toBe(0n);
     expect(await venue.topOfBook(SYMBOL)).toMatchObject({ askPx: 1_700n, askUnits: 1_000n });
     expect(venue.requests).toHaveLength(cases.length);
   });
@@ -178,7 +183,7 @@ describe("MockVenue.placeOrder", () => {
     const second = await venue.placeOrder(first);
     if (second.kind !== "rejected") throw new Error(`expected rejected, got ${second.kind}`);
     expect(second.message).toMatch(/duplicate/);
-    expect(await venue.netPosition(SYMBOL)).toBe(300n);
+    expect(await position(venue, SYMBOL)).toBe(300n);
   });
 });
 
@@ -189,7 +194,7 @@ describe("MockVenue fault injection", () => {
     venue.failNext("unknown_after_fill");
     const order = request();
     expect((await venue.placeOrder(order)).kind).toBe("unknown");
-    expect(await venue.netPosition(SYMBOL)).toBe(300n);
+    expect(await position(venue, SYMBOL)).toBe(300n);
     expect(await venue.cashMicros()).toBe(10_000_000n - 510_000n);
     expect(await venue.findOrder(order.clientOrderId, SYMBOL, 0)).toMatchObject({
       found: true,
@@ -205,7 +210,7 @@ describe("MockVenue fault injection", () => {
     venue.failNext("unknown_no_fill");
     const order = request();
     expect((await venue.placeOrder(order)).kind).toBe("unknown");
-    expect(await venue.netPosition(SYMBOL)).toBe(0n);
+    expect(await position(venue, SYMBOL)).toBe(0n);
     expect(await venue.cashMicros()).toBe(10_000_000n);
     expect(await venue.findOrder(order.clientOrderId, SYMBOL, 0)).toEqual({ found: false });
   });
@@ -216,7 +221,7 @@ describe("MockVenue fault injection", () => {
     venue.failNext("throw");
     const order = request();
     await expect(venue.placeOrder(order)).rejects.toThrow(/injected/);
-    expect(await venue.netPosition(SYMBOL)).toBe(0n);
+    expect(await position(venue, SYMBOL)).toBe(0n);
     expect(await venue.findOrder(order.clientOrderId, SYMBOL, 0)).toEqual({ found: false });
     expect(venue.requests).toEqual([order]);
   });
@@ -303,7 +308,7 @@ describe("MockVenue.resolve", () => {
     venue.setBook(SYMBOL, { bids: [], asks: [[1_700n, 300n]] });
     await venue.placeOrder(request());
     venue.resolve(SYMBOL, "yes");
-    expect(await venue.netPosition(SYMBOL)).toBe(0n);
+    expect(await position(venue, SYMBOL)).toBe(0n);
     expect(await venue.cashMicros()).toBe(10_000_000n - 510_000n + 3_000_000n);
     expect(await venue.contract(SYMBOL)).toMatchObject({ status: "settled", resolutionSide: "yes" });
 
@@ -317,7 +322,7 @@ describe("MockVenue.resolve", () => {
     venue.setBook(SYMBOL, { bids: [], asks: [[1_700n, 300n]] });
     await venue.placeOrder(request());
     venue.resolve(SYMBOL, "no");
-    expect(await venue.netPosition(SYMBOL)).toBe(0n);
+    expect(await position(venue, SYMBOL)).toBe(0n);
     expect(await venue.cashMicros()).toBe(10_000_000n - 510_000n);
     expect((await venue.contract(SYMBOL))?.resolutionSide).toBe("no");
   });
@@ -327,7 +332,7 @@ describe("MockVenue.resolve", () => {
     venue.setBook(SYMBOL, { bids: [[300n, 200n]], asks: [] });
     await venue.placeOrder(request({ outcome: "NO", units: 200n, limitPx: 9_700n }));
     venue.resolve(SYMBOL, "no");
-    expect(await venue.netPosition(SYMBOL)).toBe(0n);
+    expect(await position(venue, SYMBOL)).toBe(0n);
     expect(await venue.cashMicros()).toBe(10_000_000n - 200n * 9_700n + 200n * 10_000n);
   });
 
@@ -360,37 +365,207 @@ describe("MockVenue.settledPayoutMicros", () => {
   });
 });
 
-describe("MockVenue.listContracts", () => {
-  it("lists the active contracts with their display fields", async () => {
+describe("MockVenue.positions", () => {
+  it("reports the signed position of every contract held and leaves out the ones the account is flat in", async () => {
     const venue = venueWith();
-    venue.addContract(contract({ symbol: "GEMI-ETH-TEST", eventTicker: "ETH-TEST", title: "ETH test", label: "Up", series: "ETH15M", strike: "3000.10" }));
-    venue.addContract(contract({ symbol: "GEMI-OLD-TEST", eventTicker: "OLD-TEST" }));
-    venue.resolve("GEMI-OLD-TEST", "no");
-    const listed = await venue.listContracts();
-    expect(listed.map((info) => info.symbol)).toEqual([SYMBOL, "GEMI-ETH-TEST"]);
-    expect(listed[1]).toMatchObject({ title: "ETH test", label: "Up", series: "ETH15M", strike: "3000.10" });
+    venue.addContract(contract({ symbol: "GEMI-ETH-TEST", eventTicker: "ETH-TEST" }));
+    expect(await venue.positions()).toEqual(new Map());
+
+    venue.setBook(SYMBOL, { bids: [[300n, 300n]], asks: [[1_700n, 300n]] });
+    venue.setBook("GEMI-ETH-TEST", { bids: [[300n, 300n]], asks: [] });
+    await venue.placeOrder(request());
+    await venue.placeOrder(request({ symbol: "GEMI-ETH-TEST", outcome: "NO", units: 200n, limitPx: 9_700n }));
+    expect(await venue.positions()).toEqual(new Map([[SYMBOL, 300n], ["GEMI-ETH-TEST", -200n]]));
+
+    // Buying the other side back to flat removes the row; so does a resolution.
+    await venue.placeOrder(request({ outcome: "NO", units: 300n, limitPx: 9_700n }));
+    expect(await venue.positions()).toEqual(new Map([["GEMI-ETH-TEST", -200n]]));
+    venue.resolve("GEMI-ETH-TEST", "no");
+    expect(await venue.positions()).toEqual(new Map());
+    venue.setPosition(SYMBOL, 0n);
+    expect((await venue.positions()).has(SYMBOL)).toBe(false);
   });
 });
 
-describe("MockVenue best prices", () => {
-  it("reports the best bid and ask of its book with every contract", async () => {
+describe("MockVenue.listEvents", () => {
+  const ETH = "GEMI-ETH-TEST";
+
+  it("lists a contract it was told nothing else about as a binary event of its own", async () => {
     const venue = venueWith();
-    expect(await venue.contract(SYMBOL)).toMatchObject({ bestBidPx: null, bestAskPx: null });
+    expect(await venue.listEvents()).toEqual([
+      {
+        ticker: "BTC-TEST",
+        title: "BTC-TEST",
+        category: "Other",
+        subcategory: [],
+        underlying: "BTC-TEST",
+        shape: "binary",
+        cadence: "other",
+        description: "",
+        source: null,
+        termsUrl: null,
+        listedAt: new Date("2026-11-14T00:00:00Z"),
+        expiresAt: new Date("2026-11-14T00:15:00Z"),
+        status: "active",
+        volumeUnits: 0n,
+        contracts: [{ ...contract(), bestBidPx: null, bestAskPx: null, lastPx: null }],
+      },
+    ]);
+  });
+
+  it("lists the contracts of an event it was told about together, ascending by sort order", async () => {
+    const venue = venueWith();
+    const meta = {
+      ticker: "ETH-TEST",
+      title: "ETH price today at 1am",
+      category: "Crypto",
+      subcategory: ["Ethereum"],
+      underlying: "ETH",
+      shape: "ladder",
+      cadence: "hourly",
+      description: "A test ladder",
+      source: { agency: "test", index: "ETH-USD" },
+      termsUrl: "https://example.test/terms.pdf",
+      listedAt: new Date("2026-11-13T23:00:00Z"),
+      expiresAt: new Date("2026-11-14T01:00:00Z"),
+    } as const;
+    venue.addEvent({ ...meta, subcategory: [...meta.subcategory] });
+    venue.addContract(contract({ symbol: `${ETH}-HI3100`, eventTicker: "ETH-TEST", label: "$3,100 or above", sortOrder: 1, strike: "3100" }));
+    venue.addContract(contract({ symbol: `${ETH}-HI3000`, eventTicker: "ETH-TEST", label: "$3,000 or above", sortOrder: 0, strike: "3000", rules: "Yes at $3,000 or above." }));
+
+    const listed = await venue.listEvents();
+    expect(listed.map((event) => event.ticker)).toEqual(["BTC-TEST", "ETH-TEST"]);
+    expect(listed[1]).toMatchObject({ ...meta, status: "active", volumeUnits: 0n });
+    expect(listed[1]!.contracts.map((info) => [info.symbol, info.sortOrder, info.strike, info.rules])).toEqual([
+      [`${ETH}-HI3000`, 0, "3000", "Yes at $3,000 or above."],
+      [`${ETH}-HI3100`, 1, "3100", undefined],
+    ]);
+  });
+
+  it("lists approved and active events only: a status follows from the event's contracts", async () => {
+    const venue = venueWith();
+    venue.addContract(contract({ symbol: `${ETH}-A`, eventTicker: "ETH-TEST", status: "approved", marketState: "post_only" }));
+    venue.addContract(contract({ symbol: `${ETH}-B`, eventTicker: "ETH-TEST", status: "approved", marketState: "post_only", sortOrder: 1 }));
+    venue.addContract(contract({ symbol: "GEMI-OLD-TEST", eventTicker: "OLD-TEST" }));
+    venue.resolve("GEMI-OLD-TEST", "no");
+    const statuses = async () => (await venue.listEvents()).map((event) => [event.ticker, event.status, event.contracts.map((info) => info.status)]);
+    expect(await statuses()).toEqual([
+      ["BTC-TEST", "active", ["active"]],
+      ["ETH-TEST", "approved", ["approved", "approved"]],
+    ]);
+
+    // One contract of the event starts trading, then settles: its sibling is still listed with it.
+    venue.addContract(contract({ symbol: `${ETH}-A`, eventTicker: "ETH-TEST" }));
+    expect((await statuses())[1]).toEqual(["ETH-TEST", "active", ["active", "approved"]]);
+    venue.resolve(`${ETH}-A`, "yes");
+    expect((await statuses())[1]).toEqual(["ETH-TEST", "approved", ["settled", "approved"]]);
+    venue.addContract(contract({ symbol: `${ETH}-B`, eventTicker: "ETH-TEST", status: "under_review", marketState: "closed", sortOrder: 1 }));
+    expect((await statuses()).map(([ticker]) => ticker)).toEqual(["BTC-TEST"]);
+  });
+
+  it("reports the best bid and ask of its book and the last trade price with every contract", async () => {
+    const venue = venueWith();
+    const listed = async () => (await venue.listEvents())[0]!.contracts[0];
+    expect(await venue.contract(SYMBOL)).toMatchObject({ bestBidPx: null, bestAskPx: null, lastPx: null });
     venue.setBook(SYMBOL, { bids: [[300n, 200n], [200n, 900n]], asks: [[1_700n, 300n]] });
-    expect(await venue.contract(SYMBOL)).toMatchObject({ bestBidPx: 300n, bestAskPx: 1_700n });
-    expect((await venue.listContracts())[0]).toMatchObject({ symbol: SYMBOL, bestBidPx: 300n, bestAskPx: 1_700n });
-    venue.setBook(SYMBOL, { bids: [], asks: [[1_700n, 300n]] });
-    expect((await venue.listContracts())[0]).toMatchObject({ bestBidPx: null, bestAskPx: 1_700n });
+    expect(await venue.contract(SYMBOL)).toMatchObject({ bestBidPx: 300n, bestAskPx: 1_700n, lastPx: null });
+    expect(await listed()).toMatchObject({ symbol: SYMBOL, bestBidPx: 300n, bestAskPx: 1_700n, lastPx: null });
+
+    await venue.placeOrder(request());
+    expect(await listed()).toMatchObject({ bestBidPx: 300n, bestAskPx: null, lastPx: 1_700n });
+    expect(await venue.contract(SYMBOL)).toMatchObject({ lastPx: 1_700n });
+    expect((await venue.listEvents())[0]!.volumeUnits).toBe(300n);
   });
 });
 
 describe("MockVenue market data", () => {
+  // The clock starts on a whole minute.
+  const T0 = Date.parse("2026-11-14T00:05:00Z");
+
+  function timed() {
+    const clock = { ms: T0 };
+    const venue = venueWith(100_000_000n, { now: () => clock.ms });
+    return { venue, clock };
+  }
+
   it("returns null for an unknown contract and an empty top of book", async () => {
     const venue = venueWith();
     expect(await venue.contract("GEMI-NOPE")).toBeNull();
     expect(await venue.topOfBook(SYMBOL)).toEqual({ bidPx: null, bidUnits: 0n, askPx: null, askUnits: 0n });
     venue.setBook(SYMBOL, { bids: [[300n, 200n]], asks: [[1_700n, 300n]] });
     expect(await venue.topOfBook(SYMBOL)).toEqual({ bidPx: 300n, bidUnits: 200n, askPx: 1_700n, askUnits: 300n });
+  });
+
+  it("liveTop: the top of its book as of the last change, without any reading", async () => {
+    const { venue, clock } = timed();
+    expect(venue.liveTop(SYMBOL)).toBeUndefined(); // no book was ever set
+    venue.setBook(SYMBOL, { bids: [[300n, 200n]], asks: [[1_700n, 300n], [1_800n, 500n]] });
+    clock.ms += 5_000;
+    expect(venue.liveTop(SYMBOL)).toEqual({ top: { bidPx: 300n, bidUnits: 200n, askPx: 1_700n, askUnits: 300n }, atMs: T0 });
+
+    await venue.placeOrder(request()); // takes the whole best ask
+    expect(venue.liveTop(SYMBOL)).toEqual({ top: { bidPx: 300n, bidUnits: 200n, askPx: 1_800n, askUnits: 500n }, atMs: T0 + 5_000 });
+    clock.ms += 5_000;
+    venue.setBook(SYMBOL, { bids: [], asks: [] });
+    expect(venue.liveTop(SYMBOL)).toEqual({ top: { bidPx: null, bidUnits: 0n, askPx: null, askUnits: 0n }, atMs: T0 + 10_000 });
+  });
+
+  it("depth: up to the asked number of levels a side, best first", async () => {
+    const venue = venueWith();
+    expect(await venue.depth(SYMBOL, 10)).toEqual({ bids: [], asks: [] });
+    venue.setBook(SYMBOL, { bids: [[400n, 100n], [300n, 200n], [200n, 500n]], asks: [[1_700n, 300n], [1_800n, 500n]] });
+    expect(await venue.depth(SYMBOL, 10)).toEqual({
+      bids: [{ px: 400n, units: 100n }, { px: 300n, units: 200n }, { px: 200n, units: 500n }],
+      asks: [{ px: 1_700n, units: 300n }, { px: 1_800n, units: 500n }],
+    });
+    expect(await venue.depth(SYMBOL, 1)).toEqual({ bids: [{ px: 400n, units: 100n }], asks: [{ px: 1_700n, units: 300n }] });
+  });
+
+  it("trades: its own fills in YES price space, newest first, at most the asked number", async () => {
+    const { venue, clock } = timed();
+    expect(await venue.trades(SYMBOL, 50)).toEqual([]);
+    venue.setBook(SYMBOL, { bids: [[300n, 500n]], asks: [[1_600n, 100n], [1_700n, 500n]] });
+    const bought = await venue.placeOrder(request());
+    clock.ms += 7_000;
+    const sold = await venue.placeOrder(request({ outcome: "NO", units: 200n, limitPx: 9_700n }));
+    if (bought.kind !== "filled" || sold.kind !== "filled") throw new Error("expected both orders to fill");
+
+    expect(await venue.trades(SYMBOL, 50)).toEqual([
+      // Buying NO at 9_700 hits the YES bid at 300: a sale in YES terms.
+      { id: sold.fills[0]!.tradeId, atMs: T0 + 7_000, px: 300n, units: 200n, taker: "sell" },
+      { id: bought.fills[1]!.tradeId, atMs: T0, px: 1_700n, units: 200n, taker: "buy" },
+      { id: bought.fills[0]!.tradeId, atMs: T0, px: 1_600n, units: 100n, taker: "buy" },
+    ]);
+    expect((await venue.trades(SYMBOL, 2)).map((trade) => trade.px)).toEqual([300n, 1_700n]);
+    expect(await venue.trades("GEMI-NOPE", 50)).toEqual([]);
+  });
+
+  it("history: the last trade price of each step from the first trade to now, carried through quiet steps", async () => {
+    const { venue, clock } = timed();
+    expect(await venue.history(SYMBOL, 60)).toEqual([]); // never traded
+    const tradeAt = async (ms: number, px: bigint) => {
+      clock.ms = ms;
+      venue.setBook(SYMBOL, { bids: [], asks: [[px, 100n]] });
+      expect((await venue.placeOrder(request({ units: 100n, limitPx: px }))).kind).toBe("filled");
+    };
+    await tradeAt(T0 + 10_000, 1_700n);
+    await tradeAt(T0 + 50_000, 1_600n);
+    await tradeAt(T0 + 130_000, 1_800n);
+    clock.ms = T0 + 200_000;
+
+    expect(await venue.history(SYMBOL, 60)).toEqual([
+      { atMs: T0, px: 1_600n },
+      { atMs: T0 + 60_000, px: 1_600n },
+      { atMs: T0 + 120_000, px: 1_800n },
+      { atMs: T0 + 180_000, px: 1_800n },
+    ]);
+    expect(await venue.history(SYMBOL, 300)).toEqual([{ atMs: T0, px: 1_800n }]);
+
+    // The series ends with the contract: its last minute is the one before the expiry at 00:15.
+    clock.ms = Date.parse("2026-11-14T03:00:00Z");
+    const whole = await venue.history(SYMBOL, 60);
+    expect(whole).toHaveLength(10);
+    expect(whole.at(-1)).toEqual({ atMs: Date.parse("2026-11-14T00:14:00Z"), px: 1_800n });
   });
 });
 
@@ -405,15 +580,33 @@ describe("RollingMockVenue", () => {
     return { venue, clock };
   }
 
-  it("lists one contract per series for the current window, named after the window end, with a two-sided book", async () => {
+  /** The contracts of a list read: one per event. */
+  const listedContracts = async (venue: RollingMockVenue) => (await venue.listEvents()).flatMap((event) => event.contracts);
+
+  it("lists one up-or-down event per underlying for the current window, named after the window end, with a two-sided book", async () => {
     const { venue } = rolling();
-    const listed = await venue.listContracts();
-    expect(listed.map((info) => [info.symbol, info.series, info.eventTicker])).toEqual([
-      [BTC, "BTC15M", "BTC15M2611140300"],
-      ["TEST-ETH15M2611140300-UP", "ETH15M", "ETH15M2611140300"],
-      ["TEST-SOL15M2611140300-UP", "SOL15M", "SOL15M2611140300"],
+    const listed = await venue.listEvents();
+    expect(listed.map((event) => [event.ticker, event.underlying, event.contracts.map((info) => info.symbol)])).toEqual([
+      ["BTC15M2611140300", "BTC", [BTC]],
+      ["ETH15M2611140300", "ETH", ["TEST-ETH15M2611140300-UP"]],
+      ["SOL15M2611140300", "SOL", ["TEST-SOL15M2611140300-UP"]],
     ]);
     expect(listed[0]).toMatchObject({
+      category: "Crypto",
+      subcategory: ["Bitcoin"],
+      shape: "binary",
+      cadence: "15m",
+      source: null,
+      termsUrl: null,
+      listedAt: new Date(END - 900_000),
+      expiresAt: new Date(END),
+      status: "active",
+      volumeUnits: 0n,
+    });
+    expect(`${listed[0]!.title} ${listed[0]!.description}`).not.toMatch(/gemini/i);
+    const contract = listed[0]!.contracts[0]!;
+    expect(contract).toMatchObject({
+      eventTicker: "BTC15M2611140300",
       status: "active",
       marketState: "open",
       effectiveAt: new Date(END - 900_000),
@@ -422,25 +615,28 @@ describe("RollingMockVenue", () => {
       unitIncrement: 1n,
       minUnits: 1n,
       label: "Up",
+      sortOrder: 0,
       bestBidPx: 4_800n,
       bestAskPx: 5_200n,
+      lastPx: null,
     });
-    expect(listed[0]!.title).not.toMatch(/gemini/i);
+    expect(contract.rules).toContain(`$${contract.strike}`);
     expect(await venue.topOfBook(BTC)).toEqual({ bidPx: 4_800n, bidUnits: 20_000n, askPx: 5_200n, askUnits: 20_000n });
+    expect(venue.liveTop(BTC)).toEqual({ top: { bidPx: 4_800n, bidUnits: 20_000n, askPx: 5_200n, askUnits: 20_000n }, atMs: NOW });
   });
 
   it("moves the price a little on each list and keeps it inside the book's range", async () => {
     const steps = [0.99, 0.99, 0.0];
     const { venue } = rolling({ random: () => steps.shift() ?? 0.99 });
-    const mid = async () => ((await venue.listContracts())[0]!.bestBidPx ?? 0n) + 200n;
+    const mid = async () => ((await listedContracts(venue))[0]!.bestBidPx ?? 0n) + 200n;
     expect(await mid()).toBe(5_200n); // BTC took the first step: up two ticks
-    for (let i = 0; i < 40; i++) await venue.listContracts();
+    for (let i = 0; i < 40; i++) await venue.listEvents();
     expect(await mid()).toBe(9_000n);
   });
 
   it("closes a contract at expiry, resolves it a few seconds later and lists the next window", async () => {
     const { venue, clock } = rolling({ resolve: "no" });
-    await venue.listContracts();
+    await venue.listEvents();
     const filled = await venue.placeOrder({ clientOrderId: "a", symbol: BTC, outcome: "NO", units: 300n, limitPx: 5_200n, timeInForce: "FOK" });
     expect(filled.kind).toBe("filled");
 
@@ -449,7 +645,13 @@ describe("RollingMockVenue", () => {
     const late = await venue.placeOrder({ clientOrderId: "b", symbol: BTC, outcome: "YES", units: 100n, limitPx: 9_000n, timeInForce: "FOK" });
     expect(late.kind).toBe("rejected");
     const next = "TEST-BTC15M2611140315-UP";
-    expect((await venue.listContracts()).map((info) => info.symbol)).toContain(next);
+    expect((await listedContracts(venue)).map((info) => info.symbol)).toContain(next);
+    // The closed contract traded 300 units; its book is empty and its last price stays.
+    expect((await venue.listEvents()).find((event) => event.ticker === "BTC15M2611140300")).toMatchObject({
+      status: "active",
+      volumeUnits: 300n,
+      contracts: [{ marketState: "closed", bestBidPx: null, bestAskPx: null, lastPx: 4_800n }],
+    });
 
     clock.ms = END + 4_999;
     expect((await venue.contract(BTC))?.status).toBe("active");
@@ -457,13 +659,13 @@ describe("RollingMockVenue", () => {
     expect(await venue.contract(BTC)).toMatchObject({ status: "settled", resolutionSide: "no" });
     expect((await venue.contract(BTC))?.settlementValue).toMatch(/^\d+\.\d{2}$/);
     expect(await venue.settledPayoutMicros(BTC)).toBe(3_000_000n);
-    expect((await venue.listContracts()).map((info) => info.symbol)).toEqual([next, "TEST-ETH15M2611140315-UP", "TEST-SOL15M2611140315-UP"]);
+    expect((await listedContracts(venue)).map((info) => info.symbol)).toEqual([next, "TEST-ETH15M2611140315-UP", "TEST-SOL15M2611140315-UP"]);
   });
 
   it("resolves at random when asked to, and honours the window length", async () => {
     const draws = [0.9, 0.1];
     const { venue, clock } = rolling({ windowSecs: 180, resolve: "random", random: () => draws.shift() ?? 0.5 });
-    const symbols = (await venue.listContracts()).map((info) => info.symbol); // spends no draw on resolution
+    const symbols = (await listedContracts(venue)).map((info) => info.symbol); // spends no draw on resolution
     expect(symbols[0]).toBe("TEST-BTC15M2611140251-UP");
     draws.length = 0;
     draws.push(0.9, 0.1, 0.9);
@@ -477,7 +679,7 @@ describe("RollingMockVenue", () => {
     const { venue, clock } = rolling({ resolve: "yes" });
     const old = contract({ symbol: "TEST-BTC15M2611140245-UP", eventTicker: "BTC15M2611140245", expiresAt: new Date(NOW - 60_000), unitIncrement: 1n, minUnits: 1n });
     venue.adopt(old, 250n);
-    expect(await venue.netPosition(old.symbol)).toBe(250n);
+    expect(await position(venue, old.symbol)).toBe(250n);
     clock.ms += 1;
     expect(await venue.contract(old.symbol)).toMatchObject({ status: "settled", resolutionSide: "yes" });
     expect(await venue.settledPayoutMicros(old.symbol)).toBe(2_500_000n);
@@ -485,5 +687,17 @@ describe("RollingMockVenue", () => {
     const decided = contract({ symbol: "TEST-ETH15M2611140245-UP", eventTicker: "ETH15M2611140245", expiresAt: new Date(NOW - 60_000) });
     venue.adopt(decided, -100n, "no");
     expect(await venue.contract(decided.symbol)).toMatchObject({ status: "settled", resolutionSide: "no" });
+  });
+
+  it("lists a contract adopted after a restart under the same event as before, once", async () => {
+    const before = (await rolling().venue.listEvents())[1]!;
+    const { contracts: _contracts, volumeUnits: _volume, ...described } = before;
+    const { venue } = rolling();
+    venue.adopt(before.contracts[0]!, 250n);
+
+    const listed = await venue.listEvents();
+    expect(listed.map((event) => event.ticker)).toEqual(["ETH15M2611140300", "BTC15M2611140300", "SOL15M2611140300"]);
+    expect(listed[0]).toMatchObject({ ...described, contracts: [{ symbol: "TEST-ETH15M2611140300-UP", status: "active", bestBidPx: 4_800n, bestAskPx: 5_200n }] });
+    expect(await position(venue, "TEST-ETH15M2611140300-UP")).toBe(250n);
   });
 });

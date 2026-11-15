@@ -1,11 +1,13 @@
-// A mock venue that behaves like a live one for offline demos: it always lists one test contract
-// per series for the current time window, moves their prices a little, closes them at expiry,
-// resolves them a few seconds later and lists the next window. No network, no API key.
+// A mock venue that behaves like a live one for offline demos: it always lists one up-or-down
+// event per underlying for the current time window, moves the prices a little, closes the
+// contracts at expiry, resolves them a few seconds later and lists the next window. No network,
+// no API key.
 
 import { takerFee } from "../money.ts";
 import { MockVenue } from "./mock.ts";
+import type { MockEvent } from "./mock.ts";
 import type { VenueOrderRequest, VenueOrderResult } from "./types.ts";
-import type { ContractInfo } from "./venue.ts";
+import type { ContractInfo, EventInfo } from "./venue.ts";
 
 export const MOCK_SERIES = ["BTC15M", "ETH15M", "SOL15M"] as const;
 export const MOCK_WINDOW_SECS_DEFAULT = 900;
@@ -35,8 +37,12 @@ const MAX_MID_PX = 9_000n;
 /** Each side is quoted this far from the middle. */
 const HALF_SPREAD_PX = 200n;
 const LEVEL_UNITS = 20_000n;
-/** Reference prices in cents, for display only. */
-const BASE_STRIKE_CENTS: Record<string, bigint> = { BTC: 6_400_000n, ETH: 300_000n, SOL: 15_000n };
+/** Name and reference price in cents of each underlying, for display only. */
+const UNDERLYINGS: Record<string, { name: string; baseCents: bigint }> = {
+  BTC: { name: "Bitcoin", baseCents: 6_400_000n },
+  ETH: { name: "Ethereum", baseCents: 300_000n },
+  SOL: { name: "Solana", baseCents: 15_000n },
+};
 
 interface Tracked {
   info: ContractInfo;
@@ -55,7 +61,7 @@ export class RollingMockVenue extends MockVenue {
   private seededEndMs = 0;
 
   constructor(options: RollingMockVenueOptions) {
-    super({ feeFor: takerFee });
+    super({ feeFor: takerFee, now: options.now });
     if (!Number.isInteger(options.windowSecs) || options.windowSecs < MOCK_WINDOW_SECS_MIN) {
       throw new RangeError(`mock contract length must be a whole number of seconds, at least ${MOCK_WINDOW_SECS_MIN}`);
     }
@@ -73,6 +79,9 @@ export class RollingMockVenue extends MockVenue {
    */
   adopt(info: ContractInfo, signedUnits: bigint, resolution?: "yes" | "no"): void {
     const adopted: ContractInfo = { ...info, status: "active", resolutionSide: null };
+    // One of this venue's own contracts goes back under the event it was listed with.
+    const own = MOCK_SERIES.map((series) => this.windowOf(series, info.expiresAt.getTime()).event).find((event) => event.ticker === info.eventTicker);
+    if (own !== undefined) this.addEvent(own);
     this.addContract(adopted);
     this.setPosition(info.symbol, signedUnits);
     const entry: Tracked = { info: adopted, midPx: START_MID_PX, closed: false };
@@ -101,14 +110,16 @@ export class RollingMockVenue extends MockVenue {
     if (endMs === this.seededEndMs) return;
     this.seededEndMs = endMs;
     for (const series of MOCK_SERIES) {
-      const entry: Tracked = { info: this.newContract(series, endMs), midPx: START_MID_PX, closed: false };
-      this.tracked.set(entry.info.symbol, entry);
-      this.addContract(entry.info);
+      const { event, contract } = this.windowOf(series, endMs);
+      const entry: Tracked = { info: contract, midPx: START_MID_PX, closed: false };
+      this.tracked.set(contract.symbol, entry);
+      this.addEvent(event);
+      this.addContract(contract);
       this.quote(entry);
     }
   }
 
-  override async listContracts(): Promise<ContractInfo[]> {
+  override async listEvents(): Promise<EventInfo[]> {
     this.roll();
     for (const entry of this.tracked.values()) {
       if (entry.closed) continue;
@@ -117,7 +128,7 @@ export class RollingMockVenue extends MockVenue {
       entry.midPx = moved < MIN_MID_PX ? MIN_MID_PX : moved > MAX_MID_PX ? MAX_MID_PX : moved;
       this.quote(entry);
     }
-    return super.listContracts();
+    return super.listEvents();
   }
 
   override async contract(symbol: string): Promise<ContractInfo | null> {
@@ -147,30 +158,50 @@ export class RollingMockVenue extends MockVenue {
     this.resolve(info.symbol, side);
   }
 
-  private newContract(series: string, endMs: number): ContractInfo {
+  /** The event and its one contract of the window of `series` that ends at `endMs`. */
+  private windowOf(series: string, endMs: number): { event: MockEvent; contract: ContractInfo } {
     const end = new Date(endMs);
+    const start = new Date(endMs - this.windowMs);
     const two = (value: number): string => String(value).padStart(2, "0");
     const stamp = `${two(end.getUTCFullYear() % 100)}${two(end.getUTCMonth() + 1)}${two(end.getUTCDate())}${two(end.getUTCHours())}${two(end.getUTCMinutes())}`;
+    const time = `${two(end.getUTCHours())}:${two(end.getUTCMinutes())} UTC`;
     const underlying = series.replace(/\d+[A-Z]+$/, "");
-    const base = BASE_STRIKE_CENTS[underlying] ?? 10_000n;
+    const { name, baseCents } = UNDERLYINGS[underlying] ?? { name: underlying, baseCents: 10_000n };
     // Within one percent of the base, different for every window.
-    const strikeCents = base + (BigInt(Math.floor(endMs / 60_000) % 201) - 100n) * (base / 10_000n);
+    const strike = fromCents(baseCents + (BigInt(Math.floor(endMs / 60_000) % 201) - 100n) * (baseCents / 10_000n));
+    const ticker = `${series}${stamp}`;
     return {
-      symbol: `TEST-${series}${stamp}-UP`,
-      eventTicker: `${series}${stamp}`,
-      status: "active",
-      marketState: "open",
-      effectiveAt: new Date(endMs - this.windowMs),
-      expiresAt: end,
-      tickPx: TICK_PX,
-      unitIncrement: 1n,
-      minUnits: 1n,
-      resolutionSide: null,
-      title: `${underlying} price up at ${two(end.getUTCHours())}:${two(end.getUTCMinutes())} UTC? (test)`,
-      label: "Up",
-      series,
-      strike: fromCents(strikeCents),
-      settlementValue: null,
+      event: {
+        ticker,
+        title: `${underlying} price up at ${time}? (test)`,
+        category: "Crypto",
+        subcategory: [name],
+        underlying,
+        shape: "binary",
+        cadence: "15m",
+        description: `Simulated ${name} up-or-down event expiring at ${time}`,
+        source: null,
+        termsUrl: null,
+        listedAt: start,
+        expiresAt: end,
+      },
+      contract: {
+        symbol: `TEST-${ticker}-UP`,
+        eventTicker: ticker,
+        status: "active",
+        marketState: "open",
+        effectiveAt: start,
+        expiresAt: end,
+        tickPx: TICK_PX,
+        unitIncrement: 1n,
+        minUnits: 1n,
+        resolutionSide: null,
+        label: "Up",
+        sortOrder: 0,
+        rules: `If the simulated price of ${name} (${underlying}) at ${time} is above $${strike}, this market resolves to Yes.`,
+        strike,
+        settlementValue: null,
+      },
     };
   }
 }

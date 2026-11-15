@@ -6,15 +6,25 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Journal, JournalOrder } from "../journal.ts";
 import { MarketError } from "../markets.ts";
+import type { MarketManager } from "../markets.ts";
 import type { VenueFill } from "../venue/types.ts";
-import type { ApiError, ApiHealth, ApiMarket, ApiOrder, ApiStatus } from "./types.ts";
+import type { MarketData } from "./market-data.ts";
+import type { ApiDepth, ApiError, ApiEvent, ApiEventDetail, ApiHealth, ApiHistory, ApiMarket, ApiOrder, ApiStatus, ApiTrade } from "./types.ts";
 
 export interface ApiHandlers {
   health(): ApiHealth;
-  markets(scope: "live" | "all"): ApiMarket[];
+  /** Every listed event that has not expired, soonest expiry first. */
+  events(): ApiEvent[];
+  event(ticker: string): ApiEventDetail | undefined;
+  /** The markets that exist on-chain, newest expiry first. */
+  markets(): ApiMarket[];
   market(symbol: string): ApiMarket | undefined;
   /** Creates the on-chain market if it is missing. Rejects with a `MarketError` when it may not. */
   ensureMarket(symbol: string): Promise<ApiMarket>;
+  /** Market data from the venue; undefined for a symbol the relayer does not know. */
+  depth(symbol: string): Promise<ApiDepth | undefined>;
+  trades(symbol: string): Promise<ApiTrade[] | undefined>;
+  history(symbol: string): Promise<ApiHistory | undefined>;
   /** Newest first. */
   orders(user: string, limit: number): ApiOrder[];
   order(address: string): ApiOrder | undefined;
@@ -39,6 +49,7 @@ export interface ApiServer {
   close(): Promise<void>;
 }
 
+/** Venue symbols and event tickers. */
 const SYMBOL = /^[A-Z0-9-]{1,64}$/;
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const MAX_ORDERS = 100;
@@ -96,6 +107,26 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     }
   }
 
+  /** What a handler found, or 404 when it does not know the symbol. */
+  const orUnknown = (body: unknown): Reply => (body === undefined ? fail(404, "unknown market") : ok(body));
+  /** `/markets/:symbol` (no key) and the routes below it. */
+  const marketRoutes = new Map<string | undefined, { method: "GET" | "POST"; reply(symbol: string): Reply | Promise<Reply> }>([
+    [undefined, { method: "GET", reply: (symbol) => orUnknown(handlers.market(symbol)) }],
+    ["ensure", { method: "POST", reply: ensure }],
+    ["depth", { method: "GET", reply: async (symbol) => orUnknown(await handlers.depth(symbol)) }],
+    [
+      "trades",
+      {
+        method: "GET",
+        reply: async (symbol) => {
+          const trades = await handlers.trades(symbol);
+          return orUnknown(trades === undefined ? undefined : { trades });
+        },
+      },
+    ],
+    ["history", { method: "GET", reply: async (symbol) => orUnknown(await handlers.history(symbol)) }],
+  ]);
+
   async function route(method: string, segments: string[], query: URLSearchParams): Promise<Reply> {
     const [head, id, action, ...rest] = segments;
     const only = (allowed: "GET" | "POST", reply: () => Reply | Promise<Reply>): Reply | Promise<Reply> =>
@@ -108,12 +139,10 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
           return only("GET", () => ok(handlers.health()));
         case "status":
           return only("GET", () => ok(handlers.status()));
+        case "events":
+          return only("GET", () => ok({ events: handlers.events() }));
         case "markets":
-          return only("GET", () => {
-            const scope = query.get("scope") ?? "live";
-            if (scope !== "live" && scope !== "all") return fail(400, "scope must be live or all");
-            return ok({ markets: handlers.markets(scope) });
-          });
+          return only("GET", () => ok({ markets: handlers.markets() }));
         case "orders":
           return only("GET", () => {
             const user = query.get("user");
@@ -128,13 +157,16 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
       }
     }
 
-    if (head === "markets" && (action === undefined || action === "ensure")) {
-      return only(action === undefined ? "GET" : "POST", () => {
-        if (!SYMBOL.test(id)) return fail(400, "invalid symbol");
-        if (action === "ensure") return ensure(id);
-        const found = handlers.market(id);
-        return found === undefined ? fail(404, "unknown market") : ok(found);
+    if (head === "events" && action === undefined) {
+      return only("GET", () => {
+        if (!SYMBOL.test(id)) return fail(400, "invalid ticker");
+        const found = handlers.event(id);
+        return found === undefined ? fail(404, "unknown event") : ok(found);
       });
+    }
+    const marketRoute = head === "markets" ? marketRoutes.get(action) : undefined;
+    if (marketRoute !== undefined) {
+      return only(marketRoute.method, () => (SYMBOL.test(id) ? marketRoute.reply(id) : fail(400, "invalid symbol")));
     }
     if (head === "orders" && action === undefined) {
       return only("GET", () => {
@@ -236,19 +268,28 @@ export function toApiOrder(row: JournalOrder, fills: VenueFill[]): ApiOrder {
   };
 }
 
-/** The handlers of a running relayer: health and status from the daemon, markets from the manager, orders from the journal. */
+/**
+ * The handlers of a running relayer: health and status from the daemon, events and markets from
+ * the manager, market data from the venue, orders from the journal.
+ */
 export function createApiHandlers(parts: {
   daemon: { health(): ApiHealth; status(): ApiStatus };
-  manager: { views(scope: "live" | "all"): ApiMarket[]; view(symbol: string): ApiMarket | undefined; ensureOnchain(symbol: string): Promise<ApiMarket> };
+  manager: Pick<MarketManager, "eventViews" | "eventView" | "views" | "view" | "ensureOnchain">;
+  marketData: MarketData;
   journal: Pick<Journal, "byUser" | "get" | "fills">;
 }): ApiHandlers {
-  const { daemon, manager, journal } = parts;
+  const { daemon, manager, marketData, journal } = parts;
   const withFills = (row: JournalOrder): ApiOrder => toApiOrder(row, journal.fills(row.orderAddress));
   return {
     health: () => daemon.health(),
-    markets: (scope) => manager.views(scope),
+    events: () => manager.eventViews(),
+    event: (ticker) => manager.eventView(ticker),
+    markets: () => manager.views(),
     market: (symbol) => manager.view(symbol),
     ensureMarket: (symbol) => manager.ensureOnchain(symbol),
+    depth: (symbol) => marketData.depth(symbol),
+    trades: (symbol) => marketData.trades(symbol),
+    history: (symbol) => marketData.history(symbol),
     orders: (user, limit) => journal.byUser(user, limit).map(withFills),
     order: (address) => {
       const row = journal.get(address);

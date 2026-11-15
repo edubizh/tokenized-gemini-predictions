@@ -35,8 +35,11 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   feeSlackMicros: 30_000n,
 };
 
+/** The part of the venue an order needs. */
+export type OrderVenue = Pick<Venue, "placeOrder" | "findOrder" | "contract" | "topOfBook">;
+
 export interface PipelineDeps {
-  venue: Venue;
+  venue: OrderVenue;
   chain: Chain;
   journal: Journal;
   config: PipelineConfig;

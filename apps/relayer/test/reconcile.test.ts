@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openJournal } from "../src/journal.ts";
 import type { Journal, NewOrder } from "../src/journal.ts";
 import { createReconciler, reconcile } from "../src/reconcile.ts";
@@ -6,6 +6,7 @@ import { openRegistry } from "../src/registry.ts";
 import type { Registry } from "../src/registry.ts";
 import { MockVenue } from "../src/venue/mock.ts";
 import type { ContractInfo } from "../src/venue/venue.ts";
+import { eventOf } from "./helpers/events.ts";
 import { FakeMarketChain } from "./helpers/fake-market-chain.ts";
 
 // Synthetic contracts.
@@ -48,7 +49,7 @@ function world() {
   /** Lists a contract in the registry; with supplies it is also on the chain. */
   function market(symbol: string, supplies?: { yes: bigint; no: bigint }): void {
     venue.addContract(info(symbol));
-    registry.upsertContract(info(symbol), EXPIRY - 600_000);
+    registry.storeEvents([eventOf([info(symbol)])], EXPIRY - 600_000);
     if (supplies === undefined) return;
     chain.addMarket(symbol, { yesSupply: supplies.yes, noSupply: supplies.no });
     registry.setOnchain(symbol, { marketAddress: `market:${symbol}`, yesMint: `yes:${symbol}`, noMint: `no:${symbol}` });
@@ -132,6 +133,51 @@ describe("reconcile", () => {
       { symbol: BTC, yesSupply: "500", noSupply: "200", venueNet: "299", inFlight: "0", houseInventory: "0", balanced: false },
       { symbol: ETH, yesSupply: "0", noSupply: "150", venueNet: "-150", inFlight: "30", houseInventory: "0", balanced: false },
     ]);
+  });
+
+  it("reads the venue's positions once per run, whatever the number of markets", async () => {
+    const w = world();
+    const positions = vi.spyOn(w.venue, "positions");
+    expect((await reconcile(w.deps)).markets).toEqual([]);
+    expect(positions).toHaveBeenCalledTimes(1);
+
+    w.market(BTC, { yes: 500n, no: 200n });
+    w.market(ETH, { yes: 0n, no: 150n });
+    w.market("TEST-SOL15M2611140300-UP", { yes: 40n, no: 40n }); // flat: the venue reports no row for it
+    await w.hold(BTC, 300n);
+    await w.hold(ETH, -150n);
+    positions.mockClear();
+
+    const result = await reconcile(w.deps);
+    expect(positions).toHaveBeenCalledTimes(1);
+    expect(result.markets.map((market) => [market.symbol, market.venueNet, market.balanced])).toEqual([
+      [BTC, "300", true],
+      [ETH, "-150", true],
+      ["TEST-SOL15M2611140300-UP", "0", true],
+    ]);
+  });
+
+  it("treats the strikes of one ladder as separate markets: nothing nets across them", async () => {
+    const w = world();
+    const low = "TEST-BTC2611140400-HI64000";
+    const high = "TEST-BTC2611140400-HI65000";
+    w.venue.addContract(info(low));
+    w.venue.addContract(info(high));
+    w.registry.storeEvents([eventOf([info(low), info(high)])], EXPIRY - 600_000);
+    for (const [symbol, yes, no] of [[low, 100n, 0n], [high, 0n, 80n]] as const) {
+      w.chain.addMarket(symbol, { yesSupply: yes, noSupply: no });
+      w.registry.setOnchain(symbol, { marketAddress: `market:${symbol}`, yesMint: `yes:${symbol}`, noMint: `no:${symbol}` });
+    }
+    await w.hold(low, 100n);
+    await w.hold(high, -80n);
+
+    const result = await reconcile(w.deps);
+    expect(result.markets).toEqual([
+      { symbol: low, yesSupply: "100", noSupply: "0", venueNet: "100", inFlight: "0", houseInventory: "0", balanced: true },
+      { symbol: high, yesSupply: "0", noSupply: "80", venueNet: "-80", inFlight: "0", houseInventory: "0", balanced: true },
+    ]);
+    // YES on the low strike and NO on the high one can both win: both are covered in full.
+    expect(result.solvency.requiredMicros).toBe("1800000");
   });
 
   it("covers on-chain markets that are not settled, including those under review", async () => {

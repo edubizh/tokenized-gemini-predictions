@@ -6,6 +6,7 @@ import type { Registry } from "../src/registry.ts";
 import { createSettlementWatcher } from "../src/settlement.ts";
 import { MockVenue } from "../src/venue/mock.ts";
 import type { ContractInfo } from "../src/venue/venue.ts";
+import { eventOf } from "./helpers/events.ts";
 import { FakeMarketChain } from "./helpers/fake-market-chain.ts";
 
 // Synthetic contracts. The clock starts 30 s after expiry.
@@ -29,7 +30,6 @@ function info(symbol: string): ContractInfo {
     unitIncrement: 1n,
     minUnits: 1n,
     resolutionSide: null,
-    title: "Synthetic price at 3am",
     label: "Up",
   };
 }
@@ -65,7 +65,7 @@ function world() {
   /** Lists a contract everywhere: venue, registry and chain, with the given supplies. */
   function market(symbol: string, yesSupply: bigint, noSupply: bigint): void {
     venue.addContract(info(symbol));
-    registry.upsertContract(info(symbol), EXPIRY - 600_000);
+    registry.storeEvents([eventOf([info(symbol)])], EXPIRY - 600_000);
     chain.addMarket(symbol, { closeTs: EXPIRY / 1000, yesSupply, noSupply });
     registry.setOnchain(symbol, { marketAddress: `market:${symbol}`, yesMint: `yes:${symbol}`, noMint: `no:${symbol}` });
   }

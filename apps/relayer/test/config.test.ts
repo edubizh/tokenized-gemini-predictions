@@ -62,7 +62,6 @@ describe("loadConfig", () => {
       geminiEnv: "sandbox",
       geminiApiKey: "account-synthetic",
       geminiApiSecret: "synthetic-secret",
-      series: ["BTC15M", "ETH15M", "SOL15M", "XRP15M"],
       port: 8787,
       dbPath: path.join(root, ".data", "relayer-devnet-sandbox.sqlite"),
       relayerKeyPath: path.join(root, ".keys", "relayer-keypair.json"),
@@ -79,7 +78,6 @@ describe("loadConfig", () => {
       {
         CLUSTER: "localnet",
         VENUE: "mock",
-        MARKET_SERIES: " btc15m, ETH15M ,",
         RELAYER_PORT: "9001",
         RELAYER_DB: "/tmp/elsewhere.sqlite",
         RELAYER_KEYPAIR: "/keys/r.json",
@@ -94,7 +92,6 @@ describe("loadConfig", () => {
       rpcUrl: "http://127.0.0.1:8899",
       venue: "mock",
       geminiApiKey: undefined,
-      series: ["BTC15M", "ETH15M"],
       port: 9001,
       dbPath: "/tmp/elsewhere.sqlite",
       relayerKeyPath: "/keys/r.json",
@@ -119,8 +116,6 @@ describe("loadConfig", () => {
     expect(load({ SOLANA_RPC_URL: "not a url" })).toThrow("SOLANA_RPC_URL is not a valid http(s) URL");
     expect(load({ RELAYER_PORT: "80a" })).toThrow("RELAYER_PORT must be a port number");
     expect(load({ RELAYER_PORT: "70000" })).toThrow("RELAYER_PORT must be a port number");
-    expect(load({ MARKET_SERIES: "," })).toThrow("MARKET_SERIES names no series");
-    expect(load({ MARKET_SERIES: "BTC 15M" })).toThrow("MARKET_SERIES: not a series name");
     expect(load({ MOCK_WINDOW_SECS: "179" })).toThrow("MOCK_WINDOW_SECS must be a whole number of seconds, at least 180");
     expect(load({ MOCK_RESOLVE: "maybe" })).toThrow('MOCK_RESOLVE must be "yes", "no" or "random"');
   });

@@ -68,7 +68,7 @@ export function createSettlementWatcher(input: SettlementInput): { tick(): Promi
     const info = await venue.contract(symbol);
     if (info !== null) {
       try {
-        registry.upsertContract(info, now());
+        registry.updateContract(info, now());
       } catch {
         // Display data only; the registry keeps what it had.
       }

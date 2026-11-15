@@ -1,25 +1,23 @@
-// Market manager: keeps the registry in step with the venue's contract list, caches a top of
-// book and the on-chain state per market, builds the API views from those caches, and creates
-// on-chain markets on request.
+// Market manager: keeps the registry in step with the venue's event list, caches the list quotes
+// and the on-chain state per market, builds the API views from those caches, and creates on-chain
+// markets on request.
 
-import type { ApiBook, ApiMarket, ApiOnchainMarket, NotTradableReason } from "./api/types.ts";
+import type { ApiBook, ApiEvent, ApiEventDetail, ApiMarket, ApiOnchainMarket, NotTradableReason } from "./api/types.ts";
 import type { ChainMarket, MarketChain } from "./chain/chain.ts";
-import { seriesOf } from "./registry.ts";
-import type { Registry, RegistryMarket } from "./registry.ts";
+import type { Registry, RegistryEvent, RegistryMarket } from "./registry.ts";
 import { cutoffMs } from "./venue/tradable.ts";
 import type { Outcome } from "./venue/types.ts";
-import type { TopOfBook, Venue } from "./venue/venue.ts";
+import type { EventInfo, Venue } from "./venue/venue.ts";
 
 export interface MarketManagerOptions {
   venue: Venue;
   chain: MarketChain;
   registry: Registry;
-  /** Curated series, for example ["BTC15M", "ETH15M", "SOL15M"]. */
-  series: string[];
   maxSupplyUnits: bigint;
   /** Seconds the on-chain order cutoff sits ahead of the venue's. */
   cutoffBufferSecs: number;
-  booksPerRefresh: number;
+  /** The venue's event list is asked for again once the last answer is this old. */
+  listRefreshMs: number;
   /** A market's on-chain state is read again once its cached copy is this old. */
   chainRefreshMs: number;
   /** Unix milliseconds. */
@@ -29,7 +27,7 @@ export interface MarketManagerOptions {
 export const DEFAULT_MARKET_OPTIONS = {
   maxSupplyUnits: 1_000_000n,
   cutoffBufferSecs: 30,
-  booksPerRefresh: 2,
+  listRefreshMs: 15_000,
   chainRefreshMs: 15_000,
 } as const satisfies Partial<MarketManagerOptions>;
 
@@ -37,10 +35,14 @@ export type MarketManagerInput = Omit<MarketManagerOptions, keyof typeof DEFAULT
   Partial<Pick<MarketManagerOptions, keyof typeof DEFAULT_MARKET_OPTIONS>>;
 
 export interface MarketManager {
-  /** Venue list -> registry and book prices; a few book sizes; chain state of on-chain markets. */
+  /** Venue event list -> registry and list quotes, when it is due; chain state of on-chain markets. */
   refresh(): Promise<void>;
-  /** Built from cached data only, no I/O. */
-  views(scope: "live" | "all"): ApiMarket[];
+  /** Every listed event that has not expired, soonest expiry first. Built from cached data only, like every view. */
+  eventViews(): ApiEvent[];
+  /** Any event the registry knows, expired or not. */
+  eventView(ticker: string): ApiEventDetail | undefined;
+  /** The markets that exist on-chain, newest expiry first. */
+  views(): ApiMarket[];
   view(symbol: string): ApiMarket | undefined;
   /** Creates the on-chain market if it is missing. Rejects with a `MarketError` when the symbol may not be listed. */
   ensureOnchain(symbol: string): Promise<ApiMarket>;
@@ -63,7 +65,7 @@ export class MarketError extends Error {
   }
 }
 
-export type RefreshPart = "venue_list" | "contract" | "books" | "chain";
+export type RefreshPart = "venue_list" | "registry" | "chain";
 
 /** What went wrong during a refresh. Every part ran before this was thrown. */
 export class RefreshError extends Error {
@@ -76,43 +78,79 @@ export class RefreshError extends Error {
   }
 }
 
-/** How many markets the "all" view shows. */
-const ALL_VIEW_LIMIT = 200;
+/** How many on-chain markets the views and the chain reads cover. */
+const ONCHAIN_LIMIT = 500;
 /** Chain reads per refresh spent on markets that are neither live nor awaiting settlement. */
 const CATCH_UP_READS = 10;
 
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 const NAME_MAX_BYTES = 32;
-const TICKER_MAX_BYTES = 10;
-/** Room the ticker leaves for the underlying: 10 bytes less the side letter and HHMM. */
-const TICKER_UNDERLYING_BYTES = 5;
+/** The subject of a name is not cut below this. */
+const NAME_SUBJECT_MIN_BYTES = 3;
+/** A ticker is the subject, the side letter, the key and the tenor letter: 10 bytes at most. */
+const TICKER_SUBJECT_AND_KEY_BYTES = 8;
+const TICKER_KEY_MAX_BYTES = 6;
+const TICKER_SUBJECT_MIN_BYTES = 2;
 
 /**
- * Token metadata of one side of a market: name `"<UNDERLYING> <Label> <HH:MM>Z <D> <Mon> <YES|NO>"`
- * (expiry in UTC, at most 32 bytes: the label is shortened first) and ticker
- * `"<UNDERLYING><Y|N><HHMM>"` (at most 10 bytes: the underlying is shortened). The venue's name is
- * removed from both.
+ * Token metadata of one side of a market, from the contract's symbol, strike and dates.
+ *
+ * A symbol is `<venue prefix>-<event>-<contract>`. The subject is the event without its time
+ * (`BTC05M2611142210` -> `BTC`). What YES means and the ticker's key and tenor letter follow from
+ * the contract:
+ *   `UP` of a 5 or 15 minute event   "Up 5m" / "Up 15m", key = expiry `HHMM`, tenor `F` / `Q`
+ *   `HI<strike code>`                ">=<strike>", key = the strike code, tenor by the contract's
+ *                                    life: `H` up to 90 minutes, `D` up to 36 hours, `W` up to
+ *                                    10 days, else `M`
+ *   anything else                    the contract part as it is, tenor `X`
+ *
+ * Name: `<SUBJECT> <OUTCOME> <DDMonYY> <HH:MM> <YES|NO>`, expiry in UTC, at most 32 bytes: the
+ * subject is cut first, down to three bytes, then the outcome. Ticker:
+ * `<SUBJECT><Y|N><key><tenor>`, at most 10 bytes: the key keeps up to six, the subject the rest.
+ * The venue's name is removed from every part.
  */
 export function tokenNames(
-  market: Pick<RegistryMarket, "underlying" | "label" | "expiresAt">,
+  market: Pick<RegistryMarket, "symbol" | "strike" | "effectiveAt" | "expiresAt">,
   side: Outcome,
 ): { name: string; ticker: string; uri: string } {
-  const expiry = new Date(market.expiresAt);
-  const hours = String(expiry.getUTCHours()).padStart(2, "0");
-  const minutes = String(expiry.getUTCMinutes()).padStart(2, "0");
-  const underlying = withoutVenueName(market.underlying).toUpperCase();
-  const tail = `${hours}:${minutes}Z ${expiry.getUTCDate()} ${MONTHS[expiry.getUTCMonth()] ?? ""} ${side}`;
-  const build = (label: string): string => [underlying, label, tail].filter((part) => part !== "").join(" ");
+  const parts = market.symbol.split("-");
+  const contract = withoutVenueName(parts.length > 1 ? parts.pop()! : "");
+  if (parts.length > 1) parts.shift(); // the venue's prefix
+  const event = parts.join("");
+  const interval = /^([A-Z]+?)(05M|15M)?\d{10}$/.exec(event);
+  let subject = withoutVenueName(interval?.[1] ?? event.replace(/\d{6,}/g, ""));
 
-  let label = withoutVenueName(market.label);
-  while (label !== "" && byteLength(build(label)) > NAME_MAX_BYTES) {
-    label = Array.from(label).slice(0, -1).join("").trimEnd();
+  const expiry = new Date(market.expiresAt);
+  const two = (value: number): string => String(value).padStart(2, "0");
+  const hours = two(expiry.getUTCHours());
+  const minutes = two(expiry.getUTCMinutes());
+
+  let outcome = contract;
+  let key = contract;
+  let tenor = "X";
+  if (contract === "UP" && interval?.[2] !== undefined) {
+    const five = interval[2] === "05M";
+    outcome = five ? "Up 5m" : "Up 15m";
+    key = `${hours}${minutes}`;
+    tenor = five ? "F" : "Q";
+  } else if (/^HI./.test(contract)) {
+    key = contract.slice(2);
+    // The venue writes the decimal point of a strike as `D` in the symbol.
+    outcome = `>=${market.strike === null ? key.replace("D", ".") : withoutTrailingZeros(market.strike)}`;
+    const lifeMs = market.expiresAt - market.effectiveAt;
+    tenor = lifeMs <= 90 * MINUTE_MS ? "H" : lifeMs <= 36 * HOUR_MS ? "D" : lifeMs <= 10 * DAY_MS ? "W" : "M";
   }
-  return {
-    name: cutToBytes(build(label), NAME_MAX_BYTES),
-    ticker: cutToBytes(`${cutToBytes(underlying, TICKER_UNDERLYING_BYTES)}${side === "YES" ? "Y" : "N"}${hours}${minutes}`, TICKER_MAX_BYTES),
-    uri: "",
-  };
+
+  const tail = `${two(expiry.getUTCDate())}${MONTHS[expiry.getUTCMonth()] ?? ""}${two(expiry.getUTCFullYear() % 100)} ${hours}:${minutes} ${side}`;
+  const subjectBytes = Math.max(TICKER_SUBJECT_MIN_BYTES, TICKER_SUBJECT_AND_KEY_BYTES - byteLength(key));
+  const ticker = `${cutToBytes(subject, subjectBytes)}${side === "YES" ? "Y" : "N"}${cutToBytes(key, TICKER_KEY_MAX_BYTES)}${tenor}`;
+  const name = (): string => [subject, outcome, tail].filter((part) => part !== "").join(" ");
+  while (byteLength(name()) > NAME_MAX_BYTES && byteLength(subject) > NAME_SUBJECT_MIN_BYTES) subject = withoutLastCharacter(subject);
+  while (byteLength(name()) > NAME_MAX_BYTES && outcome !== "") outcome = withoutLastCharacter(outcome);
+  return { name: name(), ticker, uri: "" };
 }
 
 export function createMarketManager(input: MarketManagerInput): MarketManager {
@@ -120,17 +158,15 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
     ...input,
     maxSupplyUnits: input.maxSupplyUnits ?? DEFAULT_MARKET_OPTIONS.maxSupplyUnits,
     cutoffBufferSecs: input.cutoffBufferSecs ?? DEFAULT_MARKET_OPTIONS.cutoffBufferSecs,
-    booksPerRefresh: input.booksPerRefresh ?? DEFAULT_MARKET_OPTIONS.booksPerRefresh,
+    listRefreshMs: input.listRefreshMs ?? DEFAULT_MARKET_OPTIONS.listRefreshMs,
     chainRefreshMs: input.chainRefreshMs ?? DEFAULT_MARKET_OPTIONS.chainRefreshMs,
   };
-  const curated = new Set(o.series);
-  /** Best prices as they came with the contract list; a side the venue left out is undefined. */
-  const quotes = new Map<string, { bidPx: bigint | null | undefined; askPx: bigint | null | undefined; at: number }>();
-  /** The last top of book read per symbol: the source of sizes, and of prices the list lacks. */
-  const tops = new Map<string, { top: TopOfBook; at: number }>();
-  /** When each live symbol last had its turn at a book read; a higher number is more recent. */
-  const bookTurns = new Map<string, number>();
-  let turn = 0;
+  /** Best prices as they came with the event list and when they first came, kept until the contract expires. */
+  const quotes = new Map<string, { bidPx: bigint | null; askPx: bigint | null; at: number; expiresAt: number }>();
+  /** When the venue last answered with its event list, unix milliseconds. */
+  let listedAt = Number.NEGATIVE_INFINITY;
+  /** What could not be stored from that answer. Reported until the next one, so it does not come and go. */
+  let unstored: RefreshError["parts"] = [];
   const chainMarkets = new Map<string, ChainMarket>();
   /** When each market's on-chain state was last read, unix milliseconds. */
   const chainReadAt = new Map<string, number>();
@@ -138,21 +174,20 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
   let venueOnline = true;
   let paused = false;
 
-  /** Prices from the contract list, else from the last book read; sizes from the last book read, "0" when unknown. */
+  /**
+   * The venue's live top of book while it is at least as new as the quote that came with the
+   * list; otherwise that quote, which carries no sizes.
+   */
   function bookOf(symbol: string): ApiBook | null {
     const quote = quotes.get(symbol);
-    const read = tops.get(symbol);
-    if (quote === undefined && read === undefined) return null;
-    const bidPx = quote?.bidPx !== undefined ? quote.bidPx : (read?.top.bidPx ?? null);
-    const askPx = quote?.askPx !== undefined ? quote.askPx : (read?.top.askPx ?? null);
-    return {
-      bidPx: bidPx === null ? null : bidPx.toString(),
-      bidUnits: (read?.top.bidUnits ?? 0n).toString(),
-      askPx: askPx === null ? null : askPx.toString(),
-      askUnits: (read?.top.askUnits ?? 0n).toString(),
-      // When the prices were read.
-      at: quote?.at ?? read?.at ?? 0,
-    };
+    const live = o.venue.liveTop(symbol);
+    const px = (value: bigint | null): string | null => (value === null ? null : value.toString());
+    if (live !== undefined && (quote === undefined || live.atMs >= quote.at)) {
+      const { top } = live;
+      return { bidPx: px(top.bidPx), bidUnits: top.bidUnits.toString(), askPx: px(top.askPx), askUnits: top.askUnits.toString(), at: live.atMs };
+    }
+    if (quote === undefined) return null;
+    return { bidPx: px(quote.bidPx), bidUnits: "0", askPx: px(quote.askPx), askUnits: "0", at: quote.at };
   }
 
   function toView(market: RegistryMarket): ApiMarket {
@@ -177,14 +212,13 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
     return {
       symbol: market.symbol,
       eventTicker: market.eventTicker,
-      series: market.series,
-      underlying: market.underlying,
       title: market.title,
       label: market.label,
+      strike: market.strike,
+      sortOrder: market.sortOrder,
       startsAt: market.effectiveAt,
       expiresAt: market.expiresAt,
       lastOrderAt,
-      strike: market.strike,
       venueStatus: market.venueStatus,
       marketState: market.marketState,
       tradable: reason === null,
@@ -193,6 +227,7 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
       minUnits: market.minUnits.toString(),
       unitIncrement: market.unitIncrement.toString(),
       book,
+      lastPx: market.lastPx === null ? null : market.lastPx.toString(),
       onchain,
       resolution: market.resolution,
       settlementValue: market.settlementValue,
@@ -200,38 +235,73 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
     };
   }
 
-  async function refreshBooks(failures: RefreshError["parts"]): Promise<void> {
-    const live = o.registry.live(o.now(), o.series);
-    const liveSymbols = new Set(live.map((market) => market.symbol));
-    for (const symbol of [...quotes.keys(), ...tops.keys(), ...bookTurns.keys()]) {
-      if (liveSymbols.has(symbol)) continue;
-      quotes.delete(symbol);
-      tops.delete(symbol);
-      bookTurns.delete(symbol);
+  function toEventView(event: RegistryEvent): ApiEvent {
+    return {
+      ticker: event.ticker,
+      title: event.title,
+      category: event.category,
+      subcategory: event.subcategory,
+      underlying: event.underlying,
+      shape: event.shape,
+      cadence: event.cadence,
+      listedAt: event.listedAt,
+      expiresAt: event.expiresAt,
+      venueStatus: event.venueStatus,
+      volumeUnits: event.volumeUnits.toString(),
+      markets: event.markets.map(toView),
+    };
+  }
+
+  /** One list read, when it is due: every event and contract into the registry, the quotes into the cache. */
+  async function refreshList(failures: RefreshError["parts"]): Promise<void> {
+    const now = o.now();
+    if (now - listedAt < o.listRefreshMs) {
+      failures.push(...unstored);
+      return;
     }
-    // Stable sort: among symbols that waited equally long, the soonest expiry goes first.
-    const due = live
-      .sort((a, b) => (bookTurns.get(a.symbol) ?? 0) - (bookTurns.get(b.symbol) ?? 0))
-      .slice(0, Math.max(0, o.booksPerRefresh));
-    for (const { symbol } of due) {
-      // The turn is spent even when the read fails, so one bad book cannot starve the others.
-      bookTurns.set(symbol, ++turn);
-      try {
-        tops.set(symbol, { top: await o.venue.topOfBook(symbol), at: o.now() });
-      } catch (error) {
-        failures.push({ part: "books", error });
+    let events: EventInfo[];
+    try {
+      events = await o.venue.listEvents();
+    } catch (error) {
+      // Asked again on the next refresh.
+      failures.push({ part: "venue_list", error });
+      return;
+    }
+    listedAt = now;
+    try {
+      unstored = o.registry.storeEvents(events, now).map((error) => ({ part: "registry", error }));
+      o.registry.prune(now);
+    } catch (error) {
+      unstored = [{ part: "registry", error }];
+    }
+    failures.push(...unstored);
+    // A contract that is missing from this read keeps its quote: one read can be a stale page.
+    for (const [symbol, quote] of quotes) if (!(now < quote.expiresAt)) quotes.delete(symbol);
+    for (const info of events.flatMap((event) => event.contracts)) {
+      if (info.bestBidPx === undefined && info.bestAskPx === undefined) {
+        quotes.delete(info.symbol);
+        continue;
       }
+      const bidPx = info.bestBidPx ?? null;
+      const askPx = info.bestAskPx ?? null;
+      // The list lags the book: prices it only repeats were learned when they first came, so
+      // that they do not pass for newer than a live top that has moved since.
+      const known = quotes.get(info.symbol);
+      const at = known !== undefined && known.bidPx === bidPx && known.askPx === askPx ? known.at : now;
+      quotes.set(info.symbol, { bidPx, askPx, at, expiresAt: info.expiresAt.getTime() });
     }
   }
 
   async function refreshChain(failures: RefreshError["parts"]): Promise<void> {
-    // Live and unsettled markets are read again only when the cached copy has aged: the public
-    // RPC endpoint limits requests per address, and supplies do not need to be fresher than this.
+    // Only markets that exist on-chain are read. Live and unsettled ones are read again only when
+    // the cached copy has aged: the public RPC endpoint limits requests per address, and supplies
+    // do not need to be fresher than this.
     const now = o.now();
     const due = (symbol: string): boolean => now - (chainReadAt.get(symbol) ?? Number.NEGATIVE_INFINITY) >= o.chainRefreshMs;
+    const onchain = o.registry.onchain(ONCHAIN_LIMIT);
     const symbols = new Set<string>();
-    for (const market of o.registry.live(now, o.series)) {
-      if (market.marketAddress !== null && due(market.symbol)) symbols.add(market.symbol);
+    for (const market of onchain) {
+      if (now < market.expiresAt && due(market.symbol)) symbols.add(market.symbol);
     }
     for (const market of o.registry.onchainUnsettled()) {
       if (due(market.symbol)) symbols.add(market.symbol);
@@ -239,9 +309,9 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
     // Older markets are read until their final state is cached: once after a restart, and once
     // more after settlement so the view carries the payouts and the redemption time.
     let catchUp = 0;
-    for (const market of o.registry.all(ALL_VIEW_LIMIT)) {
+    for (const market of onchain) {
       if (catchUp >= CATCH_UP_READS) break;
-      if (market.marketAddress === null || symbols.has(market.symbol)) continue;
+      if (symbols.has(market.symbol)) continue;
       const cached = chainMarkets.get(market.symbol);
       if (cached === undefined || (market.settleState === "settled" && cached.status !== "settled")) {
         symbols.add(market.symbol);
@@ -262,13 +332,13 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
   async function ensure(symbol: string): Promise<ApiMarket> {
     const market = o.registry.get(symbol);
     if (market === undefined) throw new MarketError("unknown", `unknown market ${symbol}`);
-    if (!curated.has(market.series)) throw new MarketError("not_allowed", `series ${market.series} is not offered`);
     if (market.venueStatus !== "active") throw new MarketError("not_allowed", `market ${symbol} is not active at the venue`);
     if (!(o.now() < market.expiresAt)) throw new MarketError("expired", `market ${symbol} has expired`);
     if (market.unitIncrement !== 1n) {
       throw new MarketError("not_allowed", `market ${symbol} trades in steps of ${market.unitIncrement} units, not 1`);
     }
 
+    // The names only reach the chain for a mint that does not exist yet.
     const created = await o.chain.ensureMarket({
       symbol,
       closeTs: Math.floor(market.expiresAt / 1_000),
@@ -288,33 +358,29 @@ export function createMarketManager(input: MarketManagerInput): MarketManager {
   return {
     async refresh() {
       const failures: RefreshError["parts"] = [];
-      try {
-        const now = o.now();
-        for (const info of await o.venue.listContracts()) {
-          if (!curated.has(seriesOf(info))) continue;
-          try {
-            o.registry.upsertContract(info, now);
-          } catch (error) {
-            failures.push({ part: "contract", error });
-            continue;
-          }
-          if (info.bestBidPx !== undefined || info.bestAskPx !== undefined) {
-            quotes.set(info.symbol, { bidPx: info.bestBidPx, askPx: info.bestAskPx, at: now });
-          } else {
-            quotes.delete(info.symbol);
-          }
-        }
-      } catch (error) {
-        failures.push({ part: "venue_list", error });
-      }
-      await refreshBooks(failures);
+      await refreshList(failures);
       await refreshChain(failures);
       if (failures.length > 0) throw new RefreshError(failures);
     },
 
-    views(scope) {
-      const markets = scope === "live" ? o.registry.live(o.now(), o.series) : o.registry.all(ALL_VIEW_LIMIT);
-      return markets.map(toView);
+    eventViews() {
+      return o.registry.liveEvents(o.now()).map(toEventView);
+    },
+
+    eventView(ticker) {
+      const event = o.registry.event(ticker);
+      if (event === undefined) return undefined;
+      return {
+        ...toEventView(event),
+        description: event.description,
+        source: event.source,
+        termsUrl: event.termsUrl,
+        rules: Object.fromEntries(event.markets.map((market) => [market.symbol, market.rules])),
+      };
+    },
+
+    views() {
+      return o.registry.onchain(ONCHAIN_LIMIT).map(toView);
     },
 
     view(symbol) {
@@ -359,7 +425,18 @@ function toOnchain(market: ChainMarket | undefined): ApiOnchainMarket | null {
 }
 
 function withoutVenueName(text: string): string {
-  return text.replace(/gemini|gemi/gi, "").replace(/\s+/g, " ").trim();
+  let out = text;
+  while (/gemi/i.test(out)) out = out.replace(/gemini|gemi/gi, "");
+  return out;
+}
+
+/** `3.550` -> `3.55`, `50.00` -> `50`; a whole number is left as it is. */
+function withoutTrailingZeros(decimal: string): string {
+  return decimal.includes(".") ? decimal.replace(/0+$/, "").replace(/\.$/, "") : decimal;
+}
+
+function withoutLastCharacter(text: string): string {
+  return Array.from(text).slice(0, -1).join("").trimEnd();
 }
 
 function byteLength(text: string): number {

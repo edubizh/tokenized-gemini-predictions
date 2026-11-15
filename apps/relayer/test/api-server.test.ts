@@ -1,20 +1,32 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApiHandlers, createApiServer, toApiOrder } from "../src/api/server.ts";
 import type { ApiHandlers, ApiServer } from "../src/api/server.ts";
-import type { ApiHealth, ApiMarket, ApiOrder, ApiStatus } from "../src/api/types.ts";
+import type { ApiDepth, ApiEvent, ApiEventDetail, ApiHealth, ApiHistory, ApiMarket, ApiOrder, ApiStatus, ApiTrade } from "../src/api/types.ts";
 import { openJournal } from "../src/journal.ts";
 import { MarketError } from "../src/markets.ts";
 
 const SYMBOL = "TEST-BTC15M2611140300-UP";
+const TICKER = "BTC15M2611140300";
 // Synthetic addresses: valid base58 text, not real accounts.
 const USER = "U".repeat(44);
 const ORDER = "o".repeat(32);
 
 const HEALTH = { ok: true, cluster: "localnet", venue: "mock", chainTime: 1_800_000_000 } as ApiHealth;
 const STATUS = { markets: [], relayerLamports: "5", alerts: [] } as unknown as ApiStatus;
+const DEPTH: ApiDepth = { bids: [{ px: "4000", units: "500" }], asks: [{ px: "4500", units: "700" }], at: 1_000_000 };
+const TRADES: ApiTrade[] = [{ id: "5000000000000001", at: 999_000, px: "4500", units: "100", taker: "buy" }];
+const HISTORY: ApiHistory = { stepSecs: 60, points: [{ at: 960_000, px: "4500" }] };
 
 function market(symbol: string, onchain = false): ApiMarket {
   return { symbol, tradable: true, onchain: onchain ? { market: "M".repeat(44) } : null } as ApiMarket;
+}
+
+function event(ticker: string): ApiEvent {
+  return { ticker, title: "BTC price today at 3am", markets: [market(SYMBOL)] } as ApiEvent;
+}
+
+function eventDetail(ticker: string): ApiEventDetail {
+  return { ...event(ticker), description: "A synthetic event", source: null, termsUrl: null, rules: { [SYMBOL]: "Resolves to Yes." } };
 }
 
 function order(address: string): ApiOrder {
@@ -24,9 +36,14 @@ function order(address: string): ApiOrder {
 function stubs(overrides: Partial<ApiHandlers> = {}): ApiHandlers {
   return {
     health: () => HEALTH,
-    markets: (scope) => [market(scope === "live" ? SYMBOL : "TEST-OLD")],
+    events: () => [event(TICKER)],
+    event: (ticker) => (ticker === TICKER ? eventDetail(ticker) : undefined),
+    markets: () => [market("TEST-OLD", true)],
     market: (symbol) => (symbol === SYMBOL ? market(symbol) : undefined),
     ensureMarket: async (symbol) => market(symbol, true),
+    depth: async (symbol) => (symbol === SYMBOL ? DEPTH : undefined),
+    trades: async (symbol) => (symbol === SYMBOL ? TRADES : undefined),
+    history: async (symbol) => (symbol === SYMBOL ? HISTORY : undefined),
     orders: (user, limit) => (user === USER ? [order(ORDER), order(`limit${limit}`)] : []),
     order: (address) => (address === ORDER ? order(address) : undefined),
     status: () => STATUS,
@@ -63,12 +80,43 @@ describe("routes", () => {
     expect(servers[0]!.address()).toMatchObject({ address: "127.0.0.1" });
   });
 
-  it("GET /markets lists the live markets by default, or all of them", async () => {
+  it("GET /events lists the events with their markets", async () => {
     const { get } = await serve();
-    expect((await get("/markets")).body).toEqual({ markets: [market(SYMBOL)] });
-    expect((await get("/markets?scope=live")).body).toEqual({ markets: [market(SYMBOL)] });
-    expect((await get("/markets?scope=all")).body).toEqual({ markets: [market("TEST-OLD")] });
-    expect(await get("/markets?scope=everything")).toMatchObject({ status: 400, body: { error: "scope must be live or all" } });
+    expect(await get("/events")).toMatchObject({ status: 200, body: { events: [event(TICKER)] } });
+  });
+
+  it("GET /events/:ticker returns one event in full, 404 for an unknown one, 400 for a malformed ticker", async () => {
+    const { get } = await serve();
+    expect(await get(`/events/${TICKER}`)).toMatchObject({ status: 200, body: eventDetail(TICKER) });
+    expect(await get("/events/NOPE2611140300")).toMatchObject({ status: 404, body: { error: "unknown event" } });
+    expect(await get("/events/btc15m2611140300")).toMatchObject({ status: 400, body: { error: "invalid ticker" } });
+    expect(await get(`/events/${"A".repeat(65)}`)).toMatchObject({ status: 400, body: { error: "invalid ticker" } });
+  });
+
+  it("GET /markets lists the markets that exist on-chain", async () => {
+    const { get } = await serve();
+    expect(await get("/markets")).toMatchObject({ status: 200, body: { markets: [market("TEST-OLD", true)] } });
+  });
+
+  it("GET /markets/:symbol/depth, /trades and /history answer from the venue's market data", async () => {
+    const { get } = await serve();
+    expect(await get(`/markets/${SYMBOL}/depth`)).toMatchObject({ status: 200, body: DEPTH });
+    expect(await get(`/markets/${SYMBOL}/trades`)).toMatchObject({ status: 200, body: { trades: TRADES } });
+    expect(await get(`/markets/${SYMBOL}/history`)).toMatchObject({ status: 200, body: HISTORY });
+    for (const data of ["depth", "trades", "history"]) {
+      expect(await get(`/markets/TEST-NOPE/${data}`)).toMatchObject({ status: 404, body: { error: "unknown market" } });
+      expect(await get(`/markets/bad_symbol/${data}`)).toMatchObject({ status: 400, body: { error: "invalid symbol" } });
+    }
+  });
+
+  it("answers 500 when the venue cannot be read for market data, with the detail in the log", async () => {
+    const { get, logs } = await serve({
+      depth: async () => {
+        throw new Error("venue said 400 for /v1/book");
+      },
+    });
+    expect(await get(`/markets/${SYMBOL}/depth`)).toMatchObject({ status: 500, body: { error: "internal error" } });
+    expect(logs).toEqual([`api GET /markets/${SYMBOL}/depth failed: venue said 400 for /v1/book`]);
   });
 
   it("GET /markets/:symbol returns one market, 404 for an unknown one, 400 for a malformed symbol", async () => {
@@ -107,7 +155,8 @@ describe("routes", () => {
 
   it("answers 404 for unknown paths and 405 for the wrong method", async () => {
     const { get, post, call } = await serve();
-    for (const path of ["/", "/nope", "/health/more", `/markets/${SYMBOL}/halt`, `/markets/${SYMBOL}/ensure/again`, `/orders/${ORDER}/fills`]) {
+    const paths = ["/", "/nope", "/health/more", `/events/${TICKER}/markets`, `/markets/${SYMBOL}/halt`, `/markets/${SYMBOL}/toString`, `/markets/${SYMBOL}/ensure/again`, `/markets/${SYMBOL}/depth/10`, `/orders/${ORDER}/fills`];
+    for (const path of paths) {
       expect(await get(path)).toMatchObject({ status: 404, body: { error: "not found" } });
     }
     const wrong = await post("/health");
@@ -118,6 +167,11 @@ describe("routes", () => {
     const ensure = await get(`/markets/${SYMBOL}/ensure`);
     expect(ensure.status).toBe(405);
     expect(ensure.headers.get("allow")).toBe("POST");
+    for (const path of ["/events", `/events/${TICKER}`, `/markets/${SYMBOL}/depth`, `/markets/${SYMBOL}/trades`, `/markets/${SYMBOL}/history`]) {
+      const posted = await post(path);
+      expect(posted.status).toBe(405);
+      expect(posted.headers.get("allow")).toBe("GET");
+    }
   });
 
   it("writes BigInt values as decimal strings", async () => {
@@ -155,7 +209,7 @@ describe("POST /markets/:symbol/ensure", () => {
   it("maps an unknown market to 404 and a market that may not be listed to 409 with the reason", async () => {
     const refusals: Record<string, MarketError> = {
       "TEST-GONE": new MarketError("unknown", "unknown market TEST-GONE"),
-      "TEST-DOGE": new MarketError("not_allowed", "series DOGE15M is not offered"),
+      "TEST-DOGE": new MarketError("not_allowed", "market TEST-DOGE is not active at the venue"),
       "TEST-LATE": new MarketError("expired", "market TEST-LATE has expired"),
     };
     const { post } = await serve({
@@ -166,7 +220,7 @@ describe("POST /markets/:symbol/ensure", () => {
     });
     expect(await post("/markets/TEST-NEVER/ensure")).toMatchObject({ status: 404, body: { error: "unknown market" } });
     expect(await post("/markets/TEST-GONE/ensure")).toMatchObject({ status: 404, body: { error: "unknown market" } });
-    expect(await post("/markets/TEST-DOGE/ensure")).toMatchObject({ status: 409, body: { error: "series DOGE15M is not offered" } });
+    expect(await post("/markets/TEST-DOGE/ensure")).toMatchObject({ status: 409, body: { error: "market TEST-DOGE is not active at the venue" } });
     expect(await post("/markets/TEST-LATE/ensure")).toMatchObject({ status: 409, body: { error: "market TEST-LATE has expired" } });
     expect(await post("/markets/TEST-BOOM/ensure")).toMatchObject({ status: 500, body: { error: "internal error" } });
   });
@@ -205,7 +259,7 @@ describe("POST /markets/:symbol/ensure", () => {
 });
 
 describe("handlers over the relayer's parts", () => {
-  it("builds an order with its fills from the journal, numbers as strings", () => {
+  it("builds an order with its fills from the journal, numbers as strings, and passes the rest on", async () => {
     const journal = openJournal(":memory:");
     try {
       journal.recordSeen({
@@ -236,7 +290,14 @@ describe("handlers over the relayer's parts", () => {
 
       const handlers = createApiHandlers({
         daemon: { health: () => HEALTH, status: () => STATUS },
-        manager: { views: () => [], view: () => undefined, ensureOnchain: async (symbol) => market(symbol, true) },
+        manager: {
+          eventViews: () => [event(TICKER)],
+          eventView: (ticker) => (ticker === TICKER ? eventDetail(ticker) : undefined),
+          views: () => [market(SYMBOL, true)],
+          view: (symbol) => (symbol === SYMBOL ? market(symbol) : undefined),
+          ensureOnchain: async (symbol) => market(symbol, true),
+        },
+        marketData: { depth: async () => DEPTH, trades: async () => TRADES, history: async () => undefined },
         journal,
       });
       const expected = {
@@ -268,6 +329,15 @@ describe("handlers over the relayer's parts", () => {
       expect(handlers.order("x".repeat(40))).toBeUndefined();
       expect(handlers.health()).toBe(HEALTH);
       expect(handlers.status()).toBe(STATUS);
+      expect(handlers.events()).toEqual([event(TICKER)]);
+      expect(handlers.event(TICKER)).toEqual(eventDetail(TICKER));
+      expect(handlers.event("NOPE")).toBeUndefined();
+      expect(handlers.markets()).toEqual([market(SYMBOL, true)]);
+      expect(handlers.market(SYMBOL)).toEqual(market(SYMBOL));
+      expect(await handlers.ensureMarket(SYMBOL)).toEqual(market(SYMBOL, true));
+      expect(await handlers.depth(SYMBOL)).toBe(DEPTH);
+      expect(await handlers.trades(SYMBOL)).toBe(TRADES);
+      expect(await handlers.history(SYMBOL)).toBeUndefined();
     } finally {
       journal.close();
     }

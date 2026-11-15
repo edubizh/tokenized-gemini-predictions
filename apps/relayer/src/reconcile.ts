@@ -1,6 +1,7 @@
 // Reconciliation: compares the venue account's position in each unsettled on-chain market with
 // what the token supplies, in-flight fills and orphaned fills imply, and checks that the treasury
-// could fund the worst case of those markets.
+// could fund the worst case of those markets. Every contract stands alone, the strikes of one
+// ladder included: several of them can pay, so nothing nets across them.
 
 import type { ApiReconcileMarket, ApiStatus } from "./api/types.ts";
 import type { MarketChain } from "./chain/chain.ts";
@@ -20,7 +21,7 @@ export type ReconcileResult = Pick<ApiStatus, "markets" | "solvency">;
 
 /** Consecutive unbalanced runs of one market that trigger the automatic pause. */
 export const UNBALANCED_RUNS_TO_PAUSE = 3;
-/** How many registry rows are searched for markets under review. */
+/** How many on-chain markets are searched for the ones under review. */
 const REVIEW_SCAN_LIMIT = 500;
 
 /** Signed units the venue account gained from the row's fill. The venue only ever buys: a buy
@@ -34,14 +35,16 @@ export async function reconcile({ venue, chain, registry, journal }: ReconcileDe
   // Not settled: still trading, awaiting a result, or held for review. Unused markets have no supply.
   const candidates = [
     ...registry.onchainUnsettled(),
-    ...registry.all(REVIEW_SCAN_LIMIT).filter((market) => market.marketAddress !== null && market.settleState === "needs_review"),
+    ...registry.onchain(REVIEW_SCAN_LIMIT).filter((market) => market.settleState === "needs_review"),
   ];
+  // One read for the whole run. A contract the account is flat in has no row.
+  const positions = await venue.positions();
   const markets: ApiReconcileMarket[] = [];
   let requiredMicros = 0n;
   for (const { symbol } of candidates) {
     const onchain = await chain.market(symbol);
     if (onchain === null || onchain.status === "settled") continue;
-    const venueNet = await venue.netPosition(symbol);
+    const venueNet = positions.get(symbol) ?? 0n;
     const inFlight = journal
       .byState("venue_filled")
       .filter((row) => row.symbol === symbol)

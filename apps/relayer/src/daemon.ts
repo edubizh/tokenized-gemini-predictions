@@ -8,9 +8,8 @@ import type { Journal, OrderState } from "./journal.ts";
 import { RefreshError } from "./markets.ts";
 import type { MarketManager } from "./markets.ts";
 import { DEFAULT_PIPELINE_CONFIG, processOrder, recover } from "./pipeline.ts";
-import type { PipelineConfig, PipelineDeps } from "./pipeline.ts";
+import type { OrderVenue, PipelineConfig, PipelineDeps } from "./pipeline.ts";
 import type { Reconciler } from "./reconcile.ts";
-import type { Venue } from "./venue/venue.ts";
 
 export interface AlertEvent {
   kind: string;
@@ -69,7 +68,8 @@ const ORDER_STATES: readonly OrderState[] = [
 export interface DaemonDeps {
   /** Constant facts reported by `health`. */
   identity: Pick<ApiHealth, "cluster" | "venue" | "programId" | "relayer" | "stableMint">;
-  venue: Venue;
+  /** Where orders go. */
+  venue: OrderVenue;
   chain: Chain & MarketChain;
   journal: Journal;
   manager: MarketManager;
@@ -129,17 +129,13 @@ export function createDaemon(deps: DaemonDeps): Daemon {
 
   // While fills are paused on-chain a venue fill could not be recorded there, so no order goes
   // to the venue: it is refused here and the pipeline cancels it on-chain.
-  const gatedVenue: Venue = {
+  const gatedVenue: OrderVenue = {
     placeOrder: (request) =>
       chainConfig?.pauseFill === true
         ? Promise.resolve({ kind: "rejected", code: null, message: "fills are paused on-chain" })
         : venue.placeOrder(request),
     findOrder: (clientOrderId, symbol, sinceMs) => venue.findOrder(clientOrderId, symbol, sinceMs),
-    netPosition: (symbol) => venue.netPosition(symbol),
-    cashMicros: () => venue.cashMicros(),
     contract: (symbol) => venue.contract(symbol),
-    listContracts: () => venue.listContracts(),
-    settledPayoutMicros: (symbol) => venue.settledPayoutMicros(symbol),
     topOfBook: (symbol) => venue.topOfBook(symbol),
   };
   const pipelineDeps: PipelineDeps = {
@@ -240,7 +236,7 @@ export function createDaemon(deps: DaemonDeps): Daemon {
       await manager.refresh();
       venueListOk = true;
     } catch (error) {
-      // Only a failed contract list says the venue is unreachable.
+      // Only a failed event list says the venue is unreachable.
       if (error instanceof RefreshError) venueListOk = !error.parts.some(({ part }) => part === "venue_list");
       errors.push(error);
     }
