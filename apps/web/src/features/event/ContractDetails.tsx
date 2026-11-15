@@ -6,7 +6,7 @@ import { Fact, Facts } from "@/components/ui/Facts";
 import { Panel } from "@/components/ui/Panel";
 import { Row, RowList, type Column } from "@/components/ui/RowList";
 import { centsText, NO_VALUE } from "@/features/markets/derive";
-import { formatClock } from "@/features/markets/wording";
+import { formatClock, priceToBeat } from "@/features/markets/wording";
 import { formatContracts } from "@/lib/format";
 import { useDepth, useHistory, useTrades } from "@/lib/relayer/hooks";
 import { PriceChart } from "./PriceChart";
@@ -67,6 +67,7 @@ export function ContractDetails({ event, market }: { event: ApiEventDetail; mark
   const trades = useTrades(market.symbol);
   const history = useHistory(market.symbol);
   const rule = event.rules[market.symbol];
+  const toBeat = priceToBeat(market);
 
   return (
     <>
@@ -112,6 +113,7 @@ export function ContractDetails({ event, market }: { event: ApiEventDetail; mark
           <p>{rule ?? event.description}</p>
           <h3 className="sr-only">Resolution</h3>
           <Facts>
+            {toBeat && <Fact label="Price to beat">{toBeat}</Fact>}
             <Fact label="Resolves from">{event.source ? `${event.source.agency}, ${event.source.index}` : "The venue's reference price at the close"}</Fact>
             {event.termsUrl && (
               <Fact label="Terms">

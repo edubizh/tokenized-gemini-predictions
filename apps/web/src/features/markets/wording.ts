@@ -84,6 +84,16 @@ export function payoutStatement(market: Pick<ApiMarket, "label" | "strike" | "st
   return `The reference price is set when the window opens at ${formatClock(market.startsAt, options)}.`;
 }
 
+/**
+ * The price an Up contract must close at or above, or when it will be known: the venue publishes
+ * it a minute or two after the window opens. Null for any other contract.
+ */
+export function priceToBeat(market: Pick<ApiMarket, "label" | "strike" | "startsAt"> & { venueStatus?: string }, options: TimeOptions = {}): string | null {
+  if (market.label !== "Up") return null;
+  if (market.strike === null && !venueKnown(market)) return "Not known while the relayer is not answering";
+  return market.strike === null ? `Set shortly after ${formatClock(market.startsAt, options)}` : formatStrike(market.strike);
+}
+
 /** Why a contract cannot be traded now, or null when it can. */
 export function notTradableWords(market: Pick<ApiMarket, "tradable" | "notTradableReason" | "startsAt">, options: TimeOptions = {}): string | null {
   if (market.tradable) return null;

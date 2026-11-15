@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ApiMarket } from "@outcome/relayer/api-types";
 import { fixtureMarket } from "@/lib/relayer/fixtures";
-import { formatClock, formatStrike, marketTitle, notTradableWords, payoutStatement, strikeLabel } from "./wording";
+import { formatClock, formatStrike, marketTitle, notTradableWords, payoutStatement, priceToBeat, strikeLabel, VENUE_NOT_KNOWN } from "./wording";
 
 const NY = { timeZone: "America/New_York" };
 // 2026-11-14 22:00:00 EST
@@ -68,6 +68,13 @@ describe("market wording", () => {
   });
   it("falls back to the label for a contract that has no strike and is not an Up contract", () => {
     expect(payoutStatement(market({ label: "Rain in Lisbon", strike: null }), NY)).toBe("YES pays $1.00 if: Rain in Lisbon.");
+  });
+  it("names the price to beat of an Up contract, or when the venue sets it", () => {
+    expect(priceToBeat(market({}), NY)).toBe("$67,410.73");
+    // The venue publishes it a minute or two after the window opens.
+    expect(priceToBeat(market({ strike: null }), NY)).toBe("Set shortly after 9:45 PM");
+    expect(priceToBeat(market({ strike: null, venueStatus: VENUE_NOT_KNOWN }), NY)).toBe("Not known while the relayer is not answering");
+    expect(priceToBeat(market({ label: "$68,000 or above", strike: "68000" }), NY)).toBeNull();
   });
   it("gives the reason a contract cannot be traded in words", () => {
     expect(notTradableWords(market({ tradable: true, notTradableReason: null }), NY)).toBeNull();

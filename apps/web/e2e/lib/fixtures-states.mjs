@@ -90,13 +90,13 @@ export async function flip(context, query) {
 }
 
 /** Logs in with the test e-mail account, retrying once when the login service refuses or is slow. */
-export async function logIn(page) {
+export async function logIn(page, base = BASE) {
   const email = process.env.PRIVY_TEST_EMAIL;
   const otp = process.env.PRIVY_TEST_OTP;
   if (!email || !otp) throw new Error("PRIVY_TEST_EMAIL and PRIVY_TEST_OTP must be set (node --env-file=../../.env).");
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      await go(page, "/");
+      await page.goto(`${base}/`, { waitUntil: "networkidle" });
       await testId(page, "login-top").click({ timeout: 60_000 });
       await testId(page, "login-email").click();
       const input = page.locator('input[type="email"]').first();
