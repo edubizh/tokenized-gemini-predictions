@@ -183,32 +183,32 @@ Findings (2026-11-14):
 
 Matrix (one row per case, one column per wallet): first login (connect, then sign); the user rejects the connection; the user rejects or closes the signature; wallet locked; wallet on another network or Testnet Mode off; two wallets installed; log out and in again; switch account inside the wallet; reload, then Reconnect; first-run test funds; place an order and reach FILLED or REFUNDED; redeem; Reclaim. Email login keeps passing its checks.
 
-Result (2026-11-15), real extensions (Phantom 26.38.1, MetaMask 13.56) in a test browser with wallets made by the test, on devnet with the simulated venue. Each case is `node e2e/real-wallets/matrix.mjs <wallet> <case>` from `apps/web`.
+Result (2026-11-15), on the rebuilt pages (login from the navbar, first-run test funds in the trade panel), real extensions (Phantom 26.38.1, MetaMask 13.56) in a test browser with wallets made by the test. Every row was run on devnet with the simulated venue (`VENUE=mock MOCK_WINDOW_SECS=180`) for both wallets; rows 10 to 13 for Phantom were also run on devnet with the sandbox venue. One defect is open: while the public devnet RPC was answering with HTTP 429, an order was placed on Solana (held, sent, refunded) while the trade panel said "The order was not placed: HTTP error (429)" and offered the order again; the confirmation of a sent transaction does not survive a rate-limited status read. Each case is `node e2e/real-wallets/matrix.mjs <wallet> <case>` from `apps/web` (cases: first-login, side-panel, reject-connect, reject-sign, close-window, no-answer, locked, relogin, two-wallets, live, reclaim; `MARKETS` sets the markets query a live case picks from, default `?cadence=15m`). Evidence: `apps/web/e2e/out/real-wallets/matrix-<wallet>-<case>/`.
 
 | Case | Phantom | MetaMask |
 |---|---|---|
-| First login (connect, then sign), in a window and in the side panel | pass | pass |
+| First login (connect, then sign), in a window and in the side panel | pass | pass (it asks in its side panel only) |
 | The user rejects the connection | pass | pass |
 | The user rejects the signature; closes the window; closes the side panel | pass | pass (it has no window) |
 | Wallet locked | pass | pass |
-| Other network | pass: the app names Testnet Mode; with it on the order fills | pass: the app says plainly that it cannot sign |
+| Other network | pass: with Testnet Mode off the app names the setting and Cancel sends nothing; with it on the order goes through | pass: the app says plainly that it cannot sign, and MetaMask is not asked |
 | Two wallets installed | pass | pass |
 | Log out and in again | pass | pass |
-| Switch account inside the wallet | app side passes with the injected wallet; not run in the extension | pass |
-| Reload, then Reconnect | pass | pass |
-| First-run test funds | pass | pass |
-| Place an order | pass, filled | does not apply |
-| Redeem | pass | does not apply |
-| Reclaim | pass | does not apply |
+| Switch account inside the wallet | app side passes with the injected wallet; not run in the extension | pass: MetaMask keeps the site on the account that logged in |
+| Reload, then Reconnect | pass: Phantom restores the connection by itself | pass: MetaMask restores the connection by itself |
+| First-run test funds | pass (both venues) | pass |
+| Place an order | pass on both venues, filled and refunded; the open defect above under RPC rate limits | does not apply |
+| Redeem | pass on both venues | does not apply |
+| Reclaim | pass on both venues | does not apply |
 
 What is supported:
 
-- **Phantom**: login and trading. It asks in a window of its own or in its side panel; the app says so while it waits.
+- **Phantom**: login and trading. It asks in a window of its own or in its side panel; the app says so while it waits. Devnet transactions need its Testnet Mode (Settings, Developer Settings); the waiting text says so.
 - **MetaMask**: login only. MetaMask 13.56 confirms Solana mainnet transactions only (asked for devnet it still previews on mainnet and keeps its Confirm button off, and it offers no Solana test network), so it cannot sign an order here. The login entry and the trade panel say so.
 - **Solflare, Backpack**: listed when installed; not run with the real extensions.
 - **WalletConnect**: offered through the login library's own window; needs a phone wallet and was not run.
 
-Still to check by hand: Phantom with Testnet Mode on in an ordinary browser profile (in the test browser Phantom's own service refuses to preview a transaction, so the test confirms without a preview); switching between two accounts inside Phantom (its service refuses to add an account in the test browser); WalletConnect with a phone.
+Still to check by hand: Phantom with Testnet Mode on in an ordinary browser profile (in the test browser Phantom's own service refuses to preview a transaction, so the test confirms without a preview); switching between two accounts inside Phantom (its service refuses to add an account in the test browser); WalletConnect with a phone; Solflare and Backpack, if they are to be named as supported.
 
 Exit: every row passes for Phantom and for MetaMask (through its Solana account) with real extensions on a live stack; no path hangs without a message; unit tests and browser checks pass.
 
@@ -250,35 +250,61 @@ Exit: every route is rebuilt and reviewed in screenshots at 1280 and 390; no com
 - [x] Unit tests, type-checks and builds of every package
 - [x] Screenshots of every route and state at both widths, checked against DESIGN.md
 - [x] Live on devnet with the sandbox, from the command line: a 15-minute contract and a strike-ladder contract bought, settled and redeemed, with reconciliation balanced (a commodity contract cannot be bought there: none has ever had an offer)
-- [ ] The same from the browser, with a sale
-- [ ] The wallet matrix with real extensions on the live stack
-- [ ] A run with the relayer stopped
+- [x] The same from the browser, with a sale
+- [x] The wallet matrix with real extensions on the live stack
+- [x] A run with the relayer stopped
 - [x] An independent review of each track
 
 ## P6. Documentation
 
-- [ ] README, ARCHITECTURE and SCOPE brought up to date
-- [ ] Phase 2 review below: what changed, what was verified, what is not done
-- [ ] Lessons
+- [x] README, ARCHITECTURE and SCOPE brought up to date
+- [x] Phase 2 review below: what changed, what was verified, what is not done
+- [x] Lessons
 
 ## Phase 2 review
 
-Not finished. State on 2026-11-15:
+Finished on 2026-11-15.
 
-Done and verified:
+What was built:
 
 - **Wallet login** is the app's own: a login entry with email, one button per detected Solana wallet and WalletConnect, and one waiting block for every wallet request that names the wallet, says where it asks (a window or its side panel), and offers Cancel and Try again. Verified with the real Phantom and MetaMask extensions (table under P1).
 - **Design**: four colours (forest `#173B2A`, jade `#0A7F56`, peach `#FEF3EB`, white), one typeface, twelve primitives, a see-through navbar; every pairing in use is checked for contrast by a unit test. Every page is rebuilt on it and nothing of the old theme is left.
 - **Every market**: the relayer lists every event of the venue with its contracts (both shapes, six durations, two categories), serves depth, trades and price history, takes the live top of book from the venue's public feed, creates a market on-chain only at a logged-in trader's first order, and settles each contract by itself. The simulated venue offers the same variety. The local end-to-end run takes a ladder contract and an up-or-down contract from buy to redemption.
-- **Pages**: markets index (filters, search, sort, cards), event page (contracts, price chart, order book, recent trades, rule, dates, on-chain accounts, position and orders), trade panel (every state, prices in cents), portfolio, activity, system, vaults placeholder.
-- **Checks**: 445 unit tests in the web app and 927 in the relayer, type-checks and the production build; two browser checks in fixtures mode drive every route and state at 1280, 390 and 360 (no page error, no overflow, no target under 44 px) and follow an order to filled; an independent review of the relayer and one of the web app, with their must-fix items fixed.
+- **Pages**: markets index (filters, search, sort, cards), event page (contracts, price chart, order book, recent trades, rule with the price to beat for an up-or-down contract, dates, on-chain accounts, position and orders), trade panel (every state, prices in cents), portfolio, activity, system, vaults placeholder.
+- **Checks**: 452 unit tests in the web app and 941 in the relayer (`pnpm -r test`), type-checks and the production build; CI passed on every push; two browser checks in fixtures mode drive every route and state at 1280, 390 and 360 (no page error, no overflow, no target under 44 px) and follow an order to filled; `pnpm dev` started the relayer and the web app from a fresh shell and stopped both on SIGTERM; screenshots of every page at 1280 and 390 on the live stack, logged out and logged in, in `apps/web/e2e/out/live/` (not committed); an independent review of the relayer and one of the web app, with their must-fix items fixed.
 
-- **First live run** of the new relayer on devnet with the sandbox, from the command line (2026-11-15, 01:10 to 02:01 UTC): it served all 110 events and 370 contracts the venue listed, and the twelve markets of the first release were still there after the database was brought to the new tables. On an hourly ladder (XRP at $0.84 or above) one Yes contract was bought at 97 cents and half of it sold back at 88; on a 15-minute contract one No was bought and a Yes order below the offer was refunded in full. Fills landed 1 to 3 seconds after placement. Both markets settled on-chain 31 and 38 seconds after expiry from the venue's results and the winning tokens redeemed for a dollar each. Reconciliation stayed balanced throughout.
+What was verified live on devnet against the sandbox, on 2026-11-15 (UTC), from the browser with the e-mail test account unless noted:
 
-Not done yet:
+| What | Result |
+|---|---|
+| Hourly ladder contract (BTC at $61,900 or above, 04:00) | 2 Yes bought at 97¢, filled in 6.7 s; 1 sold at 88¢, filled in 11.2 s; settled on Solana 36 s after expiry; the remaining token redeemed for $1.00 |
+| 15-minute contract (XRP Up, 03:30) | 2 Yes bought at 87¢, filled in 13.2 s; 1 sold at 55¢, filled in 6.1 s; settled on Solana 38 s after expiry; redeemed for $1.00 |
+| Order at 5¢ under a 16¢ offer | refunded in full after 18.5 s |
+| Reconciliation | read after every step; balanced, except for the defect below, fixed and confirmed at the 04:45 expiry |
+| Browser checks `live-onboard`, `live-flow`, `live-sell`, `live-account`, `live-wallet`, `live-reconnect` | passed on the rebuilt pages, scripts unchanged |
+| Relayer stopped (`live-offline`) | the index said the relayer is not answering; portfolio and activity showed the balance and the open order from Solana; the order showed Expired after its 90 seconds and Reclaim returned the hold at the first try ($1,000.89 before, $1,000.75 while held, $1,000.89 after) |
+| Wallet matrix, real Phantom 26.38.1 and MetaMask 13.56 | every row passed for both wallets on devnet with the simulated venue (table under P1); MetaMask logs in and the app says it cannot sign; with Phantom, test funds, orders (filled and refunded), redemption ($1.00) and Reclaim passed there and on the sandbox stack (an order filled in 15.7 s) |
+| Commodity ladder, on devnet with the simulated venue (gold at $3,675 or above) | 1 Yes bought at 97¢, filled in 18.6 s; settled on Solana 30 s after the close; redeemed for $1.00 |
+| Command line, 01:10 to 02:01 | see "First live run" below |
 
-- The same live run from the browser, the wallet matrix on the sandbox stack, and a run with the relayer stopped. The live checks under `apps/web/e2e/live-*.mjs` follow the new pages but have not been run.
-- Found by the live run, not fixed: token supplies shown for a market stop updating once it is settled; an event keeps the status "active" after its contracts have settled; the first listing after a start can be incomplete for under a minute; an alert that says "fetch failed" without saying what was being fetched.
-- A commodity contract cannot be bought on the sandbox: no commodity, HYPE, ZEC, weekly or monthly contract has ever had an offer there, and one account cannot trade with itself. Those markets are listed with "No offers"; the commodity ladder trades, settles and redeems on the simulated venue.
-- README, ARCHITECTURE and SCOPE still describe the first release in places.
-- From the reviews, not yet done: contracts the venue drops from a ladder stay listed until they expire; the status rule that never moves backwards can also block a real correction; list reads share one queue with settlement reads.
+- **First live run** of the new relayer on devnet with the sandbox, from the command line (2026-11-15, 01:10 to 02:01 UTC): it served all 110 events and 370 contracts the venue listed, and the twelve markets of the first release were still there after the database was brought to the new tables. On an hourly ladder (XRP at $0.84 or above) one Yes contract was bought at 97 cents and half of it sold back at 88; on a 15-minute contract one No was bought and a Yes order below the offer was refunded in full. Fills landed 1 to 3 seconds after placement. Both markets settled on-chain 31 and 38 seconds after expiry from the venue's results and the winning tokens redeemed for a dollar each. Reconciliation was balanced at every read taken.
+
+Found by the live runs and fixed, each with a test:
+
+- Supplies of a settled market did not follow redemptions. They do now (seen live: 300 to 0 about 20 s after a redemption).
+- An event kept the status "active" after its contracts had settled. It is settled once all its contracts are (seen live on a ladder of eight strikes).
+- An alert said "fetch failed" without saying what was read. It names the read now (seen live: "markets: chain config read: fetch failed").
+- The first listing after a start could be incomplete. The venue answers its list from caches of different ages; the first list is three reads merged, and a page older than the one held is not taken.
+- A contract the venue drops from an event stayed listed. It is no longer offered after two list reads without it (unit-tested; the venue did not drop one during the runs).
+- For one 30-second check after each expiry a market read "Not balanced": the venue drops its position when it settles a contract, before the on-chain settlement, and three such checks would have paused new orders. The position is now compared only until a contract expires; the settlement check covers it after that, and an expired market still counts in the funds required.
+- The simulated venue numbered its orders and trades from the same value at every start. After a restart they collided with fills the database already held, a market read unbalanced and the relayer paused new orders on-chain, as designed. Ids now start from the start time. The relayer gained a `resume` command, which cleared the pause.
+- On real data: an up-or-down contract shows its price to beat (or when the venue sets it); ladder labels keep the digits of their strike ("$6.10 or above"); the event page's last price, chart and caption follow the trades listed.
+
+Not done, and why:
+
+- MetaMask cannot sign Solana devnet transactions: it confirms mainnet transactions only.
+- Commodity, HYPE, ZEC, weekly and monthly contracts never have an offer on the sandbox, and one account cannot trade with itself. They are listed with "No offers" and trade on the simulated venue.
+- Still to check by hand: Phantom with Testnet Mode on in an ordinary browser profile, switching accounts inside Phantom, WalletConnect with a phone, Solflare and Backpack.
+- Killing the relayer between the venue order and the on-chain fill was not forced on live infrastructure; the pipeline's crash tests cover it.
+- The open review items are listed under "Known limits" in [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
+- No licence is chosen (see "Open decisions").

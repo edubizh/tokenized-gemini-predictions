@@ -210,10 +210,18 @@ async function openTicket(s, side = "YES", marketUrl = null) {
     // A card's price button: "Yes 57 cents, buy …".
     const buy = page.locator('[data-testid="event-card"]').getByRole("link", { name: new RegExp(`^${side === "NO" ? "No" : "Yes"}\\b`) }).first();
     // The simulated venue's 15-minute events last one window (MARKET_WINDOW_SECS) and start on multiples of it.
-    await page.goto(`${BASE}/${MARKETS}`, { waitUntil: "domcontentloaded" });
-    if (!(await until(() => buy.isVisible(), 240_000))) return false;
-    await buy.click();
-    await page.waitForURL(/\/markets\/.+/);
+    // A market past its last order time (up to the relayer's order lifetime before its close) still
+    // shows its prices, but its panel takes no orders: then the next one is taken.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await page.goto(`${BASE}/${MARKETS}`, { waitUntil: "domcontentloaded" });
+      if (!(await until(() => buy.isVisible(), 240_000))) return false;
+      await buy.click();
+      await page.waitForURL(/\/markets\/.+/);
+      if (!(await until(() => ticket(page).isVisible(), 120_000))) return false;
+      if (!(await quantity(page).isDisabled())) break;
+      log("step", "that market no longer takes orders; waiting for the next one");
+      await sleep(20_000);
+    }
   }
   if (!(await until(() => ticket(page).isVisible(), 120_000))) return false;
   const again = page.locator('[data-testid="place-another"]');
@@ -226,8 +234,16 @@ async function placeOrder(s, what, side = "YES", marketUrl = null) {
   const { page } = s;
   if (!check((await openTicket(s, side, marketUrl)) && (await until(() => placeButton(page).isEnabled(), 15_000)), `a market takes ${side} orders`)) return null;
   await quantity(page).fill("1.00");
+  // The limit is fixed at the offer seen when the panel was first touched; a user takes the offer as it is now.
+  const moved = ticket(page).locator('[data-testid="ticket-moved"]').getByRole("button");
+  if (await moved.isVisible()) await moved.click();
   await placeButton(page).click();
   await sign(s, what);
+  // A signed order is followed in the trade panel's slip; when none appears, say what the panel shows instead.
+  if (!(await until(() => page.locator('[data-testid="order-slip"]').first().isVisible(), 30_000))) {
+    log("app", `no order slip 30 s after signing; the trade panel says: ${oneLine(await page.locator('aside[aria-label="Trade"]').innerText().catch(() => "")).slice(0, 400)}`);
+    await s.browser.shoot(page, `${what.replace(/\s+/g, "-")}-no-slip`);
+  }
   const stamp = await until(async () => {
     const shown = await page.locator('[data-testid="order-slip"]').first().getAttribute("data-stamp", { timeout: 2_000 });
     return (shown === "FILLED" || shown === "REFUNDED") && shown;

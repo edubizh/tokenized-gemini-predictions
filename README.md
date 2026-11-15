@@ -31,15 +31,16 @@ The bridge is custodial: the program limits what the relayer can do to any one o
 
 ## Status
 
-Built, and verified end to end on Solana devnet against the Gemini Predictions sandbox, from the command line (14 and 15 November 2026):
+Built, and verified end to end on Solana devnet against the Gemini Predictions sandbox, from the browser with an e-mail login (15 November 2026):
 
-- on an hourly ladder contract and on a 15-minute contract, buys placed on-chain were filled at the sandbox and the tokens were minted 1 to 3 seconds after the order was placed;
-- a sell-back filled, the tokens were burned and the proceeds paid;
-- an order below the offer was refunded in full;
-- with the relayer stopped, the user reclaimed an expired order's hold without it;
-- both contracts were settled on-chain from the sandbox's results 31 and 38 seconds after expiry, the winning tokens were redeemed, and reconciliation stayed balanced.
+- an hourly ladder contract and a 15-minute contract were each bought, partly sold back, settled on-chain from the sandbox's results 36 and 38 seconds after expiry, and the remaining winning token redeemed for $1.00; each fill came 6 to 14 seconds after the order was placed;
+- an order under the offer was refunded in full;
+- reconciliation was read after every step and was balanced;
+- with the relayer stopped, the pages kept showing balances and the open order from Solana, and the expired order's hold was reclaimed from the browser at the first try.
 
-In the browser, login and signing were run with the real Phantom and MetaMask extensions on devnet with the simulated venue (Phantom: login, test funds, an order filled, redemption, Reclaim; MetaMask: login). Every page and state is checked at 1280, 390 and 360 pixels wide against simulated data.
+The same flow was run before from the command line, on 14 and 15 November. The browser checks in `apps/web/e2e/` pass on these pages against the live stack.
+
+Wallet login with the real Phantom and MetaMask extensions: every login case passed for both on devnet. MetaMask logs in and the app says it cannot sign; with Phantom, test funds, an order (filled), redemption and Reclaim passed against the sandbox and against the simulated venue. A commodity contract, which the sandbox never quotes, was bought, settled and redeemed on the simulated venue (a gold ladder). Every page and state is also checked at 1280, 390 and 360 pixels wide against simulated data.
 
 Program id on devnet: `8TN1HWcEFTAcM7Vthmih1FKftTBrp3LDgTBkfhp1PRVn`. The addresses of that deployment are in [`deployments/devnet.json`](deployments/devnet.json).
 

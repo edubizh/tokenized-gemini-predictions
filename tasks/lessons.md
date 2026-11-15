@@ -2,6 +2,10 @@
 
 Rules learned along the way. Newest first.
 
+## 2026-11-15: A long unattended run needs a machine that stays awake
+
+The long verification run stalled for seventeen hours: the laptop slept with its lid closed on battery. The keep-awake command used, `caffeinate -i`, prevents idle sleep only, not sleep on lid close, and nothing noticed that the run had stopped. Before a long unattended run, say what the machine needs to stay awake (lid open, or mains power) and check the power source at the start. A run that depends on wall-clock windows stops with a clear message when it finds a gap in time, instead of failing case by case.
+
 ## 2026-11-15: A test that reads the clock passes today and fails tomorrow
 
 Three pushes in a row failed in CI although none of them touched the code under test. A function that decides whether orders are closed took the current time as an optional argument and read the wall clock when it was missing, and its test used a fixed "last order" time that was a quarter of an hour ahead when the test was written. The tests passed until that moment came and failed from then on, everywhere. The failures were noticed by the owner, not by whoever pushed. Logic that depends on time takes the time as a required argument and reads no clock itself. CI now runs the unit tests a second time with the clock moved a year ahead (`scripts/shift-clock.mjs`), so a test that only passes today fails at once. And the result of CI is looked at after every push, not assumed.
