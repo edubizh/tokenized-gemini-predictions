@@ -1,8 +1,10 @@
-/* A main column and the trade panel beside it, which stays in view. */
-.columns {
+/*
+ * The event page. At 60rem and wider: the head and the main column on the left, the trade panel
+ * beside them, staying in view. Narrower: the head, then the trade panel, then the rest.
+ */
+.page {
   display: grid;
-  gap: var(--space-7);
-  align-items: start;
+  gap: var(--space-6);
 }
 
 .main {
@@ -18,45 +20,259 @@
 }
 
 @media (min-width: 60rem) {
-  .columns {
+  .page {
     grid-template-columns: minmax(0, 1fr) var(--aside);
+    grid-template-areas:
+      "head aside"
+      "main aside";
+    grid-template-rows: auto 1fr;
     column-gap: var(--space-6);
+    row-gap: var(--space-6);
+  }
+
+  .head {
+    grid-area: head;
+  }
+
+  .main {
+    grid-area: main;
   }
 
   .aside {
-    grid-column: 2;
-    grid-row: 1;
+    grid-area: aside;
+    align-self: start;
     position: sticky;
     top: calc(var(--nav-height) + var(--space-5));
   }
 }
 
-/* On a narrow screen the trade panel comes first. */
-@media (max-width: 59.99rem) {
-  .aside {
-    order: -1;
-  }
+.loading {
+  display: grid;
+  gap: var(--space-3);
 }
 
-.section h2 {
+/* Head */
+.path {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--forest-soft);
+}
+
+.path a {
+  color: var(--forest-soft);
+}
+
+.title {
+  margin-top: var(--space-2);
+}
+
+.headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.figureLine {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+/* The one number that matters: the chance of the selected contract, standing on its own. */
+.figure {
+  color: var(--jade);
+  font-size: var(--text-2xl);
+  line-height: var(--leading-2xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
+}
+
+.soft {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--forest-soft);
+}
+
+/* Sections */
+.sectionTitle,
+.sectionHead {
   margin-bottom: var(--space-5);
 }
 
-.selected {
-  font-weight: var(--weight-semibold);
-}
-
-.orders {
-  border-top: 1px solid var(--line);
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-5);
 }
 
 .note {
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
   color: var(--forest-soft);
+  max-width: 65ch;
 }
 
 .more {
   margin-top: var(--space-3);
   font-size: var(--text-sm);
+}
+
+/* Contracts */
+.contract {
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+
+.contract:hover {
+  text-decoration-line: underline;
+}
+
+/* The selected contract: heavier, with the jade dot of what is chosen. */
+.selected {
+  font-weight: var(--weight-semibold);
+}
+
+.selected::before {
+  content: "";
+  display: inline-block;
+  margin-right: var(--space-2);
+  vertical-align: 0.1em;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--rounded-full);
+  background: var(--jade);
+}
+
+.dim {
+  color: var(--forest-soft);
+}
+
+.chanceCell {
+  font-weight: var(--weight-medium);
+}
+
+.rowActions {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+
+/* The selected contract's prices */
+.quote {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--forest-soft);
+}
+
+.quote strong {
+  color: var(--forest);
+  font-weight: var(--weight-medium);
+}
+
+/* Price chart */
+.chart {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.plot {
+  position: relative;
+  height: 160px;
+  margin-right: 2.5rem;
+}
+
+.plot svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.gridline {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.trace {
+  fill: none;
+  stroke: var(--jade);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.gridLabel {
+  position: absolute;
+  left: calc(100% + var(--space-2));
+  transform: translateY(-50%);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--forest-soft);
+}
+
+/* The last price: a jade dot with a ring of the surface around it. */
+.lastMark {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--rounded-full);
+  background: var(--jade);
+  box-shadow: 0 0 0 2px var(--white);
+  transform: translate(-50%, -50%);
+}
+
+.axis {
+  display: flex;
+  justify-content: space-between;
+  margin-right: 2.5rem;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--forest-soft);
+}
+
+.caption {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--forest-soft);
+}
+
+.chartEmpty {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--forest-soft);
+}
+
+/* Rule and dates */
+.rule {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.rule > p {
+  max-width: 65ch;
+}
+
+.after {
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--forest-soft);
+  max-width: 65ch;
+}
+
+.orders {
+  border-top: 1px solid var(--line);
 }
