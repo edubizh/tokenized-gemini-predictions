@@ -9,7 +9,7 @@ import { useHealth } from "@/lib/relayer/hooks";
 function RelayerNoticeView({ health, offline }: { health: ApiHealth | null; offline: boolean }) {
   if (offline) {
     return (
-      <Notice tone="caution" title="The relayer is not answering">
+      <Notice title="The relayer is not answering">
         Markets cannot be listed and new orders would not be filled until it is back. Your balances and open orders are read from Solana and are not affected.
       </Notice>
     );
@@ -17,21 +17,21 @@ function RelayerNoticeView({ health, offline }: { health: ApiHealth | null; offl
   if (!health) return null;
   if (health.paused.place) {
     return (
-      <Notice tone="caution" title="Trading is paused">
+      <Notice title="Trading is paused">
         New orders cannot be placed right now. Orders already placed are still filled or refunded.
       </Notice>
     );
   }
   if (health.paused.fill) {
     return (
-      <Notice tone="caution" title="Fills are paused">
+      <Notice title="Fills are paused">
         Open orders will not fill until this is lifted. An order that expires can be reclaimed in full.
       </Notice>
     );
   }
   if (!health.venueConnected) {
     return (
-      <Notice tone="caution" title="The venue is not connected">
+      <Notice title="The venue is not connected">
         The relayer cannot reach the exchange sandbox, so new orders would not fill. Holds are safe on Solana and come back when an order expires.
       </Notice>
     );
@@ -49,7 +49,7 @@ export function RelayerNotice() {
 /** Solana itself is not answering, so what is on screen is the last good read. */
 export function ChainNoticeView() {
   return (
-    <Notice tone="caution" title="Solana devnet is not answering">
+    <Notice title="Solana devnet is not answering">
       Balances, tokens and open orders are shown as they were last read. The app keeps trying; nothing is lost.
     </Notice>
   );

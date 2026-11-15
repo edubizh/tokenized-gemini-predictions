@@ -76,10 +76,10 @@ export function LoginDialog() {
           title="Not logged in"
           action={
             <span className={styles.actions}>
-              <Button size="row" variant="primary" onClick={login.retry}>
+              <Button size="row" onClick={login.retry}>
                 Try again
               </Button>
-              <Button size="row" onClick={login.back}>
+              <Button size="row" variant="quiet" onClick={login.back}>
                 Back
               </Button>
             </span>

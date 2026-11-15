@@ -1,20 +1,23 @@
+/* The login entry: the one floating surface besides the wallet panel. White, 20px radius, the one shadow. */
 .dialog {
   width: min(26rem, calc(100vw - 2 * var(--gutter)));
+  max-height: calc(100dvh - 2 * var(--gutter));
   padding: var(--space-5);
-  background: var(--paper-raised);
-  color: var(--ink);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--rounded-md);
-  box-shadow: var(--menu-shadow);
+  background: var(--white);
+  color: var(--forest);
+  border: 0;
+  border-radius: var(--rounded-lg);
+  box-shadow: var(--shadow);
 }
 
 .dialog[open] {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 
+/* Forest over the page, so the page stays visible and calm behind the dialog. */
 .dialog::backdrop {
-  background: oklch(0.24 0.02 265 / 0.35);
+  background: rgb(23 59 42 / 0.32);
 }
 
 .header {
@@ -32,7 +35,7 @@
 
 .ways {
   display: grid;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
 .wallet {
@@ -46,12 +49,20 @@
 }
 
 .small {
-  color: var(--ink-2);
+  margin-top: var(--space-1);
+  color: var(--forest-soft);
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
 }
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+@media (max-width: 40rem) {
+  .dialog {
+    padding: 20px;
+  }
 }

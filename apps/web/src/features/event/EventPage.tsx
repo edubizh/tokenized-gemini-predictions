@@ -5,7 +5,7 @@ import { useCallback, useEffect, useReducer, useState, type ReactNode } from "re
 import type { ApiEventDetail, ApiMarket, SideName } from "@outcome/relayer/api-types";
 import { useFaucet } from "@/components/shell/Shell";
 import { Badge } from "@/components/ui/Badge";
-import { ButtonLink } from "@/components/ui/Button";
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { Countdown } from "@/components/ui/Countdown";
 import { ExternalLink } from "@/components/ui/ExternalLink";
 import { Fact, Facts } from "@/components/ui/Facts";
@@ -15,7 +15,6 @@ import { PriceButton } from "@/components/ui/PriceButton";
 import { Row, RowList, type Column } from "@/components/ui/RowList";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { GetTestFunds, needsTestFunds } from "@/features/account/GetTestFunds";
-import { LoggedOut } from "@/features/account/LoggedOut";
 import { cadenceLabel, chancePx, chanceText, eventPhase, isQuoted, prices, selectedContract, volumeText, type EventPhase } from "@/features/markets/derive";
 import { usePlaceOrder, useReclaimOrder } from "@/features/ticket/actions";
 import { orderEntries, SETTLING_MS, type OrderEntry } from "@/features/ticket/entries";
@@ -352,33 +351,36 @@ export function EventPage({ ticker, contract, initialSide, initialAction = "buy"
         The relayer is not answering, so a new order would not reach the venue. Orders you already placed are safe on Solana, and each can be reclaimed once it expires.
       </Notice>
     );
-  } else if (!account.ready) {
-    panel = <Skeleton width="100%" height="20rem" />;
-  } else if (!account.authenticated) {
-    panel = <LoggedOut title="Log in to trade">Everyone can look at every market. Placing an order takes a login and test funds.</LoggedOut>;
-  } else if (needsTestFunds(config, account)) {
-    // The first-run step above is what there is to do.
-    panel = null;
-  } else if (account.trader === "unknown") {
-    // Whether the wallet is a trader is read from Solana; until it is known the ticket is not offered.
+  } else if (!account.ready || (account.authenticated && !needsTestFunds(config, account) && account.trader === "unknown")) {
+    // Whether the wallet is a trader is read from Solana; until it is known the panel is not offered.
     panel = account.stale ? (
       <Notice title="Solana devnet is not answering">Your account could not be read yet. The page keeps trying; nothing is lost.</Notice>
     ) : (
-      <Skeleton width="100%" height="20rem" />
+      <Skeleton width="100%" height="28rem" />
     );
   } else {
+    // A visitor and a new wallet see the whole panel; only its button is a step of its own.
+    const gate = !account.authenticated ? (
+      <Button key="login" variant="primary" block onClick={account.login} data-testid="login-to-trade">
+        Log in to trade
+      </Button>
+    ) : needsTestFunds(config, account) ? (
+      <GetTestFunds key="funds" />
+    ) : undefined;
     panel = (
       <Ticket
-        key={market.symbol}
+        // A link to this page with another contract, side or action opens the panel afresh.
+        key={`${market.symbol}-${initialSide}-${initialAction}`}
         market={market}
         health={health}
-        balances={balances}
-        held={held}
+        balances={loggedIn ? balances : null}
+        held={loggedIn ? held : null}
         initialSide={initialSide}
         initialAction={initialAction}
-        reconnect={reconnect}
+        reconnect={gate ? null : reconnect}
         progress={placing.progress}
         error={placing.error}
+        gate={gate}
         onSubmit={(draft) => void place(draft)}
         onGetTestFunds={faucet.request}
         fundsNote={faucet.status.kind === "done" || faucet.status.kind === "error" ? faucet.status.text : faucet.status.kind === "working" ? "Asking the faucet for test funds." : null}
@@ -390,7 +392,6 @@ export function EventPage({ ticker, contract, initialSide, initialAction = "buy"
     <div className={styles.page}>
       <Head event={event} market={market} phase={phase} onDeadline={redraw} />
       <aside className={styles.aside} aria-label="Trade">
-        {loggedIn && <GetTestFunds />}
         {panel}
       </aside>
       <div className={styles.main}>

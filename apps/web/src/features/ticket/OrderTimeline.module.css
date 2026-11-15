@@ -1,0 +1,36 @@
+/* An order: terms and status, the steps, then what can still be done. */
+.order {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.terms {
+  font-weight: var(--weight-semibold);
+}
+
+.soft {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--forest-soft);
+}
+
+/* The venue order id under a step: small print. */
+.detailLine {
+  display: block;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--forest-soft);
+  overflow-wrap: anywhere;
+}
+
+.foot {
+  display: grid;
+  gap: var(--space-3);
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ApiHealth, ApiMarket } from "@outcome/relayer/api-types";
 import { fixtureHealth, fixtureMarket } from "@/lib/relayer/fixtures";
 import { availableAt, askPx, bidPx, wantedAt } from "@/features/markets/book";
-import { MIN_LAMPORTS, parseContracts, parsePrice, quoteBuy, quoteSell, type QuoteInput, type SellQuoteInput } from "./quote";
+import { MIN_LAMPORTS, parseCents, parseContracts, parsePrice, quoteBuy, quoteSell, type QuoteInput, type SellQuoteInput } from "./quote";
 
 const NOW = Date.UTC(2026, 10, 15, 3, 2, 0);
 const market = fixtureMarket("GEMI-BTC15M2611150306-UP", NOW) as ApiMarket; // bid 0.55, ask 0.57, 250.00 bid, 180.00 offered
@@ -41,10 +41,10 @@ describe("quoteBuy", () => {
     expect(quoteBuy(input({ market: stepped, units: 25n })).errors[0]).toEqual({ field: "quantity", code: "off_increment", message: "Quantity must be a multiple of 0.10 contracts." });
   });
   it("says what price is allowed", () => {
-    expect(quoteBuy(input({ limitPx: null })).errors[0]).toEqual({ field: "price", code: "not_a_number", message: "Enter a price in dollars, such as 0.57." });
-    expect(quoteBuy(input({ limitPx: 0n })).errors[0]).toEqual({ field: "price", code: "out_of_range", message: "Price must be between $0.01 and $0.99." });
+    expect(quoteBuy(input({ limitPx: null })).errors[0]).toEqual({ field: "price", code: "not_a_number", message: "Enter a price in cents, such as 57." });
+    expect(quoteBuy(input({ limitPx: 0n })).errors[0]).toEqual({ field: "price", code: "out_of_range", message: "Price must be between 1¢ and 99¢." });
     expect(quoteBuy(input({ limitPx: 10_000n })).errors[0]?.code).toBe("out_of_range");
-    expect(quoteBuy(input({ limitPx: 4_550n })).errors[0]).toEqual({ field: "price", code: "off_tick", message: "Price must be a multiple of $0.01." });
+    expect(quoteBuy(input({ limitPx: 4_550n })).errors[0]).toEqual({ field: "price", code: "off_tick", message: "Price must be a multiple of 1¢." });
   });
   it("reports no amounts while the quantity or the price is invalid", () => {
     const quote = quoteBuy(input({ limitPx: 0n }));
@@ -96,7 +96,7 @@ describe("quoteSell", () => {
   it("refuses a sale whose minimum proceeds do not exceed the fee cap, and names the smallest quantity that would", () => {
     // 3.00 at $0.03 brings $0.09, and the fee cap is $0.09.
     const quote = quoteSell(sell({ minPx: 300n, heldUnits: 1_000n }));
-    expect(quote.errors).toEqual([{ field: "fee", code: "fee_cap", message: "At $0.03 a sale needs at least 3.01 contracts to cover the fee cap." }]);
+    expect(quote.errors).toEqual([{ field: "fee", code: "fee_cap", message: "At 3¢ a sale needs at least 3.01 contracts to cover the fee cap." }]);
     expect(quote.minSellUnits).toBe(301n);
     expect(quote.receiveMicros).toBe(0n);
     const enough = quoteSell(sell({ units: 301n, minPx: 300n, heldUnits: 1_000n }));
@@ -106,11 +106,11 @@ describe("quoteSell", () => {
   it("says so when no quantity can cover the fee cap at a price", () => {
     const quote = quoteSell(sell({ minPx: 100n, heldUnits: 100_000n }));
     expect(quote.minSellUnits).toBeNull();
-    expect(quote.errors).toEqual([{ field: "fee", code: "fee_cap", message: "At $0.01 a sale cannot cover the fee cap at any quantity. Set a higher minimum price." }]);
+    expect(quote.errors).toEqual([{ field: "fee", code: "fee_cap", message: "At 1¢ a sale cannot cover the fee cap at any quantity. Set a higher minimum price." }]);
   });
   it("sells no more than the wallet holds", () => {
-    expect(quoteSell(sell({ units: 301n })).errors).toEqual([{ field: "quantity", code: "above_held", message: "You hold 3.00 YES. That is the most you can sell." }]);
-    expect(quoteSell(sell({ side: "NO", heldUnits: 0n })).errors[0]).toEqual({ field: "quantity", code: "nothing_held", message: "You hold no NO tokens of this market." });
+    expect(quoteSell(sell({ units: 301n })).errors).toEqual([{ field: "quantity", code: "above_held", message: "You hold 3.00 Yes. That is the most you can sell." }]);
+    expect(quoteSell(sell({ side: "NO", heldUnits: 0n })).errors[0]).toEqual({ field: "quantity", code: "nothing_held", message: "You hold no No tokens of this market." });
     expect(quoteSell(sell({ units: 5_000n, heldUnits: null })).errors).toEqual([]);
   });
   it("applies the venue's quantity rules and the program's maximum, but not the minimum for buys", () => {
@@ -122,8 +122,8 @@ describe("quoteSell", () => {
     expect(quoteSell(sell({ units: 25n, market: { ...market, minUnits: "10", unitIncrement: "10" } })).errors[0]?.code).toBe("off_increment");
   });
   it("says what minimum price is allowed", () => {
-    expect(quoteSell(sell({ minPx: null })).errors[0]).toEqual({ field: "price", code: "not_a_number", message: "Enter a price in dollars, such as 0.57." });
-    expect(quoteSell(sell({ minPx: 10_000n })).errors[0]).toEqual({ field: "price", code: "out_of_range", message: "Price must be between $0.01 and $0.99." });
+    expect(quoteSell(sell({ minPx: null })).errors[0]).toEqual({ field: "price", code: "not_a_number", message: "Enter a price in cents, such as 57." });
+    expect(quoteSell(sell({ minPx: 10_000n })).errors[0]).toEqual({ field: "price", code: "out_of_range", message: "Price must be between 1¢ and 99¢." });
     expect(quoteSell(sell({ minPx: 5_550n })).errors[0]?.code).toBe("off_tick");
     const invalid = quoteSell(sell({ minPx: 0n }));
     expect([invalid.proceedsMicros, invalid.maxFeeMicros, invalid.receiveMicros]).toEqual([0n, 0n, 0n]);
@@ -180,5 +180,13 @@ describe("parsing what was typed", () => {
     expect(parsePrice("1")).toBe(10_000n);
     expect(parsePrice("0.12345")).toBeNull();
     expect(parsePrice("")).toBeNull();
+  });
+  it("reads a price in cents, as the trade panel takes it", () => {
+    expect(parseCents("57")).toBe(5_700n);
+    expect(parseCents(" 45.5 ")).toBe(4_550n);
+    expect(parseCents(".5")).toBe(50n);
+    expect(parseCents("57¢")).toBeNull();
+    expect(parseCents("1.005")).toBeNull();
+    expect(parseCents("")).toBeNull();
   });
 });

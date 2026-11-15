@@ -54,7 +54,7 @@ describe("deriveTimeline", () => {
     const sent = derive({ apiOrder: api({ state: "submitting", venueOrderId: "73615284000001117" }) });
     expect(shape(sent)).toEqual([
       "done:$0.97 held",
-      "done:Order sent, fill-or-kill at $0.45",
+      "done:Order sent, fill-or-kill at 45¢",
       "current:Waiting for the venue's answer",
       "pending:",
     ]);
@@ -62,7 +62,7 @@ describe("deriveTimeline", () => {
 
   it("reports a fill with the average price and the venue order id", () => {
     const t = derive({ apiOrder: api({ state: "venue_filled", ...filled }) });
-    expect(t.steps[2]).toMatchObject({ status: "done", title: "Filled", text: "Filled 2.00 at $0.44", detail: "Venue order 73615284000001117" });
+    expect(t.steps[2]).toMatchObject({ status: "done", title: "Filled", text: "Filled 2.00 at 44¢", detail: "Venue order 73615284000001117" });
     expect(t.steps[3]).toMatchObject({ status: "current", title: "Tokens minted", text: "Minting your tokens" });
     expect(t.stamp).toBe("OPEN");
   });
@@ -73,19 +73,19 @@ describe("deriveTimeline", () => {
       { tradeId: "2", units: "100", px: "4200", feeMicros: "20000" },
     ];
     const t = derive({ apiOrder: api({ state: "venue_filled", ...filled, amountMicros: "860000", fills }) });
-    expect(t.steps[2]?.text).toBe("Filled 2.00 at $0.43");
+    expect(t.steps[2]?.text).toBe("Filled 2.00 at 43¢");
   });
 
   it("ends a fill with the tokens and what came back from the hold", () => {
     const t = derive({ chainOrder: null, apiOrder: api({ state: "chain_filled", ...filled, chainSignature: "fillSig" }) });
-    expect(t.steps[3]).toMatchObject({ status: "done", title: "Tokens minted", text: "2.00 YES tokens minted. $0.05 of the hold returned.", signature: "fillSig" });
+    expect(t.steps[3]).toMatchObject({ status: "done", title: "Tokens minted", text: "2.00 Yes tokens minted. $0.05 of the hold returned.", signature: "fillSig" });
     expect(t).toMatchObject({ stamp: "FILLED", open: false, canReclaim: false });
   });
 
   it("leaves out the refund sentence when the whole hold was used", () => {
     const exact = { ...filled, amountMicros: "900000", feeMicros: "70000" };
     const t = derive({ chainOrder: null, apiOrder: api({ state: "chain_filled", ...exact, chainSignature: "fillSig" }) });
-    expect(t.steps[3]?.text).toBe("2.00 YES tokens minted.");
+    expect(t.steps[3]?.text).toBe("2.00 Yes tokens minted.");
   });
 
   it("describes an order that did not fill in words, then the refund", () => {
@@ -94,7 +94,7 @@ describe("deriveTimeline", () => {
     expect(waiting.steps[3]).toMatchObject({ status: "current", text: "Returning your hold" });
 
     const done = derive({ chainOrder: null, apiOrder: api({ state: "chain_cancelled", venueOrderId: "7", chainSignature: "cancelSig" }) });
-    expect(shape(done)).toEqual(["done:$0.97 held", "done:Order sent, fill-or-kill at $0.45", "skipped:No fill at your limit", "done:Hold returned in full."]);
+    expect(shape(done)).toEqual(["done:$0.97 held", "done:Order sent, fill-or-kill at 45¢", "skipped:No fill at your limit", "done:Hold returned in full."]);
     expect(done.steps[3]).toMatchObject({ title: "Refunded", signature: "cancelSig" });
     expect(done).toMatchObject({ stamp: "REFUNDED", open: false });
   });
@@ -183,7 +183,7 @@ describe("deriveTimeline for a sell", () => {
 
   it("holds tokens, not test dollars", () => {
     const t = sell({ chainOrder: undefined });
-    expect(t.steps[0]).toMatchObject({ status: "done", title: "Held on Solana", text: "3.00 YES tokens held", signature: PLACE_SIG });
+    expect(t.steps[0]).toMatchObject({ status: "done", title: "Held on Solana", text: "3.00 Yes tokens held", signature: PLACE_SIG });
     expect(t.steps[3]).toMatchObject({ status: "pending", title: "Tokens burned" });
     expect(t).toMatchObject({ kind: "sell", side: "YES", units: 300n, limitPx: 5_500n, holdMicros: 0n, stamp: "OPEN" });
     expect(derive({}).kind).toBe("buy");
@@ -191,8 +191,8 @@ describe("deriveTimeline for a sell", () => {
 
   it("says the venue order is a buy of the opposite outcome at the complement", () => {
     expect(shape(sell({ apiOrder: sellApi({ state: "submitting", venueOrderId: "7" }) }))).toEqual([
-      "done:3.00 YES tokens held",
-      "done:Order sent as a buy of NO, fill-or-kill at $0.45",
+      "done:3.00 Yes tokens held",
+      "done:Order sent as a buy of No, fill-or-kill at 45¢",
       "current:Waiting for the venue's answer",
       "pending:",
     ]);
@@ -200,13 +200,13 @@ describe("deriveTimeline for a sell", () => {
 
   it("reports the fill at the price the sale brought", () => {
     const t = sell({ apiOrder: sellApi({ state: "venue_filled", ...sold }) });
-    expect(t.steps[2]).toMatchObject({ status: "done", text: "Filled 3.00 at $0.56", detail: "Venue order 73615284000001117" });
+    expect(t.steps[2]).toMatchObject({ status: "done", text: "Filled 3.00 at 56¢", detail: "Venue order 73615284000001117" });
     expect(t.steps[3]).toMatchObject({ status: "current", title: "Tokens burned", text: "Burning the tokens and paying you" });
   });
 
   it("ends a fill with the tokens burned and the test dollars paid", () => {
     const t = sell({ chainOrder: null, apiOrder: sellApi({ state: "chain_filled", ...sold, chainSignature: "fillSig" }) });
-    expect(t.steps[3]).toMatchObject({ status: "done", title: "Tokens burned", text: "3.00 YES tokens burned. $1.62 paid.", signature: "fillSig" });
+    expect(t.steps[3]).toMatchObject({ status: "done", title: "Tokens burned", text: "3.00 Yes tokens burned. $1.62 paid.", signature: "fillSig" });
     expect(t).toMatchObject({ stamp: "FILLED", open: false });
   });
 
@@ -236,7 +236,7 @@ describe("deriveTimeline for a sell", () => {
 
   it("knows a sell from the order account or the relayer alone", () => {
     expect(sell({ local: null }).kind).toBe("sell");
-    expect(sell({ local: null, chainOrder: undefined, apiOrder: sellApi({ state: "seen" }) }).steps[0]?.text).toBe("3.00 YES tokens held");
+    expect(sell({ local: null, chainOrder: undefined, apiOrder: sellApi({ state: "seen" }) }).steps[0]?.text).toBe("3.00 Yes tokens held");
   });
 });
 

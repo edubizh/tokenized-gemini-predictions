@@ -5,7 +5,7 @@ import type { ApiHealth, ApiMarket, SideName } from "@outcome/relayer/api-types"
 import { complementPx, cost, feeCap, parseDecimal, PAYOUT_PER_UNIT } from "@outcome/relayer/money";
 import { notTradableWords, type TimeOptions } from "@/features/markets/wording";
 import type { Balances } from "@/lib/chain/accounts";
-import { formatContracts, formatDollars, formatPrice } from "@/lib/format";
+import { formatCents, formatContracts, formatDollars } from "@/lib/format";
 
 /**
  * SOL a wallet needs before placing an order: the rent of the order, its escrow and a token
@@ -78,6 +78,11 @@ export function parseContracts(text: string): bigint | null {
   return lenient(text, 2);
 }
 
+/** Cents as typed (`57`, `45.5`) to px: one cent is 100 px. Null when it is not a price. */
+export function parseCents(text: string): bigint | null {
+  return lenient(text, 2);
+}
+
 /** Dollars as typed (`0.57`, `.5`) to px. Null when it is not a price; the range is the quote's business. */
 export function parsePrice(text: string): bigint | null {
   return lenient(text, 4);
@@ -96,13 +101,13 @@ function quantityError(units: bigint | null, limits: OrderLimits): QuoteError | 
 }
 
 function priceError(limitPx: bigint | null, limits: OrderLimits): QuoteError | null {
-  if (limitPx === null) return { field: "price", code: "not_a_number", message: "Enter a price in dollars, such as 0.57." };
+  if (limitPx === null) return { field: "price", code: "not_a_number", message: "Enter a price in cents, such as 57." };
   const lowest = limits.tickPx;
   const highest = ((PAYOUT_PER_UNIT - 1n) / limits.tickPx) * limits.tickPx;
   if (limitPx < lowest || limitPx > highest) {
-    return { field: "price", code: "out_of_range", message: `Price must be between ${formatPrice(lowest)} and ${formatPrice(highest)}.` };
+    return { field: "price", code: "out_of_range", message: `Price must be between ${formatCents(lowest)} and ${formatCents(highest)}.` };
   }
-  if (limitPx % limits.tickPx !== 0n) return { field: "price", code: "off_tick", message: `Price must be a multiple of ${formatPrice(limits.tickPx)}.` };
+  if (limitPx % limits.tickPx !== 0n) return { field: "price", code: "off_tick", message: `Price must be a multiple of ${formatCents(limits.tickPx)}.` };
   return null;
 }
 
@@ -113,6 +118,8 @@ function marketError(market: ApiMarket, health: ApiHealth | null, timeZone: Time
   const reason = notTradableWords(market, { timeZone });
   return reason === null ? null : { field: "market", code: "not_tradable", message: reason };
 }
+
+const sideWord = (side: SideName) => (side === "YES" ? "Yes" : "No");
 
 const SOL_ERROR: QuoteError = { field: "sol", code: "not_enough_sol", message: "Not enough SOL for network fees. Get test funds to top up." };
 
@@ -230,8 +237,8 @@ export function quoteSell(input: SellQuoteInput): SellQuote {
 
   let quantity = quantityError(input.units, limits);
   if (heldUnits !== null && input.units !== null && (quantity === null || quantity.code === "above_max")) {
-    if (heldUnits === 0n) quantity = { field: "quantity", code: "nothing_held", message: `You hold no ${input.side} tokens of this market.` };
-    else if (input.units > heldUnits) quantity = { field: "quantity", code: "above_held", message: `You hold ${formatContracts(heldUnits)} ${input.side}. That is the most you can sell.` };
+    if (heldUnits === 0n) quantity = { field: "quantity", code: "nothing_held", message: `You hold no ${sideWord(input.side)} tokens of this market.` };
+    else if (input.units > heldUnits) quantity = { field: "quantity", code: "above_held", message: `You hold ${formatContracts(heldUnits)} ${sideWord(input.side)}. That is the most you can sell.` };
   }
   const price = priceError(input.minPx, limits);
   if (quantity) errors.push(quantity);
@@ -246,7 +253,7 @@ export function quoteSell(input: SellQuoteInput): SellQuote {
   const maxFeeMicros = sellFeeCap(input.units, input.minPx, slack);
   const covered = proceedsMicros > maxFeeMicros;
   if (!covered) {
-    const at = formatPrice(input.minPx);
+    const at = formatCents(input.minPx);
     errors.push({
       field: "fee",
       code: "fee_cap",

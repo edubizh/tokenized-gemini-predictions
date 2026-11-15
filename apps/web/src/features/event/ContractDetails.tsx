@@ -13,7 +13,7 @@ import { PriceChart } from "./PriceChart";
 import styles from "./Event.module.css";
 
 const LEVELS = 5;
-const TRADES = 8;
+const TRADES = 5;
 
 const BOOK: Column[] = [
   { id: "bid", header: "Bid", primary: true },

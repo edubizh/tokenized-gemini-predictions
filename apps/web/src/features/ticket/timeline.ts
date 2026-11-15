@@ -4,7 +4,7 @@
 
 import type { ApiOrder, SideName } from "@outcome/relayer/api-types";
 import { complementPx } from "@outcome/relayer/money";
-import { formatContracts, formatDollars, formatPrice } from "@/lib/format";
+import { formatCents, formatContracts, formatDollars } from "@/lib/format";
 
 /** An open order as read from its account. Times are cluster seconds. */
 export interface ChainOrderView {
@@ -182,6 +182,9 @@ export function deriveTimeline(input: TimelineInput): DerivedTimeline {
   // A buy holds test dollars; a sell holds the tokens themselves.
   const holdMicros = kind === "buy" ? units * limitPx + maxFee : 0n;
   const opposite: SideName = side === "YES" ? "NO" : "YES";
+  // The words of the interface: "Yes" and "No", in sentence case.
+  const sideWord = side === "YES" ? "Yes" : "No";
+  const oppositeWord = opposite === "YES" ? "Yes" : "No";
   const expiresAt = chainOrder?.expiresAt ?? api?.expiresAt ?? local?.expiresAt ?? 0;
   const expired = chainNowSecs > expiresAt;
   const reclaimed = local?.reclaimSignature ?? null;
@@ -197,13 +200,13 @@ export function deriveTimeline(input: TimelineInput): DerivedTimeline {
   const open = !closed;
   const canReclaim = open && expired && chainOrder != null;
 
-  const heldText = kind === "buy" ? `${formatDollars(holdMicros)} held` : `${formatContracts(units)} ${side} tokens held`;
+  const heldText = kind === "buy" ? `${formatDollars(holdMicros)} held` : `${formatContracts(units)} ${sideWord} tokens held`;
   const held = step("held", "done", "Held on Solana", heldText, { signature: local?.signature ?? null, atMs: local?.placedAt ?? api?.createdAt ?? null });
   // The relayer turns a sale into a buy of the opposite outcome at the complement of its minimum.
   const sentText =
     kind === "buy"
-      ? `Order sent, fill-or-kill at ${limitPx > 0n ? formatPrice(limitPx) : "your limit"}`
-      : `Order sent as a buy of ${opposite}, fill-or-kill at ${limitPx > 0n && limitPx < 10_000n ? formatPrice(complementPx(limitPx)) : "the matching price"}`;
+      ? `Order sent, fill-or-kill at ${limitPx > 0n ? formatCents(limitPx) : "your limit"}`
+      : `Order sent as a buy of ${oppositeWord}, fill-or-kill at ${limitPx > 0n && limitPx < 10_000n ? formatCents(complementPx(limitPx)) : "the matching price"}`;
   const sentDone = step("sent", "done", "Sent to the venue", sentText);
   const refunded = (signature: string | null, atMs: number | null) => step("result", "done", words.returnedTitle, words.returned, { signature, atMs });
   const reclaim = step("result", "current", words.reclaimTitle, words.expired);
@@ -238,7 +241,7 @@ export function deriveTimeline(input: TimelineInput): DerivedTimeline {
   const order = api;
   const venueDetail = order.venueOrderId ? `Venue order ${order.venueOrderId}` : null;
   const average = averagePx(order);
-  const filledStep = step("filled", "done", "Filled", `Filled ${formatContracts(BigInt(order.filledUnits))} at ${average === null ? "your limit" : formatPrice(average)}`, { detail: venueDetail });
+  const filledStep = step("filled", "done", "Filled", `Filled ${formatContracts(BigInt(order.filledUnits))} at ${average === null ? "your limit" : formatCents(average)}`, { detail: venueDetail });
   const noFill = step("filled", "skipped", "Not filled", words.noFill, { detail: venueDetail });
   const refusal = refusalWords(order);
   const pendingResult = step("result", "pending", words.resultTitle);
@@ -274,11 +277,11 @@ export function deriveTimeline(input: TimelineInput): DerivedTimeline {
       let text: string;
       if (kind === "buy") {
         const returned = holdMicros - BigInt(order.amountMicros) - BigInt(order.feeMicros);
-        const minted = `${formatContracts(filledUnits)} ${side} tokens minted.`;
+        const minted = `${formatContracts(filledUnits)} ${sideWord} tokens minted.`;
         text = returned > 0n ? `${minted} ${formatDollars(returned)} of the hold returned.` : minted;
       } else {
         // The fee comes out of the proceeds; tokens that were not sold go back to the wallet.
-        const burned = `${formatContracts(filledUnits)} ${side} tokens burned. ${formatDollars(BigInt(order.amountMicros) - BigInt(order.feeMicros))} paid.`;
+        const burned = `${formatContracts(filledUnits)} ${sideWord} tokens burned. ${formatDollars(BigInt(order.amountMicros) - BigInt(order.feeMicros))} paid.`;
         text = filledUnits < units ? `${burned} ${formatContracts(units - filledUnits)} returned.` : burned;
       }
       return finish([held, sentDone, filledStep], step("result", "done", words.resultTitle, text, { signature: order.chainSignature, atMs: order.updatedAt }), "FILLED");

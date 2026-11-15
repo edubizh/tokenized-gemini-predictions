@@ -22,22 +22,22 @@ export function WalletWaiting({ pinned = false }: { pinned?: boolean }) {
   return (
     <div className={pinned ? styles.pinned : undefined} data-testid="wallet-waiting" data-wallet={wait.wallet} data-slow={wait.slow || undefined} data-silent={wait.silent || undefined}>
       <Notice
-        tone={wait.slow ? "caution" : "neutral"}
         title={title}
+        busy={!wait.silent}
         action={
           <span className={styles.actions}>
             {wait.silent ? (
-              <Button size="row" variant="primary" onClick={() => window.location.reload()}>
+              <Button size="row" onClick={() => window.location.reload()}>
                 Reload page
               </Button>
             ) : (
               wait.slow && (
-                <Button size="row" variant="primary" onClick={retry}>
+                <Button size="row" onClick={retry}>
                   Try again
                 </Button>
               )
             )}
-            <Button size="row" onClick={cancel}>
+            <Button size="row" variant="quiet" onClick={cancel}>
               Cancel
             </Button>
           </span>

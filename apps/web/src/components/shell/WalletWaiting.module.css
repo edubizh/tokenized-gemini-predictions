@@ -1,11 +1,13 @@
+/* The copy the shell keeps in view under the navbar while a wallet is asked. */
 .pinned {
   position: sticky;
   z-index: 10;
-  top: calc(var(--strip-height) + var(--space-2));
-  margin-bottom: var(--space-4);
+  top: calc(var(--nav-height) + var(--space-2));
+  margin-bottom: var(--space-5);
 }
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
