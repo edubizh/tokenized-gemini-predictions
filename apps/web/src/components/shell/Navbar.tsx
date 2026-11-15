@@ -7,13 +7,15 @@ import styles from "./Navbar.module.css";
 
 /** The four destinations, shown to everyone, logged in or not. */
 const NAV = [
-  { href: "/markets", label: "Markets" },
+  { href: "/", label: "Markets" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/activity", label: "Activity" },
   { href: "/vaults", label: "Vaults" },
 ] as const;
 
+/** Markets is the entry page, and an event page under `/markets` belongs to it. */
 function isCurrent(pathname: string, href: string): boolean {
+  if (href === "/") return pathname === "/" || pathname.startsWith("/markets");
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

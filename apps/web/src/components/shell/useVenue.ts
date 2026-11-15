@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useHealth } from "@/features/markets/hooks";
+import { useHealth } from "@/lib/relayer/hooks";
 import { useConfig } from "@/lib/config";
 import type { Venue } from "./network";
 

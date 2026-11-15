@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  countdownParts,
   formatCents,
   formatContracts,
   formatDollars,
@@ -90,29 +89,6 @@ describe("shortAddress", () => {
 
   it("leaves short strings alone", () => {
     expect(shortAddress("8rj8DK8p")).toBe("8rj8DK8p");
-  });
-});
-
-describe("countdownParts", () => {
-  it("writes m:ss below an hour", () => {
-    expect(countdownParts(581_000).text).toBe("9:41");
-    expect(countdownParts(60_000).text).toBe("1:00");
-    expect(countdownParts(5_000).text).toBe("0:05");
-  });
-
-  it("writes h:mm:ss from an hour up", () => {
-    expect(countdownParts(3_600_000).text).toBe("1:00:00");
-    expect(countdownParts(3_723_000)).toEqual({ hours: 1, minutes: 2, seconds: 3, totalSeconds: 3_723, text: "1:02:03" });
-  });
-
-  it("rounds a partial second up so zero is shown only at the deadline", () => {
-    expect(countdownParts(1).text).toBe("0:01");
-    expect(countdownParts(59_001).text).toBe("1:00");
-  });
-
-  it("stops at zero", () => {
-    expect(countdownParts(0)).toEqual({ hours: 0, minutes: 0, seconds: 0, totalSeconds: 0, text: "0:00" });
-    expect(countdownParts(-4_000).text).toBe("0:00");
   });
 });
 

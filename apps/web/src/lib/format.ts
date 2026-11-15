@@ -56,34 +56,6 @@ export function shortAddress(value: string): string {
   return value.length <= 10 ? value : `${value.slice(0, 4)}…${value.slice(-4)}`;
 }
 
-export interface CountdownParts {
-  hours: number;
-  minutes: number;
-  seconds: number;
-  totalSeconds: number;
-  /** `m:ss`, or `h:mm:ss` from one hour up. */
-  text: string;
-}
-
-/** A partial second counts as a whole one, so `0:00` appears exactly at the deadline. */
-export function countdownParts(remainingMs: number): CountdownParts {
-  const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const ss = String(seconds).padStart(2, "0");
-  const text = hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${ss}` : `${minutes}:${ss}`;
-  return { hours, minutes, seconds, totalSeconds, text };
-}
-
-/** Duration in words for screen readers: "9 minutes 41 seconds". */
-export function spokenDuration(remainingMs: number): string {
-  const { hours, minutes, seconds } = countdownParts(remainingMs);
-  const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
-  const parts = [hours > 0 ? plural(hours, "hour") : "", hours > 0 || minutes > 0 ? plural(minutes, "minute") : "", plural(seconds, "second")];
-  return parts.filter(Boolean).join(" ");
-}
-
 /** Wall-clock time in the viewer's zone with the zone named: `14:05 UTC`. */
 export function formatLocalTime(atMs: number, options: { timeZone?: string; seconds?: boolean } = {}): string {
   const parts = new Intl.DateTimeFormat("en-US", {

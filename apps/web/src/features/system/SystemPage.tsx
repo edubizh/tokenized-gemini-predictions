@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { PageHeader } from "@/components/shell/Shell";
-import { useVenue } from "@/components/shell/NetworkStrip";
+import { useVenue } from "@/components/shell/useVenue";
 import { explorerAddressUrl, useConfig } from "@/lib/config";
 import { usePolling } from "@/lib/polling";
 import { getStatus } from "@/lib/relayer/client";

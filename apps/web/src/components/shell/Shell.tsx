@@ -50,7 +50,7 @@ export function useFaucet(): { status: FaucetStatus; request(): void } {
       } else if (response.status === 503) {
         setStatus({ kind: "error", text: "The demo is not set up yet, so there are no test funds to send." });
       } else if (response.status === 409) {
-        setStatus({ kind: "error", text: "This wallet is not registered yet. Use Get test funds on the welcome page first." });
+        setStatus({ kind: "error", text: "This wallet is not registered yet. Use Get test funds first." });
       } else if (response.status === 401) {
         setStatus({ kind: "error", text: "Your login has expired. Log in again, then retry." });
       } else {
