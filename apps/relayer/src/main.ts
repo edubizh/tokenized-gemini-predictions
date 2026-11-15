@@ -195,7 +195,7 @@ async function start(config: RelayerConfig): Promise<void> {
   const now = Date.now;
   const manager = createMarketManager({ venue, chain, registry, now });
   const settlement = createSettlementWatcher({ venue, chain, registry, journal, now, alert: alerts.alert });
-  const reconciler = createReconciler({ venue, chain, registry, journal, alert: alerts.alert });
+  const reconciler = createReconciler({ venue, chain, registry, journal, now, alert: alerts.alert });
   const daemon = createDaemon({
     identity: {
       cluster: config.cluster,

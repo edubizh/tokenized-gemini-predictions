@@ -43,7 +43,7 @@ describe("a ladder of the simulated venue, across a restart of the relayer", () 
         journal,
         manager,
         settlement: createSettlementWatcher({ venue, chain, registry, journal, now, alert: alerts.alert }),
-        reconciler: createReconciler({ venue, chain, registry, journal, alert: alerts.alert }),
+        reconciler: createReconciler({ venue, chain, registry, journal, now, alert: alerts.alert }),
         alerts,
         now,
         sleep: async (ms) => {

@@ -98,8 +98,10 @@ function world() {
     if (end !== undefined) journal.markChain(order.orderAddress, end);
   }
 
-  const deps = { venue, chain, registry, journal };
-  return { ...deps, deps, alerts, market, hold, venueFilled };
+  /** Ten minutes before the contracts expire, unless a test moves it. */
+  const clock = { ms: EXPIRY - 600_000 };
+  const deps = { venue, chain, registry, journal, now: () => clock.ms };
+  return { ...deps, deps, clock, alerts, market, hold, venueFilled };
 }
 
 describe("reconcile", () => {
@@ -305,5 +307,55 @@ describe("createReconciler", () => {
     await r.run();
     expect(w.chain.pauses).toEqual([{ place: true }]);
     expect(w.alerts).toHaveLength(1);
+  });
+});
+
+// Seen live: the venue drops its position row when it settles the contract, about 30 s before
+// the market is settled on-chain, so every run in between read "unbalanced".
+describe("a contract that has expired", () => {
+  function reconciler(w: ReturnType<typeof world>) {
+    return createReconciler({ ...w.deps, alert: (event) => w.alerts.push(event) });
+  }
+
+  it("is left out of the comparison, still counts in the required funds, and never pauses", async () => {
+    const w = world();
+    w.market(BTC, { yes: 100n, no: 0n }); // the venue reports no position for it
+    w.clock.ms = EXPIRY + 23_000;
+    const result = await reconcile(w.deps);
+    expect(result.markets).toEqual([]);
+    expect(result.solvency.requiredMicros).toBe("1000000");
+
+    const r = reconciler(w);
+    for (let run = 0; run < 3; run += 1) await r.run();
+    expect(w.chain.pauses).toEqual([]);
+    expect(w.alerts).toEqual([]);
+  });
+
+  it("is still compared one second before its expiry, and three unbalanced runs pause as before", async () => {
+    const w = world();
+    w.market(BTC, { yes: 100n, no: 0n });
+    w.clock.ms = EXPIRY - 1_000;
+    expect((await reconcile(w.deps)).markets).toEqual([
+      { symbol: BTC, yesSupply: "100", noSupply: "0", venueNet: "0", inFlight: "0", houseInventory: "0", balanced: false },
+    ]);
+
+    const r = reconciler(w);
+    for (let run = 0; run < 3; run += 1) await r.run();
+    expect(w.chain.pauses).toEqual([{ place: true }]);
+    expect(w.alerts).toEqual([{ kind: "auto_paused", orderAddress: null, detail: `unbalanced for 3 runs: ${BTC}` }]);
+  });
+
+  it("held for review with supply left, stays in the required funds and does not pause", async () => {
+    const w = world();
+    w.market(BTC, { yes: 100n, no: 40n });
+    w.registry.setSettle(BTC, "needs_review");
+    w.clock.ms = EXPIRY + 24 * 3_600_000;
+    const r = reconciler(w);
+    for (let run = 0; run < 3; run += 1) {
+      const result = await r.run();
+      expect(result.markets).toEqual([]);
+      expect(result.solvency.requiredMicros).toBe("1000000");
+    }
+    expect(w.chain.pauses).toEqual([]);
   });
 });

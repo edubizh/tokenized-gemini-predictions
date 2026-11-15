@@ -1,7 +1,13 @@
-// Reconciliation: compares the venue account's position in each unsettled on-chain market with
-// what the token supplies, in-flight fills and orphaned fills imply, and checks that the treasury
-// could fund the worst case of those markets. Every contract stands alone, the strikes of one
-// ladder included: several of them can pay, so nothing nets across them.
+// Reconciliation: compares the venue account's position in each on-chain market whose contract
+// has not expired with what the token supplies, in-flight fills and orphaned fills imply, and
+// checks that the treasury could fund the worst case of every market not settled on-chain. Every
+// contract stands alone, the strikes of one ladder included: several of them can pay, so nothing
+// nets across them.
+//
+// The venue drops its position row once it settles a contract, before the market is settled
+// on-chain, so from expiry on the position says nothing. Trading stops minutes before expiry: the
+// last runs before it have compared the final position, and the settlement watcher's check of the
+// venue's payout against the supplies covers the market from then on.
 
 import type { ApiReconcileMarket, ApiStatus } from "./api/types.ts";
 import type { MarketChain } from "./chain/chain.ts";
@@ -15,6 +21,8 @@ export interface ReconcileDeps {
   chain: MarketChain;
   registry: Registry;
   journal: Journal;
+  /** Unix milliseconds: the clock the settlement watcher judges expiry on. */
+  now(): number;
 }
 
 export type ReconcileResult = Pick<ApiStatus, "markets" | "solvency">;
@@ -29,16 +37,21 @@ function signedFilledUnits(row: JournalOrder): bigint {
   return venueBoughtYes ? row.filledUnits : -row.filledUnits;
 }
 
-export async function reconcile({ venue, chain, registry, journal }: ReconcileDeps): Promise<ReconcileResult> {
+export async function reconcile({ venue, chain, registry, journal, now }: ReconcileDeps): Promise<ReconcileResult> {
   // Not settled: still trading, awaiting a result, or held for review. Unused markets have no supply.
   const candidates = [...registry.onchainUnsettled(), ...registry.onchainUnderReview()];
   // One read for the whole run. A contract the account is flat in has no row.
   const positions = await venue.positions();
+  const started = now();
   const markets: ApiReconcileMarket[] = [];
   let requiredMicros = 0n;
-  for (const { symbol } of candidates) {
+  for (const { symbol, expiresAt } of candidates) {
     const onchain = await chain.market(symbol);
     if (onchain === null || onchain.status === "settled") continue;
+    // Only one side can win: the most the treasury could have to fund is the larger supply.
+    const largerSupply = onchain.yesSupply > onchain.noSupply ? onchain.yesSupply : onchain.noSupply;
+    requiredMicros += largerSupply * PAYOUT_PER_UNIT;
+    if (expiresAt <= started) continue;
     const venueNet = positions.get(symbol) ?? 0n;
     const inFlight = journal
       .byState("venue_filled")
@@ -54,9 +67,6 @@ export async function reconcile({ venue, chain, registry, journal }: ReconcileDe
       houseInventory: houseInventory.toString(),
       balanced: venueNet === onchain.yesSupply - onchain.noSupply + inFlight + houseInventory,
     });
-    // Only one side can win: the most the treasury could have to fund is the larger supply.
-    const largerSupply = onchain.yesSupply > onchain.noSupply ? onchain.yesSupply : onchain.noSupply;
-    requiredMicros += largerSupply * PAYOUT_PER_UNIT;
   }
 
   const venueCashMicros = await venue.cashMicros();
@@ -84,9 +94,10 @@ export interface Reconciler {
 }
 
 /**
- * Pauses placement (`chain.pause({ place: true })`) and alerts `auto_paused` when one market is
- * unbalanced `UNBALANCED_RUNS_TO_PAUSE` runs in a row or the treasury cannot cover the open
- * markets. One pause per episode: it is not repeated until a run comes back clean.
+ * Pauses placement (`chain.pause({ place: true })`) and alerts `auto_paused` when one market whose
+ * contract has not expired is unbalanced `UNBALANCED_RUNS_TO_PAUSE` runs in a row or the treasury
+ * cannot cover the open markets. One pause per episode: it is not repeated until a run comes back
+ * clean.
  */
 export function createReconciler(deps: ReconcilerDeps): Reconciler {
   const unbalancedRuns = new Map<string, number>();
