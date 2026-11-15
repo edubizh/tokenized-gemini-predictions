@@ -40,7 +40,36 @@ export async function pickEvents(request) {
   };
 }
 
-export const eventPath = (event, query = "") => `/markets/${encodeURIComponent(event.ticker)}${query}`;
+/**
+ * A contract to trade now, chosen at the moment it is needed: tradable, with an offer on Yes, and
+ * taking orders for at least 150 seconds more (the short series roll over every five minutes).
+ * Prefers the one with the most time left; waits up to two minutes for one to appear.
+ */
+export async function freshContract(request) {
+  const deadline = Date.now() + 120_000;
+  for (;;) {
+    const response = await request.get(`${BASE}/api/relayer/events`);
+    if (response.ok()) {
+      const { events } = await response.json();
+      const now = Date.now();
+      const candidates = events
+        .flatMap((event) => event.markets.map((market) => ({ event, market })))
+        .filter(({ market }) => market.tradable && market.book && market.book.askPx !== null && market.lastOrderAt - now >= 150_000)
+        .sort((a, b) => b.market.lastOrderAt - a.market.lastOrderAt);
+      if (candidates.length > 0) return { event: candidates[0].event, symbol: candidates[0].market.symbol };
+    }
+    if (Date.now() > deadline) throw new Error("no tradable contract with an offer and 150 seconds left appeared within two minutes");
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+  }
+}
+
+/** The event page with the trade panel on a fresh contract, Yes chosen. */
+export async function freshTicketPath(request) {
+  const { event, symbol } = await freshContract(request);
+  return eventPath(event, `?c=${symbol}&side=yes`);
+}
+
+export const eventPath =(event, query = "") => `/markets/${encodeURIComponent(event.ticker)}${query}`;
 
 const testId = (page, id) => page.locator(`[data-testid="${id}"]`);
 
@@ -139,8 +168,8 @@ export function loggedInStates(picks) {
   return [
     {
       name: "ticket-ready",
-      run: async (page) => {
-        await go(page, eventPath(picks.binary, `?c=${picks.binarySymbol}&side=yes`));
+      run: async (page, context) => {
+        await go(page, await freshTicketPath(context.request));
         await landmark(page, page.locator('[data-testid="place"]:not([disabled])'), 60_000);
       },
     },
@@ -179,10 +208,12 @@ export function loggedInStates(picks) {
         await go(page, "/activity");
         await landmark(page, testId(page, "activity-details"), 60_000);
         const details = testId(page, "activity-details").first();
-        // A click before the list has hydrated does nothing; it is repeated until the row opens.
-        for (let attempt = 0; attempt < 3 && (await details.getAttribute("aria-expanded")) !== "true"; attempt++) {
+        // An expired order's row starts open, so Reclaim is in view; any other row is opened here.
+        if ((await details.getAttribute("aria-expanded")) !== "true") {
           await details.click();
+          // A click before the list has hydrated does nothing; one more is made if it did not open.
           await page.waitForTimeout(1_000);
+          if ((await details.getAttribute("aria-expanded")) !== "true") await details.click();
         }
         console.log("  activity row opened (aria-expanded):", await details.getAttribute("aria-expanded"));
         await testId(page, "activity-steps").first().waitFor({ timeout: 10_000 });

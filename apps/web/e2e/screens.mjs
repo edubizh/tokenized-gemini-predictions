@@ -16,7 +16,7 @@
 import { chromium } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { BASE, eventPath, flip, go, landmark, loggedInStates, loggedOutStates, logIn, pickEvents } from "./lib/fixtures-states.mjs";
+import { BASE, flip, freshTicketPath, go, landmark, loggedInStates, loggedOutStates, logIn, pickEvents } from "./lib/fixtures-states.mjs";
 
 const OUT = path.join(import.meta.dirname, "out");
 const VIEWPORT = { width: 1280, height: 800 };
@@ -86,7 +86,8 @@ const slip = page.locator('[data-testid="order-slip"]');
 await capture({
   name: "order-placed",
   run: async () => {
-    await go(page, eventPath(picks.binary, `?c=${picks.binarySymbol}&side=yes`));
+    // Chosen now, not at the start: a contract picked earlier may have closed in the meantime.
+    await go(page, await freshTicketPath(context.request));
     await landmark(page, page.locator('[data-testid="place"]:not([disabled])'), 60_000);
     await page.locator('[data-testid="ticket-quantity"] input, input[data-testid="ticket-quantity"]').first().fill("2");
     await page.locator('[data-testid="place"]').click();
